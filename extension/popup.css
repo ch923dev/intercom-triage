@@ -1,0 +1,284 @@
+/* Popup mini-board styling — a compact echo of the webapp's design tokens
+   (plan §8b: Geist/JetBrains Mono, oklch swatches, hairline borders). */
+
+:root {
+  --bg: #faf9f6;
+  --panel: #ffffff;
+  --ink: #111111;
+  --ink-2: #555555;
+  --ink-3: #8a8a82;
+  --line: #e6e3db;
+  --line-soft: #efece4;
+  --chip-bg: #f3efe6;
+  --accent: #ff4d2e;
+  --accent-soft: rgba(255, 77, 46, 0.1);
+  --hairline: 0.5px;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  width: 380px;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.muted {
+  color: var(--ink-3);
+}
+
+/* ── Bars ──────────────────────────────────────────────────────────────── */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--bg);
+  border-bottom: var(--hairline) solid var(--line);
+}
+
+.foot {
+  border-bottom: 0;
+  border-top: var(--hairline) solid var(--line);
+}
+
+.brand-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+
+.wordmark {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.count {
+  margin-left: 2px;
+}
+
+.ghost {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 9px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.foot .ghost {
+  margin-left: auto;
+}
+
+.select {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 3px 5px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+/* ── Tabs ──────────────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  border-bottom: var(--hairline) solid var(--line);
+  scrollbar-width: thin;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tab.active {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.tab.proposal {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
+.tab .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.tab .tab-count {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+/* ── Ticket list ───────────────────────────────────────────────────────── */
+.list {
+  height: 360px;
+  overflow-y: auto;
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.state {
+  text-align: center;
+  color: var(--ink-3);
+  padding: 36px 8px;
+}
+
+.state.error {
+  color: var(--accent);
+}
+
+.card {
+  border: var(--hairline) solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 9px 10px;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.card-title {
+  margin: 0 0 5px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-summary {
+  margin: 0 0 7px;
+  font-size: 11px;
+  color: var(--ink-2);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.customer {
+  font-size: 10.5px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.move-btn {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 7px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.overridden {
+  border-left: 2px solid var(--accent);
+}
+
+/* Move target picker */
+.move-picker {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: var(--hairline) dashed var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.move-target {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  padding: 3px 7px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.move-target:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.move-target .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
