@@ -178,16 +178,13 @@ function partTime(iso: string): string {
 }
 
 // ── Conversation timeline ────────────────────────────────────────────────────
-// One chronological stream: customer messages on the left, teammate replies on
-// the right, merged + sorted by `created_at`.
-//
-// `internal_notes` historically held Intercom `renderable_type` 2 parts, which
-// turned out to be ordinary customer-facing teammate replies — not internal
-// notes. They are folded into the timeline as admin replies. The extension no
-// longer populates `internal_notes`, but stale boards ingested before that fix
-// still carry the field, so this keeps those correct too.
+// One chronological stream: customer messages, teammate replies, and Intercom
+// internal notes — merged + sorted by `created_at`. Customer messages sit left,
+// teammate replies right; internal notes (Intercom renderable_type 3) render as
+// centred insets so they read as side-channel context, not customer-facing
+// messages.
 
-type TimelineKind = 'customer' | 'admin';
+type TimelineKind = 'customer' | 'admin' | 'note';
 interface TimelineItem {
   kind: TimelineKind;
   author: { name: string | null };
@@ -195,10 +192,8 @@ interface TimelineItem {
   created_at: string;
 }
 
-const messageCount = computed(() => {
-  const t = ticket.value;
-  return t ? t.parts.length + t.internal_notes.length : 0;
-});
+const messageCount = computed(() => ticket.value?.parts.length ?? 0);
+const noteCount = computed(() => ticket.value?.internal_notes.length ?? 0);
 
 const timeline = computed<TimelineItem[]>(() => {
   const t = ticket.value;
@@ -210,9 +205,8 @@ const timeline = computed<TimelineItem[]>(() => {
       body: p.body,
       created_at: p.created_at,
     })),
-    // Folded in as teammate replies — see the note above.
     ...t.internal_notes.map((n) => ({
-      kind: 'admin' as TimelineKind,
+      kind: 'note' as TimelineKind,
       author: n.author,
       body: n.body,
       created_at: n.created_at,
@@ -329,6 +323,8 @@ async function resetField(field: 'title' | 'summary') {
               <span>Conversation</span>
               <span class="convo-count">
                 {{ messageCount }} message{{ messageCount === 1 ? '' : 's' }}
+                <template v-if="noteCount">
+                  · {{ noteCount }} note{{ noteCount === 1 ? '' : 's' }}</template>
               </span>
             </div>
 
@@ -336,19 +332,31 @@ async function resetField(field: 'title' | 'summary') {
               No conversation messages yet
             </p>
             <div v-else class="chat">
-              <!-- Chat message — customer (left) or teammate reply (right). -->
-              <div v-for="(m, i) in timeline" :key="i" class="chat-row" :class="m.kind">
-                <div class="avatar" :class="m.kind">{{ initials(m.author.name) }}</div>
-                <div class="bubble-wrap">
-                  <div class="bubble-head">
-                    <span class="bubble-author">
-                      {{ m.author.name ?? (m.kind === 'admin' ? 'Teammate' : 'Customer') }}
-                    </span>
-                    <span class="bubble-time">{{ partTime(m.created_at) }}</span>
+              <template v-for="(m, i) in timeline" :key="i">
+                <!-- Internal note — centred inset, side-channel context. -->
+                <div v-if="m.kind === 'note'" class="note-item">
+                  <div class="note-head">
+                    <span class="note-tag">Internal note</span>
+                    <span class="note-author">{{ m.author.name ?? 'Teammate' }}</span>
+                    <span class="note-time">{{ partTime(m.created_at) }}</span>
                   </div>
-                  <div class="bubble" :class="m.kind">{{ m.body }}</div>
+                  <p class="note-body">{{ m.body }}</p>
                 </div>
-              </div>
+
+                <!-- Chat message — customer (left) or teammate reply (right). -->
+                <div v-else class="chat-row" :class="m.kind">
+                  <div class="avatar" :class="m.kind">{{ initials(m.author.name) }}</div>
+                  <div class="bubble-wrap">
+                    <div class="bubble-head">
+                      <span class="bubble-author">
+                        {{ m.author.name ?? (m.kind === 'admin' ? 'Teammate' : 'Customer') }}
+                      </span>
+                      <span class="bubble-time">{{ partTime(m.created_at) }}</span>
+                    </div>
+                    <div class="bubble" :class="m.kind">{{ m.body }}</div>
+                  </div>
+                </div>
+              </template>
             </div>
           </div>
 
@@ -913,5 +921,54 @@ html[data-theme='dark'] .bubble.admin {
   background: oklch(0.3 0.05 145);
   border-color: oklch(0.42 0.07 145);
   color: oklch(0.9 0.07 145);
+}
+/* Internal note — centred inset, dashed amber, side-channel context. */
+.note-item {
+  align-self: center;
+  width: 88%;
+  background: oklch(0.96 0.035 95);
+  border: var(--hairline) dashed oklch(0.78 0.09 95);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+html[data-theme='dark'] .note-item {
+  background: oklch(0.3 0.035 95);
+  border-color: oklch(0.46 0.07 95);
+}
+.note-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 3px;
+}
+.note-tag {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  color: oklch(0.52 0.12 75);
+}
+html[data-theme='dark'] .note-tag {
+  color: oklch(0.82 0.1 90);
+}
+.note-author {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.note-time {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-3);
+  margin-left: auto;
+}
+.note-body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>

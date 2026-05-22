@@ -26,14 +26,17 @@ const APP_ID_STORAGE_KEY = 'intercomAppId';
 //   12 — Email inbound (customer)            → parts[], is_admin=false
 //   2  — Admin reply visible to the customer → parts[], is_admin=true
 //   24 — Admin reply visible to the customer → parts[], is_admin=true
+//   3  — Internal team note (admin-only)     → internal_notes[]
+//   5/6/14 — assignment/attribute events     → skip
 //   71 — Bot / AI translation event          → skip
 //
-// NOTE: an earlier guess that `renderable_type` 2 was an internal team note
-// was wrong — in this workspace type 2 carries an ordinary admin reply sent
-// to the customer (the bodies read as customer-facing replies). It is treated
-// as part of the conversation, same as type 24.
+// Classification was verified against live conversations: type 2 and 24 are
+// both ordinary customer-facing admin replies; type 3 is the genuine internal
+// team note (terse, third-person teammate coordination, never sent to the
+// customer). All three carry the teammate in `admin_summary` or `entity`.
 const INBOUND_RENDERABLE_TYPES = new Set([1, 12]);
 const ADMIN_REPLY_RENDERABLE_TYPES = new Set([2, 24]);
+const INTERNAL_NOTE_RENDERABLE_TYPE = 3;
 
 class IntercomSessionError extends Error {
   constructor(status, message) {
@@ -217,6 +220,7 @@ export function normalizeConversation(detail, appId, summary) {
   const createdIso = toIso(detail.created_at, nowIso);
 
   const parts = [];
+  const internalNotes = [];
   for (const node of detail.renderable_parts ?? []) {
     const renderableType = node?.renderable_type;
     const data = node.renderable_data ?? {};
@@ -240,6 +244,15 @@ export function normalizeConversation(detail, appId, summary) {
         created_at: createdAt,
         is_admin: true,
       });
+    } else if (renderableType === INTERNAL_NOTE_RENDERABLE_TYPE) {
+      const body = blocksToPlainText(data.blocks);
+      if (!body) continue;
+      internalNotes.push({
+        author: authorFromAdminBlob(data.admin_summary || data.entity || data.author),
+        body,
+        created_at: createdAt,
+        is_admin: true,
+      });
     }
     // Anything else (assignment / attribute / translation events) is skipped.
   }
@@ -258,9 +271,7 @@ export function normalizeConversation(detail, appId, summary) {
     author,
     url: `https://app.intercom.com/a/inbox/${appId}/inbox/conversation/${id}`,
     parts,
-    // No internal-note channel any more (type 2 turned out to be a customer
-    // reply). Kept as an empty list for backend-schema compatibility.
-    internal_notes: [],
+    internal_notes: internalNotes,
   };
 }
 
