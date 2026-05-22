@@ -1,15 +1,21 @@
-<!-- App shell. Loads settings + categories + tickets on mount, renders the top
-     bar and the active page (board / categories / proposals), and owns the
-     global keyboard shortcuts (T036) and the settings drawer (T035). -->
+<!-- App shell. Loads settings + categories + tickets + follow-ups + notes on
+     mount, renders the top bar and the active page (board / categories /
+     proposals), owns the global keyboard shortcuts (T036), the settings drawer
+     (T035), the ticket flyout (T050/T052), and the once-per-second alarm loop
+     (T051). -->
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue';
+import AlarmBanners from '@/components/AlarmBanners.vue';
 import Board from '@/components/Board.vue';
 import CategoriesPage from '@/components/CategoriesPage.vue';
 import ExtensionCallout from '@/components/ExtensionCallout.vue';
 import ProposalsPage from '@/components/ProposalsPage.vue';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
+import TicketFlyout from '@/components/TicketFlyout.vue';
 import Topbar from '@/components/Topbar.vue';
 import { useCategoriesStore } from '@/stores/categories';
+import { useFollowupsStore } from '@/stores/followups';
+import { useNotesStore } from '@/stores/notes';
 import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
@@ -17,6 +23,8 @@ import { useViewStore } from '@/stores/view';
 const categories = useCategoriesStore();
 const settings = useSettingsStore();
 const tickets = useTicketsStore();
+const followups = useFollowupsStore();
+const notes = useNotesStore();
 const view = useViewStore();
 
 const COLUMN_STEP = 296; // column width (280) + gutter
@@ -24,10 +32,54 @@ const COLUMN_STEP = 296; // column width (280) + gutter
 onMounted(async () => {
   await settings.load();
   await categories.load();
+  // Follow-ups + notes are independent of the (possibly degraded) ticket fetch.
+  await Promise.all([followups.load(), notes.load()]);
   // A degraded backend (no Intercom token) makes `/tickets/fetch` throw — the
   // board just stays empty in that case, so swallow it here.
   await tickets.refresh(settings.filter).catch(() => undefined);
 });
+
+// ── Alarm loop (T051) ─────────────────────────────────────────────────────────
+//
+// A WebAudio two-note ping (880 → 1175 Hz). The AudioContext can only start
+// after a user gesture (browser autoplay policy), so it is created lazily on
+// the first pointer interaction.
+
+let audioCtx: AudioContext | null = null;
+
+function ensureAudio() {
+  if (audioCtx === null && typeof AudioContext !== 'undefined') {
+    audioCtx = new AudioContext();
+  }
+}
+
+function playPing() {
+  ensureAudio();
+  if (audioCtx === null) return;
+  if (audioCtx.state === 'suspended') void audioCtx.resume();
+  const t0 = audioCtx.currentTime;
+  [880, 1175].forEach((freq, i) => {
+    const osc = audioCtx!.createOscillator();
+    const gain = audioCtx!.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const start = t0 + i * 0.34;
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.22, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.3);
+    osc.connect(gain).connect(audioCtx!.destination);
+    osc.start(start);
+    osc.stop(start + 0.32);
+  });
+}
+
+let tickHandle = 0;
+
+function alarmTick() {
+  const fired = followups.tick();
+  // FR-021 — the banner always shows; the mute flag suppresses only the audio.
+  if (fired.length > 0 && !settings.muteAlarms) playPing();
+}
 
 /** Global shortcuts (T036): `r` refreshes, ←/→ scroll the board columns. */
 function onKeydown(e: KeyboardEvent) {
@@ -38,6 +90,10 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'r') {
     e.preventDefault();
     void tickets.refresh(settings.filter);
+    return;
+  }
+  if (e.key === 'Escape' && view.selectedTicketId !== null) {
+    view.closeFlyout();
     return;
   }
   if (view.view !== 'board') return;
@@ -52,8 +108,15 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown));
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+  window.addEventListener('pointerdown', ensureAudio, { once: true });
+  tickHandle = window.setInterval(alarmTick, 1000);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown);
+  clearInterval(tickHandle);
+});
 </script>
 
 <template>
@@ -80,6 +143,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
     </footer>
 
     <SettingsDrawer />
+    <TicketFlyout />
+    <AlarmBanners />
   </div>
 </template>
 

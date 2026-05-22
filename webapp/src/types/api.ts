@@ -107,4 +107,5 @@ export interface FilterSettings {
   lookback_value: number; // 1..720
   states: TicketState[];
   include_category_ids: number[] | null;
+  mute_alarms: boolean; // FR-024 — shared by webapp + popup
 }

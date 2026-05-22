@@ -1,24 +1,33 @@
-<!-- Board — horizontal scroll of columns. Per tasks.md T032. -->
+<!-- Board — horizontal scroll of columns. Per tasks.md T032, T050. -->
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import Column from './Column.vue';
 import { useCategoriesStore } from '@/stores/categories';
+import { useFollowupsStore } from '@/stores/followups';
 import { useTicketsStore } from '@/stores/tickets';
+import { useViewStore } from '@/stores/view';
 import type { Ticket } from '@/types/api';
 
 const categories = useCategoriesStore();
 const tickets = useTicketsStore();
+const followups = useFollowupsStore();
+const view = useViewStore();
 
-const selected = ref<Ticket | null>(null);
-const selectedId = computed(() => selected.value?.id ?? null);
+const selectedId = computed(() => view.selectedTicketId);
 
+/** Tickets for a column, with due follow-ups pinned to the top (T050). The
+ *  source list is already `updated_at`-sorted; `sort` is stable so the rest
+ *  keeps that order. */
 function ticketsForColumn(col: { kind: 'category' | 'proposal'; id: number }) {
-  if (col.kind === 'category') return tickets.byCategory.get(col.id) ?? [];
-  return tickets.byProposal.get(col.id) ?? [];
+  const list =
+    col.kind === 'category'
+      ? (tickets.byCategory.get(col.id) ?? [])
+      : (tickets.byProposal.get(col.id) ?? []);
+  return [...list].sort((a, b) => Number(followups.isDue(b.id)) - Number(followups.isDue(a.id)));
 }
 
 function onSelect(t: Ticket) {
-  selected.value = t;
+  view.selectTicket(t.id);
 }
 </script>
 

@@ -4,6 +4,7 @@
 import { computed } from 'vue';
 import Mono from './Mono.vue';
 import { useCategoriesStore } from '@/stores/categories';
+import { useFollowupsStore } from '@/stores/followups';
 import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 import { useTweaksStore } from '@/stores/tweaks';
@@ -15,6 +16,7 @@ const tickets = useTicketsStore();
 const tweaks = useTweaksStore();
 const settings = useSettingsStore();
 const categories = useCategoriesStore();
+const followups = useFollowupsStore();
 const view = useViewStore();
 
 const densities: Density[] = ['compact', 'balanced', 'comfy'];
@@ -71,6 +73,18 @@ function toggleDark() {
 
     <Mono>{{ tickets.tickets.length }} tickets</Mono>
 
+    <!-- Follow-up status pill (T051) — accent-pulse while an alarm is firing. -->
+    <button
+      v-if="followups.pendingCount > 0"
+      class="pill"
+      :class="{ firing: followups.firing }"
+      title="Pending follow-ups"
+    >
+      <span class="mono"
+        >{{ followups.pendingCount }} follow-up{{ followups.pendingCount === 1 ? '' : 's' }}</span
+      >
+    </button>
+
     <div v-if="tickets.isMock" class="badge mock">
       <Mono :color="'var(--accent)'">Sample data — /tickets/fetch unavailable</Mono>
     </div>
@@ -122,6 +136,15 @@ function toggleDark() {
         @click="tweaks.setAccent(c)"
       />
     </div>
+
+    <button
+      class="ghost"
+      :class="{ active: settings.muteAlarms }"
+      title="Mute the alarm audio cue (the banner still shows)"
+      @click="settings.setMuteAlarms(!settings.muteAlarms)"
+    >
+      <span class="mono">{{ settings.muteAlarms ? 'Muted' : 'Mute' }}</span>
+    </button>
 
     <button class="ghost" @click="toggleDark">
       <span class="mono">{{ tweaks.darkMode ? 'Light' : 'Dark' }}</span>
@@ -237,5 +260,19 @@ function toggleDark() {
 .swatches button.active {
   outline: 2px solid var(--ink);
   outline-offset: 1px;
+}
+.pill {
+  padding: 3px 9px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--chip-bg);
+  color: var(--ink-2);
+  cursor: default;
+}
+.pill.firing {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  animation: triagePulse 1.4s ease-in-out infinite;
 }
 </style>

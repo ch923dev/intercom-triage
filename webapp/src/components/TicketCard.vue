@@ -4,6 +4,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import Mono from './Mono.vue';
+import { useFollowupsStore } from '@/stores/followups';
+import { countNoteLines, useNotesStore } from '@/stores/notes';
 import { useTweaksStore } from '@/stores/tweaks';
 import { formatAgoFromDate } from '@/utils/time';
 import type { Ticket } from '@/types/api';
@@ -19,12 +21,27 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const tweaks = useTweaksStore();
+const followups = useFollowupsStore();
+const notes = useNotesStore();
 
 const dense = computed(() => tweaks.density === 'compact');
 const rich = computed(() => tweaks.density === 'comfy');
 const showSummary = computed(() => tweaks.showSummary && !dense.value);
 const confColor = computed(() => (props.ticket.ai_confidence < 0.5 ? '#c34a2b' : 'var(--ink-3)'));
 const updatedAgo = computed(() => formatAgoFromDate(props.ticket.updated_at));
+
+// Follow-up chip (T050): `F/U in 15m` while pending, `due now` once due.
+const followupDue = computed(() => followups.isDue(props.ticket.id));
+const followupLabel = computed(() => {
+  const f = followups.get(props.ticket.id);
+  if (!f) return null;
+  if (followupDue.value) return 'Follow up · due now';
+  const mins = Math.round((Date.parse(f.due_at) - followups.now) / 60_000);
+  return mins < 60 ? `F/U in ${mins}m` : `F/U in ${Math.round(mins / 60)}h`;
+});
+
+// Notes chip (T052): count of non-empty bullet lines.
+const noteLines = computed(() => countNoteLines(notes.bodyOf(props.ticket.id)));
 </script>
 
 <template>
@@ -52,6 +69,13 @@ const updatedAgo = computed(() => formatAgoFromDate(props.ticket.updated_at));
       <Mono v-if="tweaks.showConfidence" :color="confColor" :size="9.5" class="conf">
         {{ Math.round(props.ticket.ai_confidence * 100) }}%
       </Mono>
+    </div>
+
+    <div v-if="followupLabel || noteLines" class="tags">
+      <span v-if="followupLabel" class="tag fu" :class="{ due: followupDue }">
+        {{ followupLabel }}
+      </span>
+      <span v-if="noteLines" class="tag note">Notes ({{ noteLines }})</span>
     </div>
   </article>
 </template>
@@ -143,5 +167,34 @@ header {
 }
 .conf {
   margin-left: auto;
+}
+.tags {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.card.dense .tags {
+  margin-top: 6px;
+}
+.tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: var(--radius-chip);
+  border: var(--hairline) solid var(--line);
+  color: var(--ink-2);
+  background: var(--chip-bg);
+}
+.tag.fu.due {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: triagePulse 1.6s ease-in-out infinite;
+}
+.tag.note {
+  color: var(--ink-3);
 }
 </style>

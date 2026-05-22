@@ -12,6 +12,7 @@ const DEFAULTS: FilterSettings = {
   lookback_value: 24,
   states: ['open'],
   include_category_ids: null,
+  mute_alarms: false,
 };
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -24,6 +25,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const lookbackUnit = computed(() => state.value.lookback_unit);
   const states = computed(() => state.value.states);
   const includedCategoryIds = computed(() => state.value.include_category_ids);
+  const muteAlarms = computed(() => state.value.mute_alarms);
 
   /** Load the stored filter. Falls back to defaults if the backend is down. */
   async function load() {
@@ -62,6 +64,12 @@ export const useSettingsStore = defineStore('settings', () => {
     return update({ include_category_ids: ids });
   }
 
+  /** FR-024 — the mute flag lives in the server settings row so the popup
+   *  sees the same value the webapp wrote. */
+  function setMuteAlarms(v: boolean) {
+    return update({ mute_alarms: v });
+  }
+
   return {
     filter,
     loaded,
@@ -70,10 +78,12 @@ export const useSettingsStore = defineStore('settings', () => {
     lookbackUnit,
     states,
     includedCategoryIds,
+    muteAlarms,
     load,
     update,
     setLookback,
     toggleState,
     setIncludedCategoryIds,
+    setMuteAlarms,
   };
 });

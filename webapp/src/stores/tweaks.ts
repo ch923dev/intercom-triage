@@ -1,6 +1,8 @@
-// Tweaks (UI preferences) store. Per plan §8b — dark mode, accent, density,
-// show summary, show confidence, mute alarms. v1 reads/writes localStorage;
-// T049 will wire to server-side settings.
+// Tweaks (display preferences) store. Per plan §8b — dark mode, accent,
+// density, show summary, show confidence. These are per-device display
+// choices and stay in localStorage. The sixth tweak — mute alarms — lives in
+// the server settings row instead (FR-024) so the popup shares it; see the
+// `settings` store's `muteAlarms`.
 
 import { defineStore } from 'pinia';
 import { computed, ref, watch } from 'vue';
@@ -14,7 +16,6 @@ interface TweaksState {
   density: Density;
   showSummary: boolean;
   showConfidence: boolean;
-  muteAlarms: boolean;
 }
 
 const DEFAULTS: TweaksState = {
@@ -23,7 +24,6 @@ const DEFAULTS: TweaksState = {
   density: 'balanced',
   showSummary: true,
   showConfidence: true,
-  muteAlarms: false,
 };
 
 const ACCENT_SWATCHES = ['#ff4d2e', '#2e7fff', '#22a06b', '#a855f7', '#111111'] as const;
@@ -46,7 +46,6 @@ export const useTweaksStore = defineStore('tweaks', () => {
   const density = computed(() => state.value.density);
   const showSummary = computed(() => state.value.showSummary);
   const showConfidence = computed(() => state.value.showConfidence);
-  const muteAlarms = computed(() => state.value.muteAlarms);
 
   function setDarkMode(v: boolean) {
     state.value.darkMode = v;
@@ -62,9 +61,6 @@ export const useTweaksStore = defineStore('tweaks', () => {
   }
   function setShowConfidence(v: boolean) {
     state.value.showConfidence = v;
-  }
-  function setMuteAlarms(v: boolean) {
-    state.value.muteAlarms = v;
   }
 
   // Persist + apply to <html>.
@@ -85,13 +81,11 @@ export const useTweaksStore = defineStore('tweaks', () => {
     density,
     showSummary,
     showConfidence,
-    muteAlarms,
     setDarkMode,
     setAccent,
     setDensity,
     setShowSummary,
     setShowConfidence,
-    setMuteAlarms,
     ACCENT_SWATCHES,
   };
 });
