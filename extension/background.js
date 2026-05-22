@@ -1,30 +1,57 @@
-// Background service worker — optional polling + toolbar badge.
-// Reference: tasks.md T042 — US-006.
+// Background service worker — optional Intercom poll + toolbar badge.
+// Reference: tasks.md T042 — US-006; ingest pivot (Slice B).
 //
 // Polling is OFF by default. When the operator picks an interval in the popup,
 // `pollMinutes` is written to chrome.storage.local and we register a
-// chrome.alarms alarm. Each tick fetches the board and writes the Urgent count
-// onto the action badge. Interval "Off" clears the alarm and the badge — no
-// background calls happen.
+// chrome.alarms alarm. Each tick:
+//   1. Pulls a batch from the operator's Intercom session (if a workspace id
+//      is configured) and POSTs it to `/tickets/ingest`.
+//   2. Reads the stored board from `/tickets` and writes the Urgent count
+//      onto the action badge.
+// Interval "Off" clears the alarm and the badge — no background calls.
 
-import { fetchCategories, fetchSettings, fetchTickets } from './api.js';
+import { fetchCategories, fetchSettings, getStoredTickets, ingestTickets } from './api.js';
+import { fetchHydratedBatch, getAppId, IntercomSessionError } from './intercom.js';
 
 const ALARM = 'triage-poll';
 const BADGE_COLOR = '#ff4d2e';
 
-/** Fetch the board once and reflect the Urgent count on the badge. */
+/** Pull from Intercom + ingest (best-effort — a stale badge is better than no badge). */
+async function ingestFromIntercom(settings) {
+  const appId = await getAppId();
+  if (!appId) return; // operator hasn't set the workspace yet
+  const states = settings.states?.length ? settings.states : ['open'];
+  const batches = await Promise.all(
+    states.map((state) =>
+      fetchHydratedBatch({ appId, state, count: 60, concurrency: 4 }).catch((e) => {
+        // Session expired / not signed in is the only failure worth surfacing;
+        // any other error just leaves the stored board unchanged for this tick.
+        if (e instanceof IntercomSessionError && (e.status === 401 || e.status === 403)) {
+          throw e;
+        }
+        return [];
+      }),
+    ),
+  );
+  const hydrated = batches.flat();
+  if (hydrated.length > 0) await ingestTickets(hydrated);
+}
+
+/** One poll cycle: ingest (if configured) + refresh the badge. */
 async function poll() {
   try {
-    const [settings, catResp] = await Promise.all([fetchSettings(), fetchCategories()]);
-    const tickets = await fetchTickets(settings);
+    const settings = await fetchSettings();
+    await ingestFromIntercom(settings);
 
+    const [catResp, tickets] = await Promise.all([fetchCategories(), getStoredTickets()]);
     const urgent = catResp.categories.find((c) => c.name.trim().toLowerCase() === 'urgent');
     const count = urgent ? tickets.filter((t) => t.category_id === urgent.id).length : 0;
 
     await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
     await chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
   } catch {
-    // Backend down or degraded — leave the last badge value untouched.
+    // Backend down or Intercom session expired — leave the last badge value
+    // alone. The popup surfaces actionable errors when the operator opens it.
   }
 }
 
@@ -48,7 +75,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onInstalled.addListener(() => void reschedule());
 chrome.runtime.onStartup.addListener(() => void reschedule());
 
-// The popup sends this after the operator changes the interval.
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'reschedule') {
     reschedule().then(() => sendResponse({ ok: true }));

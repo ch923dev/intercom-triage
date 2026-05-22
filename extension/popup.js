@@ -14,11 +14,13 @@ import {
   fetchCategories,
   fetchFollowups,
   fetchSettings,
-  fetchTickets,
+  getStoredTickets,
+  ingestTickets,
   markFollowupFired,
   overrideCategory,
   FULL_BOARD_URL,
 } from './api.js';
+import { fetchHydratedBatch, getAppId, IntercomSessionError, setAppId } from './intercom.js';
 
 const state = {
   categories: [],
@@ -39,9 +41,16 @@ const el = {
   banner: document.getElementById('banner'),
   list: document.getElementById('list'),
   refresh: document.getElementById('refresh'),
+  sync: document.getElementById('sync'),
+  setup: document.getElementById('setup'),
+  appIdInput: document.getElementById('appIdInput'),
+  saveAppId: document.getElementById('saveAppId'),
+  syncStatus: document.getElementById('syncStatus'),
   interval: document.getElementById('interval'),
   openBoard: document.getElementById('openBoard'),
 };
+
+let appId = '';
 
 /** Per-render lookup of a ticket's countdown chip + card, so the tick loop can
  *  update them in place without a disruptive full re-render. */
@@ -335,7 +344,7 @@ async function load() {
     state.proposals = catResp.pending_proposals;
     state.muteAlarms = Boolean(settings.mute_alarms);
     state.followups = Object.fromEntries(followups.map((f) => [f.ticket_id, f]));
-    state.tickets = await fetchTickets(settings);
+    state.tickets = await getStoredTickets();
 
     // Keep the selected tab if it still exists, else default to the first.
     const keys = [
@@ -359,6 +368,17 @@ async function load() {
 
 el.refresh.addEventListener('click', () => void load());
 
+el.sync.addEventListener('click', () => void sync());
+
+el.saveAppId.addEventListener('click', async () => {
+  const value = el.appIdInput.value.trim();
+  if (!value) return;
+  await setAppId(value);
+  appId = value;
+  el.setup.hidden = true;
+  await sync();
+});
+
 el.openBoard.addEventListener('click', () => {
   chrome.tabs.create({ url: FULL_BOARD_URL });
 });
@@ -372,9 +392,63 @@ el.interval.addEventListener('change', async () => {
 // Unlock audio on the first interaction inside the popup (autoplay policy).
 window.addEventListener('pointerdown', ensureAudio, { once: true });
 
+function setSyncStatus(text, { error = false } = {}) {
+  if (!text) {
+    el.syncStatus.hidden = true;
+    el.syncStatus.textContent = '';
+    return;
+  }
+  el.syncStatus.hidden = false;
+  el.syncStatus.textContent = text;
+  el.syncStatus.classList.toggle('error', error);
+}
+
+/** Pull from Intercom, send to backend ingest, reload the stored board. */
+async function sync() {
+  if (!appId) {
+    el.setup.hidden = false;
+    el.appIdInput.focus();
+    setSyncStatus('Set your Intercom workspace id to sync', { error: true });
+    return;
+  }
+  el.sync.disabled = true;
+  setSyncStatus('Pulling from Intercom…');
+  try {
+    const settings = await fetchSettings();
+    const states = settings.states?.length ? settings.states : ['open'];
+    const batches = await Promise.all(
+      states.map((state) =>
+        fetchHydratedBatch({ appId, state, count: 60, concurrency: 4 }).catch((e) => {
+          if (e instanceof IntercomSessionError) throw e;
+          return [];
+        }),
+      ),
+    );
+    const hydrated = batches.flat();
+    if (hydrated.length === 0) {
+      setSyncStatus('No conversations matched the current filter');
+    } else {
+      setSyncStatus(`Categorizing ${hydrated.length}…`);
+      const result = await ingestTickets(hydrated);
+      setSyncStatus(`Synced ${result.received} (AI: ${result.categorized})`);
+    }
+    await load();
+  } catch (e) {
+    setSyncStatus(e.message || 'Sync failed', { error: true });
+  } finally {
+    el.sync.disabled = false;
+  }
+}
+
 (async function init() {
-  const { pollMinutes = 0 } = await chrome.storage.local.get('pollMinutes');
+  const [{ pollMinutes = 0 }, savedAppId] = await Promise.all([
+    chrome.storage.local.get('pollMinutes'),
+    getAppId(),
+  ]);
   el.interval.value = String(pollMinutes);
+  appId = savedAppId;
+  if (!appId) el.setup.hidden = false;
+  else el.appIdInput.value = appId;
   await load();
   setInterval(alarmTick, 1000);
 })();

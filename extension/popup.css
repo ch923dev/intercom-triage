@@ -348,3 +348,46 @@ body {
 .card.due {
   border-left: 2px solid var(--accent);
 }
+
+/* ── Setup row + sync status ─────────────────────────────────────────── */
+.setup {
+  padding: 10px 12px;
+  border-bottom: var(--hairline) solid var(--line);
+  background: var(--chip-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.setup-row {
+  display: flex;
+  gap: 6px;
+}
+
+.setup-input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 7px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.setup-hint {
+  margin: 0;
+  font-size: 9.5px;
+}
+
+.sync-status {
+  padding: 6px 12px;
+  border-bottom: var(--hairline) solid var(--line);
+  background: var(--accent-soft);
+  color: var(--ink-2);
+}
+
+.sync-status.error {
+  background: var(--accent);
+  color: #fff;
+}
