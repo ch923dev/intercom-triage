@@ -1,8 +1,9 @@
 """SQLAlchemy 2.0 async models for the local triage tool.
 
-Ported from `snippets/models.py` (reference). Schema is created via
-`Base.metadata.create_all` on first startup (see `init_db` below), then seeded
-with the seven default categories and the singleton settings row.
+Ported from `snippets/models.py` (reference). Schema is managed via Alembic
+(see `backend/alembic/`). On first startup `init_db` runs `alembic upgrade
+head`, which creates all tables and applies any pending migrations. Seeding
+(categories + singleton settings row) happens after migrations complete.
 
 Works against SQLite by default (`sqlite+aiosqlite:///./data/triage.db`) and
 against Postgres by swapping `DATABASE_URL` (`postgresql+asyncpg://...`). No
@@ -15,6 +16,7 @@ Reference: plan.md §5 (data model), tasks.md T006.
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import (
@@ -29,15 +31,18 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy import inspect as sqla_inspect
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from alembic.config import Config as AlembicConfig
+from alembic.runtime.environment import EnvironmentContext
+from alembic.script import ScriptDirectory
 
 # ── Base ──────────────────────────────────────────────────────────────────────
 
 
 class Base(DeclarativeBase):
-    """Declarative base. Add `naming_convention` here if you later move to Alembic."""
+    """Declarative base for all ORM models. Alembic reads `Base.metadata` for autogenerate."""
 
 
 # ── Tables ────────────────────────────────────────────────────────────────────
@@ -398,80 +403,65 @@ DEFAULT_CATEGORIES: list[dict[str, Any]] = [
 
 # ── Init + seed ───────────────────────────────────────────────────────────────
 
+# Path to alembic.ini, resolved relative to this file so it works regardless
+# of cwd (tests, uvicorn, direct invocation).
+_ALEMBIC_INI = Path(__file__).parent.parent / "alembic.ini"
 
-def _ensure_mute_alarms_column(conn: Any) -> None:
-    """One-time additive migration: add `settings.mute_alarms` if missing.
 
-    Runs inside the DDL transaction in `init_db`. No-op once the column exists.
+def _make_alembic_cfg() -> AlembicConfig:
+    """Build an AlembicConfig pointing at our alembic.ini."""
+    return AlembicConfig(str(_ALEMBIC_INI))
+
+
+def _run_migrations_sync(connection: Any) -> None:
+    """Run all pending Alembic migrations using an existing (sync) connection.
+
+    This is called via `await conn.run_sync(...)` so `connection` is a
+    synchronous SQLAlchemy `Connection` (not the raw DBAPI cursor).  By
+    reusing the same connection we avoid the in-memory-SQLite-per-connection
+    problem: every *new* connection to `sqlite+aiosqlite:///:memory:` is a
+    distinct empty database, so Alembic must migrate the same connection that
+    the session factory talks to.
+
+    We drive Alembic via `EnvironmentContext` + `MigrationContext` directly,
+    bypassing `env.py` entirely, which is the correct approach for programmatic
+    use with an existing connection.
     """
-    inspector = sqla_inspect(conn)
-    columns = {col["name"] for col in inspector.get_columns("settings")}
-    if "mute_alarms" in columns:
-        return
-    conn.exec_driver_sql("ALTER TABLE settings ADD COLUMN mute_alarms BOOLEAN DEFAULT 0 NOT NULL")
+    cfg = _make_alembic_cfg()
+    script = ScriptDirectory.from_config(cfg)
 
+    def do_upgrade(rev: Any, context: Any) -> Any:
+        return script._upgrade_revs("head", rev)
 
-def _ensure_internal_notes_column(conn: Any) -> None:
-    """Add `tickets.internal_notes` (default `[]`) for DBs ingested before the
-    Intercom-team-notes feature landed. No-op once present."""
-    inspector = sqla_inspect(conn)
-    if "tickets" not in inspector.get_table_names():
-        return  # fresh DB — `create_all` made the column already
-    columns = {col["name"] for col in inspector.get_columns("tickets")}
-    if "internal_notes" in columns:
-        return
-    conn.exec_driver_sql("ALTER TABLE tickets ADD COLUMN internal_notes JSON DEFAULT '[]' NOT NULL")
-
-
-def _ensure_use_ai_column(conn: Any) -> None:
-    """Add `settings.use_ai` (default 1) for DBs created before the AI toggle.
-    No-op once present."""
-    inspector = sqla_inspect(conn)
-    columns = {col["name"] for col in inspector.get_columns("settings")}
-    if "use_ai" in columns:
-        return
-    conn.exec_driver_sql("ALTER TABLE settings ADD COLUMN use_ai BOOLEAN DEFAULT 1 NOT NULL")
-
-
-def _ensure_user_edited_columns(conn: Any) -> None:
-    """Add `tickets.title_user_edited` + `tickets.summary_user_edited` for DBs
-    ingested before operator-editable title/summary landed. No-op once present."""
-    inspector = sqla_inspect(conn)
-    if "tickets" not in inspector.get_table_names():
-        return
-    columns = {col["name"] for col in inspector.get_columns("tickets")}
-    if "title_user_edited" not in columns:
-        conn.exec_driver_sql(
-            "ALTER TABLE tickets ADD COLUMN title_user_edited BOOLEAN DEFAULT 0 NOT NULL",
+    with EnvironmentContext(cfg, script, fn=do_upgrade, destination_rev="head") as env_ctx:
+        env_ctx.configure(
+            connection=connection,
+            target_metadata=Base.metadata,
+            render_as_batch=True,
         )
-    if "summary_user_edited" not in columns:
-        conn.exec_driver_sql(
-            "ALTER TABLE tickets ADD COLUMN summary_user_edited BOOLEAN DEFAULT 0 NOT NULL",
-        )
+        with env_ctx.begin_transaction():
+            env_ctx.run_migrations()
 
 
 async def init_db(engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]) -> None:
-    """Create schema if missing; seed defaults + singleton settings row if empty.
+    """Apply all Alembic migrations then seed defaults + singleton settings row.
 
-    Call from the FastAPI lifespan hook. Idempotent — re-runs leave existing data alone.
+    Call from the FastAPI lifespan hook. Idempotent — re-runs leave existing
+    data alone (Alembic tracks applied revisions in `alembic_version`; seeding
+    checks before inserting).
+
+    Why we drive migrations via the existing engine connection rather than via
+    `alembic.command.upgrade`:
+
+    `alembic.command.upgrade` invokes env.py which calls `asyncio.run()` on a
+    fresh engine with `NullPool`.  For file-based databases that works fine.
+    For `sqlite+aiosqlite:///:memory:` each new connection is a *different*
+    in-memory database — Alembic's tables would live in a throwaway DB, not the
+    one the app uses.  By passing `run_sync` our existing connection we ensure
+    migrations happen in the same database the session factory talks to.
     """
     async with engine.begin() as conn:
-        # SQLite needs FKs explicitly enabled per connection — but `engine.begin()`
-        # opens one fresh connection here only for DDL. App-level FK enforcement is
-        # set up via the `connect` event listener below.
-        if engine.dialect.name == "sqlite":
-            await conn.exec_driver_sql("PRAGMA foreign_keys = ON")
-        await conn.run_sync(Base.metadata.create_all)
-        # create_all adds the new `followups`/`ticket_notes` tables but never new
-        # columns on an existing table — backfill `settings.mute_alarms` for DBs
-        # created before Phase 10 (T045). Graduates to Alembic at T104.
-        await conn.run_sync(_ensure_mute_alarms_column)
-        # Same story for the `internal_notes` column added later on `tickets`.
-        await conn.run_sync(_ensure_internal_notes_column)
-        # …and the operator-edit flags on `tickets`.
-        await conn.run_sync(_ensure_user_edited_columns)
-        # …and the `settings.use_ai` toggle.
-        await conn.run_sync(_ensure_use_ai_column)
+        await conn.run_sync(_run_migrations_sync)
 
     async with session_factory() as session:
         # Seed categories if empty.

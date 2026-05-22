@@ -12,6 +12,7 @@ pydantic-settings==2.7.0
 # DB
 sqlalchemy==2.0.36
 aiosqlite==0.20.0
+alembic>=1.13,<2
 
 # Optional Postgres swap (uncomment to enable):
 # asyncpg==0.30.0
