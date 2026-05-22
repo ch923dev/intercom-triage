@@ -30,6 +30,19 @@ const countdown = computed(() =>
  *  swallowing the rejection. */
 const actionError = ref('');
 
+/** Drag state — toggles a visual cue on the card while it's being dragged. */
+const isDragging = ref(false);
+
+function onDragStart(e: DragEvent) {
+  if (e.dataTransfer === null) return;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', props.followup.ticket_id);
+  isDragging.value = true;
+}
+function onDragEnd() {
+  isDragging.value = false;
+}
+
 function open() {
   view.selectTicket(props.followup.ticket_id);
 }
@@ -52,7 +65,13 @@ async function done() {
 </script>
 
 <template>
-  <article class="fu-card">
+  <article
+    class="fu-card"
+    :class="{ dragging: isDragging }"
+    draggable="true"
+    @dragstart="onDragStart"
+    @dragend="onDragEnd"
+  >
     <header>
       <Mono>{{ props.followup.ticket_id }}</Mono>
       <Mono class="countdown">{{ countdown }}</Mono>
@@ -75,6 +94,11 @@ async function done() {
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-card);
   padding: 11px 12px 12px;
+  cursor: grab;
+}
+.fu-card.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
 }
 header {
   display: flex;

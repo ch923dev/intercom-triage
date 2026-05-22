@@ -46,6 +46,31 @@ export function bucketOf(f: Followup, nowMs: number): Bucket {
   return 'later';
 }
 
+/**
+ * Compute the due_at for a card dropped into `bucket`. Returns `null` for
+ * `fired` — that path uses `markFired` instead of `setFollowup`.
+ *
+ * `today` is capped at end-of-day local; `later` is tomorrow 09:00 local.
+ * Pure — `nowMs` is passed in so the caller controls the clock (and tests
+ * can pin it).
+ */
+export function dueAtForBucket(bucket: Bucket, nowMs: number): Date | null {
+  if (bucket === 'fired') return null;
+  if (bucket === 'overdue') return new Date(nowMs);
+  if (bucket === 'within1h') return new Date(nowMs + 30 * 60_000);
+  if (bucket === 'today') {
+    const endOfDay = new Date(nowMs);
+    endOfDay.setHours(23, 59, 59, 999);
+    const fourHours = nowMs + 4 * 3_600_000;
+    return new Date(Math.min(fourHours, endOfDay.getTime()));
+  }
+  // 'later' → tomorrow 09:00 local.
+  const tomorrow = new Date(nowMs);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(9, 0, 0, 0);
+  return tomorrow;
+}
+
 export const useFollowupsStore = defineStore('followups', () => {
   /** ticket_id → follow-up record. */
   const map = ref<Record<string, Followup>>({});
@@ -165,6 +190,27 @@ export const useFollowupsStore = defineStore('followups', () => {
     banners.value = banners.value.filter((b) => b.ticketId !== ticketId);
   }
 
+  /** Move a card to a new bucket via drag-and-drop.
+   *  - Same bucket → no-op.
+   *  - `fired` → call markFired (no due_at change).
+   *  - Others → setFollowup(ticketId, dueAtForBucket(bucket, Date.now())!, currentReason).
+   *  Optimistic: setFollowup/markFired already do their own optimistic updates,
+   *  but we early-out before calling them when bucket is unchanged.
+   */
+  async function rescheduleToBucket(ticketId: string, bucket: Bucket): Promise<void> {
+    const f = map.value[ticketId];
+    if (f === undefined) return;
+    if (bucketOf(f, now.value) === bucket) return;
+    if (bucket === 'fired') {
+      await markFired(ticketId);
+      return;
+    }
+    const dueAt = dueAtForBucket(bucket, Date.now());
+    if (dueAt === null) return;
+    const reason = map.value[ticketId]?.reason ?? null;
+    await setFollowup(ticketId, dueAt, reason);
+  }
+
   /**
    * Once-per-second tick (T051). Advances `now`, then for every follow-up that
    * has just transitioned pending → due: raises a banner and marks it fired.
@@ -213,6 +259,7 @@ export const useFollowupsStore = defineStore('followups', () => {
     snooze,
     markFired,
     dismissBanner,
+    rescheduleToBucket,
     tick,
   };
 });
