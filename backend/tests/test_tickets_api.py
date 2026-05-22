@@ -187,3 +187,41 @@ async def test_override_invalidated_when_ticket_advances(
         await intercom.aclose()
 
     assert out[0].user_override is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_embeds_followup_and_note(
+    session: AsyncSession,
+    test_config: AppConfig,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """T048 — `/tickets/fetch` joins the follow-up + note rows by ticket id."""
+    from datetime import datetime
+
+    from app.services.followups import set_followup
+    from app.services.notes import set_note
+
+    await set_followup(session, "C1", datetime(2030, 1, 1, 12, 0, 0), "call back")
+    await set_note(session, "C1", "escalate to tier 2")
+
+    httpx_mock.add_response(
+        url=_SEARCH_URL,
+        method="POST",
+        json={"conversations": [{"id": "C1"}], "pages": {}},
+    )
+    httpx_mock.add_response(url=_hydrate_url("C1"), json=intercom_conv("C1", updated=1000))
+
+    intercom = IntercomClient("token")
+    try:
+        out = await fetch_tickets(
+            session=session,
+            intercom=intercom,
+            openrouter=None,
+            config=test_config,
+            filter_settings=FilterSettings(),
+        )
+    finally:
+        await intercom.aclose()
+
+    assert out[0].followup is not None and out[0].followup.reason == "call back"
+    assert out[0].note is not None and out[0].note.body == "escalate to tier 2"

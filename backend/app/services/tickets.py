@@ -18,8 +18,14 @@ from app.clients.intercom import IntercomClient, IntercomError
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig
 from app.metrics import metrics
-from app.models import Category, Override
-from app.schemas import FilterSettings, HydratedTicket, TicketSchema
+from app.models import Category, Followup, Override, TicketNote
+from app.schemas import (
+    FilterSettings,
+    FollowupRead,
+    HydratedTicket,
+    TicketNoteRead,
+    TicketSchema,
+)
 from app.services.cache import get_cached, set_cached
 from app.services.categories import get_fallback
 from app.util import naive_utcnow
@@ -91,6 +97,10 @@ async def fetch_tickets(
 
     overrides = {o.ticket_id: o for o in (await session.scalars(select(Override))).all()}
 
+    # Follow-ups + notes joined in by ticket id (T048, plan §8a).
+    followups = {f.ticket_id: f for f in (await session.scalars(select(Followup))).all()}
+    notes = {n.ticket_id: n for n in (await session.scalars(select(TicketNote))).all()}
+
     # Compose the response (FR-009 override application).
     composed: list[TicketSchema] = []
     for ticket in hydrated:
@@ -105,6 +115,9 @@ async def fetch_tickets(
             proposal_id = None
             user_override = True
 
+        followup = followups.get(ticket.id)
+        note = notes.get(ticket.id)
+
         composed.append(
             TicketSchema(
                 **ticket.model_dump(),
@@ -113,6 +126,8 @@ async def fetch_tickets(
                 summary=result.summary,
                 ai_confidence=result.confidence,
                 user_override=user_override,
+                followup=FollowupRead.model_validate(followup) if followup is not None else None,
+                note=TicketNoteRead.model_validate(note) if note is not None else None,
             ),
         )
 

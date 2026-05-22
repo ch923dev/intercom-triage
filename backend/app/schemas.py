@@ -97,6 +97,49 @@ class MergeResponse(BaseModel):
     moved_count: int
 
 
+# ── Follow-ups + notes ────────────────────────────────────────────────────────
+
+
+class FollowupRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ticket_id: str
+    due_at: datetime
+    reason: str | None
+    fired: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class FollowupSet(BaseModel):
+    """PUT /followups/{ticket_id} body. `due_at` is absolute — the client
+    computes it from a preset offset so server and client clocks agree."""
+
+    due_at: datetime
+    reason: str | None = Field(default=None, max_length=80)
+
+
+class SnoozeRequest(BaseModel):
+    minutes: int = Field(ge=1, le=10_080)  # up to 7 days
+
+
+class TicketNoteRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ticket_id: str
+    body: str
+    updated_at: datetime
+
+
+class TicketNoteSet(BaseModel):
+    body: str  # empty / whitespace-only deletes the row
+
+
+class NoteDeletedResponse(BaseModel):
+    ok: Literal[True] = True
+    deleted: Literal[True] = True
+
+
 # ── Tickets ───────────────────────────────────────────────────────────────────
 
 
@@ -135,6 +178,8 @@ class TicketSchema(HydratedTicket):
     summary: str
     ai_confidence: float
     user_override: bool
+    followup: FollowupRead | None = None
+    note: TicketNoteRead | None = None
 
 
 class CategoryUpdate(BaseModel):
@@ -160,6 +205,7 @@ class FilterSettings(BaseModel):
     lookback_value: int = Field(default=24, ge=1, le=720)
     states: list[TicketState] = Field(default_factory=_default_states)
     include_category_ids: list[int] | None = None
+    mute_alarms: bool = False
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────────

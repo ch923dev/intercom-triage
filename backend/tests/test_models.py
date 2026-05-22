@@ -12,7 +12,9 @@ from app.db import make_engine, make_session_factory
 from app.models import (
     AICacheEntry,
     Category,
+    Followup,
     Settings,
+    TicketNote,
     init_db,
 )
 
@@ -118,6 +120,45 @@ async def test_ai_cache_xor_rejects_neither_set() -> None:
                     summary="x",
                     confidence=0.5,
                     ticket_updated_at=datetime.now(UTC),
+                ),
+            )
+            with pytest.raises(IntegrityError):
+                await session.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_init_db_creates_followup_and_note_tables() -> None:
+    """T045 — fresh boot creates `followups` + `ticket_notes` with `mute_alarms`."""
+    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    factory = make_session_factory(engine)
+    try:
+        await init_db(engine, factory)
+        async with factory() as session:
+            assert (await session.scalars(select(Followup))).all() == []
+            assert (await session.scalars(select(TicketNote))).all() == []
+            row = await session.scalar(select(Settings).where(Settings.id == 1))
+            assert row is not None and row.mute_alarms is False
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_followup_reason_length_constraint() -> None:
+    """T045 — a follow-up reason longer than 80 chars is rejected."""
+    from datetime import datetime
+
+    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    factory = make_session_factory(engine)
+    try:
+        await init_db(engine, factory)
+        async with factory() as session:
+            session.add(
+                Followup(
+                    ticket_id="conv_long_reason",
+                    due_at=datetime.now(UTC).replace(tzinfo=None),
+                    reason="x" * 100,
                 ),
             )
             with pytest.raises(IntegrityError):

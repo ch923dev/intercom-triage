@@ -29,6 +29,7 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy import inspect as sqla_inspect
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -193,6 +194,11 @@ class Settings(Base):
         nullable=False,
     )
     include_category_ids: Mapped[list[int] | None] = mapped_column(JSON)  # null = all
+    mute_alarms: Mapped[bool] = mapped_column(
+        default=False,
+        server_default=text("0"),
+        nullable=False,
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=text("CURRENT_TIMESTAMP"),
@@ -214,6 +220,51 @@ class RejectedProposalSignature(Base):
     signature: Mapped[str] = mapped_column(Text, primary_key=True)
     rejected_name: Mapped[str] = mapped_column(Text, nullable=False)
     rejected_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
+
+class Followup(Base):
+    """A per-ticket reminder (US-012). At most one row per ticket — `ticket_id`
+    is the PK, so `PUT` upserts. No FK: the ticket id is owned by Intercom."""
+
+    __tablename__ = "followups"
+
+    ticket_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    fired: Mapped[bool] = mapped_column(default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "reason IS NULL OR length(reason) <= 80",
+            name="followups_reason_len_check",
+        ),
+        Index("ix_followups_due_at", "due_at"),
+    )
+
+
+class TicketNote(Base):
+    """A per-ticket free-text note (US-014). One row per ticket; an empty body
+    deletes the row, so every stored row is non-empty by invariant."""
+
+    __tablename__ = "ticket_notes"
+
+    ticket_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=text("CURRENT_TIMESTAMP"),
         nullable=False,
@@ -282,6 +333,18 @@ DEFAULT_CATEGORIES: list[dict[str, Any]] = [
 # ── Init + seed ───────────────────────────────────────────────────────────────
 
 
+def _ensure_mute_alarms_column(conn: Any) -> None:
+    """One-time additive migration: add `settings.mute_alarms` if missing.
+
+    Runs inside the DDL transaction in `init_db`. No-op once the column exists.
+    """
+    inspector = sqla_inspect(conn)
+    columns = {col["name"] for col in inspector.get_columns("settings")}
+    if "mute_alarms" in columns:
+        return
+    conn.exec_driver_sql("ALTER TABLE settings ADD COLUMN mute_alarms BOOLEAN DEFAULT 0 NOT NULL")
+
+
 async def init_db(engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]) -> None:
     """Create schema if missing; seed defaults + singleton settings row if empty.
 
@@ -294,6 +357,10 @@ async def init_db(engine: AsyncEngine, session_factory: async_sessionmaker[Async
         if engine.dialect.name == "sqlite":
             await conn.exec_driver_sql("PRAGMA foreign_keys = ON")
         await conn.run_sync(Base.metadata.create_all)
+        # create_all adds the new `followups`/`ticket_notes` tables but never new
+        # columns on an existing table — backfill `settings.mute_alarms` for DBs
+        # created before Phase 10 (T045). Graduates to Alembic at T104.
+        await conn.run_sync(_ensure_mute_alarms_column)
 
     async with session_factory() as session:
         # Seed categories if empty.

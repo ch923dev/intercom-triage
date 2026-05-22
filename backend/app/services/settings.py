@@ -21,6 +21,7 @@ async def get_settings(session: AsyncSession) -> FilterSettings:
         include_category_ids=(
             list(row.include_category_ids) if row.include_category_ids is not None else None
         ),
+        mute_alarms=row.mute_alarms,
     )
 
 
@@ -39,6 +40,7 @@ async def update_settings(
     row.include_category_ids = (
         list(data.include_category_ids) if data.include_category_ids is not None else None
     )
+    row.mute_alarms = data.mute_alarms
     row.updated_at = naive_utcnow()
     await session.commit()
     return await get_settings(session)

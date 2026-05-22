@@ -84,9 +84,12 @@ interval in the popup footer to have it badge the Urgent count.
 | `POST /categories/{src}/merge-into/{dst}` | Merge categories |
 | `GET /proposals` | Pending AI category proposals + example tickets |
 | `POST /proposals/{id}/approve` · `/merge-into/{cat}` · `/reject` | Resolve a proposal |
-| `POST /tickets/fetch` | Fetch + categorize tickets for a `FilterSettings` body |
+| `POST /tickets/fetch` | Fetch + categorize tickets (each carries its follow-up + note) |
 | `PATCH /tickets/{id}/category` | Manually override a ticket's category |
-| `GET /settings` · `PUT /settings` | The stored filter settings |
+| `GET /settings` · `PUT /settings` | The stored filter settings + `mute_alarms` |
+| `GET /followups` | All active follow-up reminders |
+| `PUT /followups/{id}` · `/snooze` · `/mark-fired` · `DELETE` | Set / snooze / fire / clear a follow-up |
+| `GET /notes` · `PUT /notes/{id}` | Per-ticket next-step notes (empty body deletes) |
 
 Interactive docs at <http://localhost:8000/docs> while the backend runs.
 
