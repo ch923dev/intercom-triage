@@ -12,7 +12,7 @@ import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
 import { useTweaksStore } from '@/stores/tweaks';
 import { permission, requestPermission, supported } from '@/utils/notify';
-import type { LookbackUnit, TicketState } from '@/types/api';
+import type { Density, LookbackUnit, TicketState } from '@/types/api';
 
 const settings = useSettingsStore();
 const tickets = useTicketsStore();
@@ -23,6 +23,12 @@ const notifyHint = ref('');
 
 const STATES: TicketState[] = ['open', 'snoozed', 'closed'];
 const UNITS: LookbackUnit[] = ['hours', 'days'];
+const densities: Density[] = ['compact', 'balanced', 'comfy'];
+const DENSITY_LABEL: Record<Density, string> = {
+  compact: 'Compact',
+  balanced: 'Balanced',
+  comfy: 'Comfy',
+};
 
 /** Run a settings mutation, then refresh the board against the new filter. */
 async function apply(mutate: () => Promise<void>) {
@@ -113,6 +119,75 @@ async function onToggleNotifications(event: Event) {
       </header>
 
       <div class="body">
+        <!-- Display tweaks — per-device, persisted in localStorage via the
+             tweaks store. Lives here (rather than the topbar) so the topbar
+             stays focused on navigation + search. -->
+        <section class="display">
+          <Mono>Density</Mono>
+          <div class="seg">
+            <button
+              v-for="d in densities"
+              :key="d"
+              :class="{ active: tweaks.density === d }"
+              @click="tweaks.setDensity(d)"
+            >
+              {{ DENSITY_LABEL[d] }}
+            </button>
+          </div>
+
+          <Mono>Card content</Mono>
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="tweaks.showSummary"
+              @change="tweaks.setShowSummary(($event.target as HTMLInputElement).checked)"
+            />
+            <span class="sentence">Show AI summary on cards</span>
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="tweaks.showConfidence"
+              @change="tweaks.setShowConfidence(($event.target as HTMLInputElement).checked)"
+            />
+            <span class="sentence">Show AI confidence on cards</span>
+          </label>
+
+          <Mono>Accent color</Mono>
+          <div class="swatches">
+            <button
+              v-for="c in tweaks.ACCENT_SWATCHES"
+              :key="c"
+              :class="{ active: tweaks.accent === c }"
+              :style="{ background: c }"
+              :title="`Accent ${c}`"
+              @click="tweaks.setAccent(c)"
+            />
+          </div>
+
+          <Mono>Theme</Mono>
+          <div class="seg">
+            <button
+              :class="{ active: !tweaks.darkMode }"
+              @click="tweaks.setDarkMode(false)"
+            >Light</button>
+            <button
+              :class="{ active: tweaks.darkMode }"
+              @click="tweaks.setDarkMode(true)"
+            >Dark</button>
+          </div>
+
+          <Mono>Alarms</Mono>
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="settings.muteAlarms"
+              @change="settings.setMuteAlarms(($event.target as HTMLInputElement).checked)"
+            />
+            <span class="sentence">Mute alarm audio (banner still shows)</span>
+          </label>
+        </section>
+
         <!-- Lookback window -->
         <section>
           <Mono>Lookback window</Mono>
@@ -366,5 +441,21 @@ section {
   font-family: var(--font-mono);
   font-size: 12px;
   cursor: pointer;
+}
+.swatches {
+  display: flex;
+  gap: 6px;
+}
+.swatches button {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: var(--hairline) solid var(--line);
+  cursor: pointer;
+  padding: 0;
+}
+.swatches button.active {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
 }
 </style>
