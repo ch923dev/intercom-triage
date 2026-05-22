@@ -314,8 +314,17 @@ export async function fetchHydratedBatch({
           continue; // leaves out[i] === null
         }
       }
-      const detail = await getConversation(appId, summary.id);
-      out[i] = normalizeConversation(detail, appId, summary);
+      try {
+        const detail = await getConversation(appId, summary.id);
+        out[i] = normalizeConversation(detail, appId, summary);
+      } catch (err) {
+        // Auth errors must bubble so the popup can surface the "log in" hint.
+        if (err instanceof IntercomSessionError && (err.status === 401 || err.status === 403)) {
+          throw err;
+        }
+        console.warn(`[intercom] skipped conversation ${summary.id}:`, err?.message ?? err);
+        // out[i] stays null; the .filter() at the end drops it from the result.
+      }
     }
   }
 
