@@ -1,25 +1,24 @@
-<!-- Top bar — wordmark, page nav, refresh, display tweaks, settings.
+<!-- Top bar — wordmark, page nav, search, refresh, settings.
+     Display tweaks (density / theme / accent / mute / summary / confidence)
+     now live in the Settings drawer so the topbar stays scannable and the
+     search input has room to breathe.
      Reference: tasks.md T036 (refresh + last-refreshed), T035 (settings entry). -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import Mono from './Mono.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
-import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 import { useTweaksStore } from '@/stores/tweaks';
 import { useViewStore } from '@/stores/view';
 import type { View } from '@/stores/view';
-import type { Density } from '@/types/api';
 
 const tickets = useTicketsStore();
 const tweaks = useTweaksStore();
-const settings = useSettingsStore();
 const categories = useCategoriesStore();
 const followups = useFollowupsStore();
 const view = useViewStore();
 
-const densities: Density[] = ['compact', 'balanced', 'comfy'];
 const NAV: { id: View; label: string }[] = [
   { id: 'board', label: 'Board' },
   { id: 'followups', label: 'Follow-ups' },
@@ -59,10 +58,6 @@ function refresh() {
   void tickets.refresh();
 }
 
-function toggleDark() {
-  tweaks.setDarkMode(!tweaks.darkMode);
-}
-
 function onSearchInput(e: Event) {
   tickets.setQuery((e.target as HTMLInputElement).value);
 }
@@ -97,17 +92,20 @@ function onSearchInput(e: Event) {
 
     <div class="sep" />
 
-    <!-- Search input. Positioned between the nav and the ticket count so it
-         sits in the natural reading flow: brand → nav → search → count → actions.
-         Width is fixed at ~200px to avoid layout shift while typing. The
-         `.search-input` class is targeted by the `/` keyboard shortcut in App.vue. -->
-    <input
-      class="search-input"
-      type="search"
-      placeholder="Search title / summary / customer"
-      :value="tickets.query"
-      @input="onSearchInput"
-    />
+    <!-- Search input. Wrapped in a label so the magnifier glyph is part of the
+         clickable hit-target. The `.search-input` class is preserved so the
+         App.vue `/` shortcut (querySelector('.search-input')) still works. -->
+    <label class="search" :class="{ active: !!tickets.query }">
+      <span class="search-icon" aria-hidden="true">⌕</span>
+      <input
+        class="search-input"
+        type="search"
+        placeholder="Search tickets…"
+        :value="tickets.query"
+        @input="onSearchInput"
+      />
+      <span v-if="!tickets.query" class="search-kbd" aria-hidden="true">/</span>
+    </label>
 
     <Mono>{{ ticketCountLabel }}</Mono>
 
@@ -133,59 +131,8 @@ function onSearchInput(e: Event) {
 
     <div class="sep" />
 
-    <!-- Density picker -->
-    <div class="seg">
-      <button
-        v-for="d in densities"
-        :key="d"
-        :class="{ active: tweaks.density === d }"
-        @click="tweaks.setDensity(d)"
-      >
-        <span class="mono">{{ d.slice(0, 1).toUpperCase() }}</span>
-      </button>
-    </div>
-
-    <button
-      class="ghost"
-      :class="{ active: tweaks.showSummary }"
-      @click="tweaks.setShowSummary(!tweaks.showSummary)"
-    >
-      <span class="mono">Summary</span>
-    </button>
-    <button
-      class="ghost"
-      :class="{ active: tweaks.showConfidence }"
-      @click="tweaks.setShowConfidence(!tweaks.showConfidence)"
-    >
-      <span class="mono">Conf</span>
-    </button>
-
-    <div class="swatches">
-      <button
-        v-for="c in tweaks.ACCENT_SWATCHES"
-        :key="c"
-        :class="{ active: tweaks.accent === c }"
-        :style="{ background: c }"
-        :title="`Accent ${c}`"
-        @click="tweaks.setAccent(c)"
-      />
-    </div>
-
-    <button
-      class="ghost"
-      :class="{ active: settings.muteAlarms }"
-      title="Mute the alarm audio cue (the banner still shows)"
-      @click="settings.setMuteAlarms(!settings.muteAlarms)"
-    >
-      <span class="mono">{{ settings.muteAlarms ? 'Muted' : 'Mute' }}</span>
-    </button>
-
-    <button class="ghost" @click="toggleDark">
-      <span class="mono">{{ tweaks.darkMode ? 'Light' : 'Dark' }}</span>
-    </button>
-
-    <!-- Settings drawer (T035) -->
-    <button class="ghost" title="Filter settings" @click="view.openDrawer()">
+    <!-- Settings drawer (T035) — display tweaks now live inside it. -->
+    <button class="ghost" title="Filter & display settings" @click="view.openDrawer()">
       <span class="mono">Settings</span>
     </button>
   </header>
@@ -273,22 +220,6 @@ function onSearchInput(e: Event) {
   color: var(--bg);
   border-color: var(--ink);
 }
-.swatches {
-  display: flex;
-  gap: 5px;
-}
-.swatches button {
-  width: 14px;
-  height: 14px;
-  border-radius: 2px;
-  border: var(--hairline) solid var(--line);
-  cursor: pointer;
-  padding: 0;
-}
-.swatches button.active {
-  outline: 2px solid var(--ink);
-  outline-offset: 1px;
-}
 .pill {
   padding: 3px 9px;
   border: var(--hairline) solid var(--line);
@@ -303,27 +234,55 @@ function onSearchInput(e: Event) {
   color: #fff;
   animation: triagePulse 1.4s ease-in-out infinite;
 }
-/* Search input — ghost style matching the rest of the topbar controls. */
-.search-input {
-  width: 200px;
-  padding: 4px 8px;
+/* Search — the label is the visual chip; the input inside is borderless. */
+.search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 320px;
+  padding: 4px 10px;
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-chip);
+  background: var(--panel);
+  transition: border-color 80ms ease, background 80ms ease;
+}
+.search:focus-within {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+.search.active {
+  border-color: var(--accent);
+}
+.search-icon {
+  font-size: 14px;
+  color: var(--ink-3);
+  line-height: 1;
+}
+.search-input {
+  flex: 1;
+  border: 0;
+  outline: none;
   background: transparent;
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: 11px;
-  outline: none;
+  min-width: 0;
 }
 .search-input::placeholder {
   color: var(--ink-3);
 }
-.search-input:focus {
-  border-color: var(--accent);
-}
-/* Clear button inside native search input (WebKit) */
 .search-input::-webkit-search-cancel-button {
   cursor: pointer;
+}
+.search-kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  padding: 1px 5px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  line-height: 1.2;
 }
 /* Faint auto-sync indicator appended to the last-sync timestamp. */
 .auto-label {
