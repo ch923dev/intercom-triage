@@ -7,12 +7,10 @@
 import { onMounted, ref } from 'vue';
 import Mono from './Mono.vue';
 import { useCategoriesStore } from '@/stores/categories';
-import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 
 const categories = useCategoriesStore();
 const tickets = useTicketsStore();
-const settings = useSettingsStore();
 
 const busy = ref<number | null>(null);
 const error = ref<string | null>(null);
@@ -35,7 +33,7 @@ async function run(id: number, fn: () => Promise<void>) {
   error.value = null;
   try {
     await fn();
-    await tickets.refresh(settings.filter);
+    await tickets.refresh();
   } catch (e) {
     error.value = (e as Error).message;
   } finally {

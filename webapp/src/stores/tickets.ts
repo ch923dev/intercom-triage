@@ -1,13 +1,14 @@
-// Tickets store. Per tasks.md T031.
-// Real /tickets/fetch lands in T025; for the scaffold the store carries a
-// `mock` mode that loads the design's sample data so the UI can be developed
-// against realistic shapes before the backend route exists.
+// Tickets store. Per tasks.md T031; ingest-pivot Slice C.
+//
+// The operator has no Intercom Access Token, so the board is served from the
+// stored `tickets` table the Chrome extension ingests into (`GET /tickets`).
+// An empty board means the operator hasn't synced yet — the UI surfaces the
+// extension callout instead of mock data.
 
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { api, ApiError } from '@/api/client';
-import { SAMPLE_TICKETS } from '@/mock/sampleTickets';
-import type { FilterSettings, Ticket } from '@/types/api';
+import { api } from '@/api/client';
+import type { Ticket } from '@/types/api';
 
 interface TicketsState {
   tickets: Ticket[];
@@ -16,8 +17,6 @@ interface TicketsState {
   lastRefresh: Date | null;
   /** Optimistic local overrides waiting on the server PATCH. */
   pendingOverrides: Record<string, number>;
-  /** Set true when the live endpoint isn't wired yet. */
-  mock: boolean;
 }
 
 export const useTicketsStore = defineStore('tickets', () => {
@@ -27,7 +26,6 @@ export const useTicketsStore = defineStore('tickets', () => {
     error: null,
     lastRefresh: null,
     pendingOverrides: {},
-    mock: false,
   });
 
   const tickets = computed(() => state.value.tickets);
@@ -57,23 +55,15 @@ export const useTicketsStore = defineStore('tickets', () => {
     return map;
   });
 
-  async function refresh(filter: FilterSettings) {
+  /** Reload the stored board. Filter settings are applied server-side. */
+  async function refresh() {
     state.value.loading = true;
     state.value.error = null;
     try {
-      const data = await api.fetchTickets(filter);
-      state.value.tickets = data;
-      state.value.mock = false;
+      state.value.tickets = await api.listTickets();
     } catch (e) {
-      // Backend `/tickets/fetch` isn't merged yet (T025). Fall back to the
-      // sample-data shipped with the design so the UI is workable.
-      if (e instanceof ApiError && e.status === 404) {
-        state.value.tickets = SAMPLE_TICKETS;
-        state.value.mock = true;
-      } else {
-        state.value.error = (e as Error).message;
-        throw e;
-      }
+      state.value.error = (e as Error).message;
+      throw e;
     } finally {
       state.value.lastRefresh = new Date();
       state.value.loading = false;
@@ -84,7 +74,6 @@ export const useTicketsStore = defineStore('tickets', () => {
   async function applyOverride(ticketId: string, categoryId: number) {
     const previous = state.value.pendingOverrides[ticketId];
     state.value.pendingOverrides = { ...state.value.pendingOverrides, [ticketId]: categoryId };
-    if (state.value.mock) return; // no server in mock mode
     try {
       await api.overrideCategory(ticketId, categoryId);
     } catch (e) {
@@ -106,7 +95,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     byProposal,
     refresh,
     applyOverride,
-    isMock: computed(() => state.value.mock),
+    isEmpty: computed(() => !state.value.loading && state.value.tickets.length === 0),
     pendingOverrides: computed(() => state.value.pendingOverrides),
   };
 });

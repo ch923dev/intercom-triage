@@ -7,12 +7,10 @@ import { computed, ref } from 'vue';
 import CatDot from './CatDot.vue';
 import Mono from './Mono.vue';
 import { useCategoriesStore } from '@/stores/categories';
-import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 
 const categories = useCategoriesStore();
 const tickets = useTicketsStore();
-const settings = useSettingsStore();
 
 // oklch swatch palette — matches the seeded category hues (plan §8b).
 const SWATCHES = [
@@ -70,7 +68,7 @@ async function archive(id: number, name: string) {
   if (!window.confirm(`Archive “${name}”? Its tickets move to the fallback category.`)) return;
   await run(id, async () => {
     await categories.archiveCategory(id);
-    await tickets.refresh(settings.filter);
+    await tickets.refresh();
   });
 }
 
@@ -86,7 +84,7 @@ async function merge(srcId: number, event: Event) {
   }
   await run(srcId, async () => {
     await categories.mergeCategories(srcId, dstId);
-    await tickets.refresh(settings.filter);
+    await tickets.refresh();
   });
 }
 

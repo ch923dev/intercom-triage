@@ -23,7 +23,7 @@ const UNITS: LookbackUnit[] = ['hours', 'days'];
 /** Run a settings mutation, then refresh the board against the new filter. */
 async function apply(mutate: () => Promise<void>) {
   await mutate();
-  await tickets.refresh(settings.filter);
+  await tickets.refresh();
 }
 
 function onUnit(unit: LookbackUnit) {

@@ -80,8 +80,8 @@ export const api = {
     request<{ ok: true }>(`/proposals/${id}/reject`, { method: 'POST' }),
 
   // ── tickets ───────────────────────────────────────────────────────────────
-  fetchTickets: (filter: FilterSettings): Promise<Ticket[]> =>
-    request('/tickets/fetch', { method: 'POST', body: JSON.stringify(filter) }),
+  /** The stored board — extension-ingested + categorized tickets. */
+  listTickets: (): Promise<Ticket[]> => request('/tickets'),
 
   overrideCategory: (ticketId: string, categoryId: number) =>
     request<{ ok: true; category_id: number }>(`/tickets/${ticketId}/category`, {

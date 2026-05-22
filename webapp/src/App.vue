@@ -32,11 +32,10 @@ const COLUMN_STEP = 296; // column width (280) + gutter
 onMounted(async () => {
   await settings.load();
   await categories.load();
-  // Follow-ups + notes are independent of the (possibly degraded) ticket fetch.
   await Promise.all([followups.load(), notes.load()]);
-  // A degraded backend (no Intercom token) makes `/tickets/fetch` throw — the
-  // board just stays empty in that case, so swallow it here.
-  await tickets.refresh(settings.filter).catch(() => undefined);
+  // An unreachable backend leaves the board empty + raises an inline error;
+  // the empty-state callout points the operator at the extension to sync.
+  await tickets.refresh().catch(() => undefined);
 });
 
 // ── Alarm loop (T051) ─────────────────────────────────────────────────────────
@@ -89,7 +88,7 @@ function onKeydown(e: KeyboardEvent) {
 
   if (e.key === 'r') {
     e.preventDefault();
-    void tickets.refresh(settings.filter);
+    void tickets.refresh();
     return;
   }
   if (e.key === 'Escape' && view.selectedTicketId !== null) {
@@ -129,7 +128,10 @@ onBeforeUnmount(() => {
       Backend unreachable — {{ categories.error }}
     </div>
     <template v-else>
-      <Board v-if="view.view === 'board'" />
+      <template v-if="view.view === 'board'">
+        <ExtensionCallout v-if="tickets.isEmpty" mode="empty" />
+        <Board v-else />
+      </template>
       <CategoriesPage v-else-if="view.view === 'categories'" />
       <ProposalsPage v-else />
     </template>

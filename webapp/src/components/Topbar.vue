@@ -38,7 +38,7 @@ const lastSync = computed(() => {
 const proposalCount = computed(() => categories.pendingProposals.length);
 
 function refresh() {
-  void tickets.refresh(settings.filter);
+  void tickets.refresh();
 }
 
 function toggleDark() {
@@ -84,10 +84,6 @@ function toggleDark() {
         >{{ followups.pendingCount }} follow-up{{ followups.pendingCount === 1 ? '' : 's' }}</span
       >
     </button>
-
-    <div v-if="tickets.isMock" class="badge mock">
-      <Mono :color="'var(--accent)'">Sample data — /tickets/fetch unavailable</Mono>
-    </div>
 
     <div class="spacer" />
 
@@ -192,12 +188,6 @@ function toggleDark() {
 }
 .spacer {
   flex: 1;
-}
-.badge.mock {
-  padding: 2px 8px;
-  border: var(--hairline) solid var(--accent);
-  border-radius: 2px;
-  background: var(--accent-soft);
 }
 .seg {
   display: inline-flex;
