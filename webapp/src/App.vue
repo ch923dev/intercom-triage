@@ -79,6 +79,8 @@ function playPing() {
 let tickHandle = 0;
 
 function alarmTick() {
+  // Early-return is cheaper than the watcher lifecycle dance; same CPU savings.
+  if (followups.pendingCount === 0 && followups.banners.length === 0) return;
   const fired = followups.tick();
   // FR-021 — the banner always shows; the mute flag suppresses only the audio.
   if (fired.length > 0 && !settings.muteAlarms) playPing();
