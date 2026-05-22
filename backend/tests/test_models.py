@@ -5,11 +5,14 @@ from __future__ import annotations
 from datetime import UTC
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
+from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from app.db import make_engine, make_session_factory
 from app.models import (
+    _ALEMBIC_INI,
     AICacheEntry,
     Category,
     Followup,
@@ -140,6 +143,34 @@ async def test_init_db_creates_followup_and_note_tables() -> None:
             assert (await session.scalars(select(TicketNote))).all() == []
             row = await session.scalar(select(Settings).where(Settings.id == 1))
             assert row is not None and row.mute_alarms is False
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_alembic_version_matches_head() -> None:
+    """After init_db, alembic_version row must equal the current head revision.
+
+    This pins the contract: if a new migration is added without updating the
+    head, or if the version table is not stamped correctly, this test fails.
+    """
+    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    factory = make_session_factory(engine)
+    try:
+        await init_db(engine, factory)
+        # Determine expected head from the script directory.
+        alembic_cfg = AlembicConfig(str(_ALEMBIC_INI))
+        script = ScriptDirectory.from_config(alembic_cfg)
+        head_revision = script.get_current_head()
+
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+            rows = result.fetchall()
+
+        assert len(rows) == 1, "Expected exactly one row in alembic_version"
+        assert rows[0][0] == head_revision, (
+            f"alembic_version={rows[0][0]!r} but expected head={head_revision!r}"
+        )
     finally:
         await engine.dispose()
 
