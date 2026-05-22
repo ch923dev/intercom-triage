@@ -42,6 +42,18 @@ const followupLabel = computed(() => {
 
 // Notes chip (T052): count of non-empty bullet lines.
 const noteLines = computed(() => countNoteLines(notes.bodyOf(props.ticket.id)));
+
+// Reply state — derived from the Intercom-visible thread.
+const adminReplyCount = computed(() => props.ticket.parts.filter((p) => p.is_admin).length);
+const lastPart = computed(() => props.ticket.parts[props.ticket.parts.length - 1]);
+/** True when the most-recent visible message is from us — i.e. the ball is
+ *  in the customer's court. Useful triage hint: skip vs follow-up. */
+const awaitingCustomer = computed(() => adminReplyCount.value > 0 && !!lastPart.value?.is_admin);
+
+// Intercom team notes (separate from the operator's local `note`).
+const teamNoteCount = computed(() => props.ticket.internal_notes.length);
+
+const isClosed = computed(() => props.ticket.state === 'closed');
 </script>
 
 <template>
@@ -71,7 +83,25 @@ const noteLines = computed(() => countNoteLines(notes.bodyOf(props.ticket.id)));
       </Mono>
     </div>
 
-    <div v-if="followupLabel || noteLines" class="tags">
+    <div
+      v-if="
+        followupLabel ||
+        noteLines ||
+        adminReplyCount ||
+        teamNoteCount ||
+        awaitingCustomer ||
+        isClosed
+      "
+      class="tags"
+    >
+      <span v-if="isClosed" class="tag closed">Closed</span>
+      <span v-if="awaitingCustomer" class="tag awaiting">Awaiting customer</span>
+      <span v-else-if="adminReplyCount" class="tag replied">
+        Replied{{ adminReplyCount > 1 ? ` (${adminReplyCount})` : '' }}
+      </span>
+      <span v-if="teamNoteCount" class="tag team-note">
+        Team {{ teamNoteCount === 1 ? 'note' : `notes (${teamNoteCount})` }}
+      </span>
       <span v-if="followupLabel" class="tag fu" :class="{ due: followupDue }">
         {{ followupLabel }}
       </span>
@@ -196,5 +226,40 @@ header {
 }
 .tag.note {
   color: var(--ink-3);
+}
+.tag.replied {
+  color: oklch(0.45 0.13 145);
+  background: oklch(0.95 0.04 145);
+  border-color: oklch(0.75 0.08 145);
+}
+.tag.awaiting {
+  color: oklch(0.45 0.13 235);
+  background: oklch(0.95 0.04 235);
+  border-color: oklch(0.75 0.08 235);
+}
+.tag.team-note {
+  color: oklch(0.45 0.13 285);
+  background: oklch(0.95 0.04 285);
+  border-color: oklch(0.75 0.08 285);
+}
+.tag.closed {
+  color: var(--ink-3);
+  background: transparent;
+  border-style: dashed;
+}
+html[data-theme='dark'] .tag.replied {
+  color: oklch(0.85 0.12 145);
+  background: oklch(0.25 0.05 145);
+  border-color: oklch(0.4 0.08 145);
+}
+html[data-theme='dark'] .tag.awaiting {
+  color: oklch(0.85 0.12 235);
+  background: oklch(0.25 0.05 235);
+  border-color: oklch(0.4 0.08 235);
+}
+html[data-theme='dark'] .tag.team-note {
+  color: oklch(0.85 0.12 285);
+  background: oklch(0.25 0.05 285);
+  border-color: oklch(0.4 0.08 285);
 }
 </style>

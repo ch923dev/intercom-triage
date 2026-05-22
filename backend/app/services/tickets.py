@@ -198,6 +198,7 @@ async def _upsert_ticket(
     """Insert or update one stored ticket row from its hydrated + AI data."""
     author = hydrated.author.model_dump(mode="json")
     parts = [p.model_dump(mode="json") for p in hydrated.parts]
+    internal_notes = [n.model_dump(mode="json") for n in hydrated.internal_notes]
     row = await session.get(Ticket, hydrated.id)
     if row is None:
         session.add(
@@ -209,6 +210,7 @@ async def _upsert_ticket(
                 url=hydrated.url,
                 author=author,
                 parts=parts,
+                internal_notes=internal_notes,
                 created_at=hydrated.created_at,
                 updated_at=hydrated.updated_at,
                 category_id=result.category_id,
@@ -225,6 +227,7 @@ async def _upsert_ticket(
     row.url = hydrated.url
     row.author = author
     row.parts = parts
+    row.internal_notes = internal_notes
     row.created_at = hydrated.created_at
     row.updated_at = hydrated.updated_at
     row.category_id = result.category_id
@@ -324,6 +327,7 @@ async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
                 author=row.author,  # type: ignore[arg-type]
                 url=row.url,
                 parts=row.parts,  # type: ignore[arg-type]
+                internal_notes=row.internal_notes,  # type: ignore[arg-type]
                 category_id=category_id,
                 proposal_id=proposal_id,
                 summary=row.summary,

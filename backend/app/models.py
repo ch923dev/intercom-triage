@@ -290,6 +290,12 @@ class Ticket(Base):
     url: Mapped[str | None] = mapped_column(Text)
     author: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     parts: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    internal_notes: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON,
+        default=list,
+        server_default=text("'[]'"),
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     category_id: Mapped[int | None] = mapped_column(
@@ -386,6 +392,18 @@ def _ensure_mute_alarms_column(conn: Any) -> None:
     conn.exec_driver_sql("ALTER TABLE settings ADD COLUMN mute_alarms BOOLEAN DEFAULT 0 NOT NULL")
 
 
+def _ensure_internal_notes_column(conn: Any) -> None:
+    """Add `tickets.internal_notes` (default `[]`) for DBs ingested before the
+    Intercom-team-notes feature landed. No-op once present."""
+    inspector = sqla_inspect(conn)
+    if "tickets" not in inspector.get_table_names():
+        return  # fresh DB — `create_all` made the column already
+    columns = {col["name"] for col in inspector.get_columns("tickets")}
+    if "internal_notes" in columns:
+        return
+    conn.exec_driver_sql("ALTER TABLE tickets ADD COLUMN internal_notes JSON DEFAULT '[]' NOT NULL")
+
+
 async def init_db(engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]) -> None:
     """Create schema if missing; seed defaults + singleton settings row if empty.
 
@@ -402,6 +420,8 @@ async def init_db(engine: AsyncEngine, session_factory: async_sessionmaker[Async
         # columns on an existing table — backfill `settings.mute_alarms` for DBs
         # created before Phase 10 (T045). Graduates to Alembic at T104.
         await conn.run_sync(_ensure_mute_alarms_column)
+        # Same story for the `internal_notes` column added later on `tickets`.
+        await conn.run_sync(_ensure_internal_notes_column)
 
     async with session_factory() as session:
         # Seed categories if empty.

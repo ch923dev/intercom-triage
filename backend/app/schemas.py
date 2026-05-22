@@ -169,10 +169,19 @@ class ConversationPartSchema(BaseModel):
     author: TicketAuthorSchema
     body: str
     created_at: NaiveUTCDatetime
+    # True for admin replies that were visible to the customer (Intercom
+    # `renderable_type` 24). Inbound customer messages (1/12) → False.
+    is_admin: bool = False
 
 
 class HydratedTicket(BaseModel):
-    """A conversation fetched + hydrated from Intercom, before AI categorization."""
+    """A conversation fetched + hydrated from Intercom, before AI categorization.
+
+    `parts` is what the AI sees: the customer-visible thread (inbound messages
+    + admin replies). `internal_notes` is the team-only side-channel (Intercom
+    `renderable_type` 2 — distinct from the operator's local `TicketNote` jot)
+    and is NOT fed to the AI prompt; only the UI surfaces it.
+    """
 
     id: str
     title: str | None
@@ -183,10 +192,16 @@ class HydratedTicket(BaseModel):
     author: TicketAuthorSchema
     url: str | None
     parts: list[ConversationPartSchema]
+    internal_notes: list[ConversationPartSchema] = Field(default_factory=list)
 
 
 class TicketSchema(HydratedTicket):
-    """A ticket returned to a client — hydrated + categorized (plan §3)."""
+    """A ticket returned to a client — hydrated + categorized (plan §3).
+
+    Inherits `parts` + `internal_notes` from `HydratedTicket`. `note` is the
+    operator's local next-step jot (FR-023), independent of any Intercom team
+    notes carried in `internal_notes`.
+    """
 
     category_id: int | None
     proposal_id: int | None

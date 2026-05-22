@@ -165,6 +165,20 @@ const dueLabel = computed(() => {
     minute: '2-digit',
   });
 });
+
+/** Render a single timestamp the way it's read on a card. */
+function partTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+const conversation = computed(() => ticket.value?.parts ?? []);
+const teamNotes = computed(() => ticket.value?.internal_notes ?? []);
 </script>
 
 <template>
@@ -186,6 +200,43 @@ const dueLabel = computed(() => {
           </div>
 
           <p class="summary">{{ ticket.summary }}</p>
+
+          <!-- Conversation history — customer-visible thread. -->
+          <section v-if="conversation.length" class="block">
+            <div class="mono label">Conversation ({{ conversation.length }})</div>
+            <ol class="thread">
+              <li
+                v-for="(p, i) in conversation"
+                :key="i"
+                class="msg"
+                :class="{ admin: p.is_admin }"
+              >
+                <div class="msg-head">
+                  <span class="msg-author">{{
+                    p.author.name ?? (p.is_admin ? 'Teammate' : 'Customer')
+                  }}</span>
+                  <span v-if="p.is_admin" class="mono msg-kind">Admin reply</span>
+                  <span class="mono dim">{{ partTime(p.created_at) }}</span>
+                </div>
+                <p class="msg-body">{{ p.body }}</p>
+              </li>
+            </ol>
+          </section>
+
+          <!-- Intercom team notes — internal-only side channel. -->
+          <section v-if="teamNotes.length" class="block">
+            <div class="mono label">Team notes from Intercom ({{ teamNotes.length }})</div>
+            <ol class="thread">
+              <li v-for="(n, i) in teamNotes" :key="i" class="msg team-note">
+                <div class="msg-head">
+                  <span class="msg-author">{{ n.author.name ?? 'Teammate' }}</span>
+                  <span class="mono msg-kind">Internal note</span>
+                  <span class="mono dim">{{ partTime(n.created_at) }}</span>
+                </div>
+                <p class="msg-body">{{ n.body }}</p>
+              </li>
+            </ol>
+          </section>
 
           <div class="row">
             <span class="customer">{{ ticket.author.name ?? '—' }}</span>
@@ -415,5 +466,48 @@ header {
 }
 .err {
   color: var(--accent);
+}
+.thread {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg {
+  padding: 8px 10px;
+  border-radius: var(--radius-card);
+  border: var(--hairline) solid var(--line);
+  background: var(--panel);
+}
+.msg.admin {
+  background: var(--chip-bg);
+  border-left: 2px solid oklch(0.7 0.13 145);
+}
+.msg.team-note {
+  border-left: 2px solid oklch(0.7 0.13 285);
+}
+.msg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.msg-author {
+  font-size: 11.5px;
+  color: var(--ink);
+  font-weight: 500;
+}
+.msg-kind {
+  color: var(--ink-3);
+}
+.msg-body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>

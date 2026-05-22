@@ -61,6 +61,10 @@ export interface ConversationPart {
   author: TicketAuthor;
   body: string;
   created_at: string;
+  /** True for an admin reply visible to the customer (Intercom renderable_type
+   *  24). Inbound customer messages → false. Internal team notes live in
+   *  `Ticket.internal_notes`, not here. */
+  is_admin: boolean;
 }
 
 export interface Followup {
@@ -88,6 +92,9 @@ export interface Ticket {
   author: TicketAuthor;
   url: string | null;
   parts: ConversationPart[];
+  /** Intercom team notes — internal-only side channel, distinct from `note`
+   *  (the operator's local next-step jot). Never fed to the AI prompt. */
+  internal_notes: ConversationPart[];
   category_id: number | null;
   proposal_id: number | null;
   summary: string;

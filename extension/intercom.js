@@ -19,15 +19,21 @@
 const INTERCOM_BASE = 'https://app.intercom.com';
 const APP_ID_STORAGE_KEY = 'intercomAppId';
 
-// Renderable types we know carry conversation text. Inclusive list — anything
-// else (assignment, attribute change, internal note metadata) is filtered out
-// implicitly because `blocksToPlainText` yields an empty string for it.
-//   1  — Messenger inbound (user)
-//   12 — Email inbound (user)
-//   24 — Admin reply (Messenger or email)
-//   25 — Admin internal note (skipped — type 17 in some workspaces)
-const MESSAGE_RENDERABLE_TYPES = new Set([1, 12, 24]);
+// Renderable types we know carry conversation text. Decoded via live
+// inspection — assignment/attribute/translation events fall through and are
+// filtered out implicitly because `blocksToPlainText` yields '' for them.
+//   1  — Messenger inbound (customer)            → parts[], is_admin=false
+//   12 — Email inbound (customer)                → parts[], is_admin=false
+//   24 — Admin reply visible to the customer     → parts[], is_admin=true
+//   2  — Admin internal team note (NOT outbound) → internal_notes[]
+//   71 — Bot / AI translation event              → skip
 const INBOUND_RENDERABLE_TYPES = new Set([1, 12]);
+const ADMIN_REPLY_RENDERABLE_TYPE = 24;
+const INTERNAL_NOTE_RENDERABLE_TYPE = 2;
+const MESSAGE_RENDERABLE_TYPES = new Set([
+  ...INBOUND_RENDERABLE_TYPES,
+  ADMIN_REPLY_RENDERABLE_TYPE,
+]);
 
 class IntercomSessionError extends Error {
   constructor(status, message) {
@@ -173,6 +179,18 @@ function authorFromSummary(summary) {
   };
 }
 
+/** Admin replies (renderable_type 24) carry the teammate in `entity`; internal
+ *  notes (type 2) carry them in `admin_summary`. Either way it's an admin. */
+function authorFromAdminBlob(blob) {
+  if (!blob || typeof blob !== 'object') return { id: null, name: null, email: null, type: 'admin' };
+  return {
+    id: blob.id != null ? String(blob.id) : null,
+    name: blob.name ?? null,
+    email: blob.email ?? null,
+    type: 'admin',
+  };
+}
+
 /**
  * Convert an Intercom detail payload into the backend's `HydratedTicket` shape:
  *   { id, title, state, priority, created_at, updated_at, author, url, parts[] }
@@ -189,19 +207,41 @@ export function normalizeConversation(detail, appId, summary) {
   const createdIso = toIso(detail.created_at, nowIso);
 
   const parts = [];
+  const internalNotes = [];
   for (const node of detail.renderable_parts ?? []) {
     const renderableType = node?.renderable_type;
-    if (!MESSAGE_RENDERABLE_TYPES.has(renderableType)) continue;
     const data = node.renderable_data ?? {};
-    const body = blocksToPlainText(data.blocks);
-    if (!body) continue;
-    parts.push({
-      author: INBOUND_RENDERABLE_TYPES.has(renderableType)
-        ? authorFromSummary(data.user_summary) || author
-        : normalizeAuthor(data.author),
-      body,
-      created_at: toIso(node.created_at, createdIso),
-    });
+    const createdAt = toIso(node.created_at, createdIso);
+
+    if (INBOUND_RENDERABLE_TYPES.has(renderableType)) {
+      const body = blocksToPlainText(data.blocks);
+      if (!body) continue;
+      parts.push({
+        author: authorFromSummary(data.user_summary) || author,
+        body,
+        created_at: createdAt,
+        is_admin: false,
+      });
+    } else if (renderableType === ADMIN_REPLY_RENDERABLE_TYPE) {
+      const body = blocksToPlainText(data.blocks);
+      if (!body) continue;
+      parts.push({
+        author: authorFromAdminBlob(data.entity || data.admin_summary || data.author),
+        body,
+        created_at: createdAt,
+        is_admin: true,
+      });
+    } else if (renderableType === INTERNAL_NOTE_RENDERABLE_TYPE) {
+      const body = blocksToPlainText(data.blocks);
+      if (!body) continue;
+      internalNotes.push({
+        author: authorFromAdminBlob(data.admin_summary || data.entity || data.author),
+        body,
+        created_at: createdAt,
+        is_admin: true,
+      });
+    }
+    // Anything else (assignment / attribute / translation events) is skipped.
   }
 
   const updatedRaw =
@@ -218,6 +258,7 @@ export function normalizeConversation(detail, appId, summary) {
     author,
     url: `https://app.intercom.com/a/inbox/${appId}/inbox/conversation/${id}`,
     parts,
+    internal_notes: internalNotes,
   };
 }
 
