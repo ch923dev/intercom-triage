@@ -31,11 +31,13 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy import inspect as sqla_inspect
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.environment import EnvironmentContext
+from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 
 # ── Base ──────────────────────────────────────────────────────────────────────
@@ -426,9 +428,31 @@ def _run_migrations_sync(connection: Any) -> None:
     We drive Alembic via `EnvironmentContext` + `MigrationContext` directly,
     bypassing `env.py` entirely, which is the correct approach for programmatic
     use with an existing connection.
+
+    Three cases handled:
+      - `alembic_version` exists  → normal `upgrade head` (idempotent).
+      - `alembic_version` missing but app tables exist (pre-Alembic DB created
+        by the old `create_all` + `_ensure_*_column` path)  → `stamp head`. The
+        schema is already current; we just need to mark the revision so future
+        migrations apply cleanly.
+      - Empty DB  → `upgrade head` from scratch.
     """
     cfg = _make_alembic_cfg()
     script = ScriptDirectory.from_config(cfg)
+    inspector = sqla_inspect(connection)
+    existing_tables = set(inspector.get_table_names())
+    has_version_table = "alembic_version" in existing_tables
+    # `categories` is a stable proxy for "the app's tables are here" — it's
+    # been part of the schema since the first release.
+    has_app_tables = "categories" in existing_tables
+
+    if has_app_tables and not has_version_table:
+        # Pre-Alembic DB. Stamp the head revision without running any scripts.
+        context = MigrationContext.configure(
+            connection=connection, opts={"target_metadata": Base.metadata}
+        )
+        context.stamp(script, "head")
+        return
 
     def do_upgrade(rev: Any, context: Any) -> Any:
         return script._upgrade_revs("head", rev)

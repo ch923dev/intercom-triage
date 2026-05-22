@@ -168,11 +168,52 @@ async def test_alembic_version_matches_head() -> None:
             rows = result.fetchall()
 
         assert len(rows) == 1, "Expected exactly one row in alembic_version"
-        assert rows[0][0] == head_revision, (
-            f"alembic_version={rows[0][0]!r} but expected head={head_revision!r}"
-        )
+        assert (
+            rows[0][0] == head_revision
+        ), f"alembic_version={rows[0][0]!r} but expected head={head_revision!r}"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_init_db_stamps_preexisting_schema() -> None:
+    """A DB created by the old pre-Alembic path has all the app tables but no
+    `alembic_version`. init_db must stamp the head revision instead of trying
+    to re-run migration 0001 (which would fail with 'table already exists')."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "preexisting.db"
+        url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+
+        # Pretend the legacy create_all path ran: build the schema directly
+        # from Base.metadata, no alembic_version table.
+        from app.models import Base
+
+        engine = make_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        finally:
+            await engine.dispose()
+
+        # Now init_db on the same file. Must NOT raise (the bug was an
+        # OperationalError: table already exists). Must stamp head.
+        engine = make_engine(url)
+        factory = make_session_factory(engine)
+        try:
+            await init_db(engine, factory)
+            alembic_cfg = AlembicConfig(str(_ALEMBIC_INI))
+            script = ScriptDirectory.from_config(alembic_cfg)
+            head_revision = script.get_current_head()
+
+            async with engine.connect() as conn:
+                result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+                row = result.fetchone()
+            assert row is not None and row[0] == head_revision
+        finally:
+            await engine.dispose()
 
 
 @pytest.mark.asyncio
