@@ -5,12 +5,12 @@
 // the backend or behind a localhost reverse proxy.
 
 import type {
-  AppSettings,
   CategoriesResponse,
   Category,
   FilterSettings,
   Followup,
   HealthResponse,
+  ProposalsResponse,
   Ticket,
   TicketNote,
 } from '@/types/api';
@@ -62,6 +62,23 @@ export const api = {
       method: 'POST',
     }),
 
+  // ── proposals ─────────────────────────────────────────────────────────────
+  listProposals: (): Promise<ProposalsResponse> => request('/proposals'),
+
+  approveProposal: (id: number, body: { color?: string | null; sort_order?: number | null } = {}) =>
+    request<Category>(`/proposals/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  mergeProposal: (id: number, categoryId: number) =>
+    request<{ ok: true; moved_count: number }>(`/proposals/${id}/merge-into/${categoryId}`, {
+      method: 'POST',
+    }),
+
+  rejectProposal: (id: number) =>
+    request<{ ok: true }>(`/proposals/${id}/reject`, { method: 'POST' }),
+
   // ── tickets ───────────────────────────────────────────────────────────────
   fetchTickets: (filter: FilterSettings): Promise<Ticket[]> =>
     request('/tickets/fetch', { method: 'POST', body: JSON.stringify(filter) }),
@@ -73,8 +90,10 @@ export const api = {
     }),
 
   // ── settings ──────────────────────────────────────────────────────────────
-  getSettings: (): Promise<AppSettings> => request('/settings'),
-  putSettings: (s: AppSettings): Promise<AppSettings> =>
+  // The backend `/settings` row carries only the filter shape (plan §4); UI
+  // tweaks (dark mode, accent, density) stay client-side until T049.
+  getSettings: (): Promise<FilterSettings> => request('/settings'),
+  putSettings: (s: FilterSettings): Promise<FilterSettings> =>
     request('/settings', { method: 'PUT', body: JSON.stringify(s) }),
 
   // ── followups (Phase 10 — T046) ───────────────────────────────────────────

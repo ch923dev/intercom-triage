@@ -23,9 +23,7 @@ const tweaks = useTweaksStore();
 const dense = computed(() => tweaks.density === 'compact');
 const rich = computed(() => tweaks.density === 'comfy');
 const showSummary = computed(() => tweaks.showSummary && !dense.value);
-const confColor = computed(() =>
-  props.ticket.ai_confidence < 0.5 ? '#c34a2b' : 'var(--ink-3)',
-);
+const confColor = computed(() => (props.ticket.ai_confidence < 0.5 ? '#c34a2b' : 'var(--ink-3)'));
 const updatedAgo = computed(() => formatAgoFromDate(props.ticket.updated_at));
 </script>
 
@@ -48,19 +46,10 @@ const updatedAgo = computed(() => formatAgoFromDate(props.ticket.updated_at));
 
     <div class="meta">
       <span class="customer">{{ props.ticket.author.name ?? '—' }}</span>
-      <Mono
-        v-if="props.ticket.parts.length > 1"
-        :color="'var(--ink-3)'"
-        :size="9.5"
-      >
+      <Mono v-if="props.ticket.parts.length > 1" :color="'var(--ink-3)'" :size="9.5">
         {{ props.ticket.parts.length }} msgs
       </Mono>
-      <Mono
-        v-if="tweaks.showConfidence"
-        :color="confColor"
-        :size="9.5"
-        class="conf"
-      >
+      <Mono v-if="tweaks.showConfidence" :color="confColor" :size="9.5" class="conf">
         {{ Math.round(props.ticket.ai_confidence * 100) }}%
       </Mono>
     </div>
@@ -75,7 +64,10 @@ const updatedAgo = computed(() => formatAgoFromDate(props.ticket.updated_at));
   border-radius: var(--radius-card);
   padding: 11px 12px 12px;
   cursor: grab;
-  transition: border-color 0.12s, background 0.12s, box-shadow 0.25s;
+  transition:
+    border-color 0.12s,
+    background 0.12s,
+    box-shadow 0.25s;
 }
 .card.dense {
   padding: 8px 10px;

@@ -1,12 +1,11 @@
-// Filter + behavior settings store. Per tasks.md T031.
-// Until T027 (backend GET/PUT /settings) lands, persists to localStorage with
-// the same shape so the API swap later is a one-line change in `load`/`save`.
+// Filter settings store. Per tasks.md T031 / T035.
+// Server-backed: reads `GET /settings`, writes `PUT /settings`. The backend
+// owns the singleton row, so reloading the page restores the same filter.
 
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
+import { api } from '@/api/client';
 import type { FilterSettings, LookbackUnit, TicketState } from '@/types/api';
-
-const STORAGE_KEY = 'triage-filter-v1';
 
 const DEFAULTS: FilterSettings = {
   lookback_unit: 'hours',
@@ -15,22 +14,10 @@ const DEFAULTS: FilterSettings = {
   include_category_ids: null,
 };
 
-function load(): FilterSettings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULTS;
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<FilterSettings>) };
-  } catch {
-    return DEFAULTS;
-  }
-}
-
-function save(s: FilterSettings) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-}
-
 export const useSettingsStore = defineStore('settings', () => {
-  const state = ref<FilterSettings>(load());
+  const state = ref<FilterSettings>({ ...DEFAULTS });
+  const loaded = ref(false);
+  const saving = ref(false);
 
   const filter = computed(() => state.value);
   const lookbackValue = computed(() => state.value.lookback_value);
@@ -38,28 +25,53 @@ export const useSettingsStore = defineStore('settings', () => {
   const states = computed(() => state.value.states);
   const includedCategoryIds = computed(() => state.value.include_category_ids);
 
-  function setLookback(value: number, unit: LookbackUnit) {
-    state.value = { ...state.value, lookback_value: value, lookback_unit: unit };
-    save(state.value);
+  /** Load the stored filter. Falls back to defaults if the backend is down. */
+  async function load() {
+    try {
+      state.value = await api.getSettings();
+    } catch {
+      state.value = { ...DEFAULTS };
+    } finally {
+      loaded.value = true;
+    }
   }
+
+  /** Persist a partial change and adopt the server's canonical response. */
+  async function update(patch: Partial<FilterSettings>) {
+    const next = { ...state.value, ...patch };
+    saving.value = true;
+    try {
+      state.value = await api.putSettings(next);
+    } finally {
+      saving.value = false;
+    }
+  }
+
+  function setLookback(value: number, unit: LookbackUnit) {
+    return update({ lookback_value: value, lookback_unit: unit });
+  }
+
   function toggleState(s: TicketState) {
     const set = new Set(state.value.states);
     if (set.has(s)) set.delete(s);
     else set.add(s);
-    state.value = { ...state.value, states: [...set] };
-    save(state.value);
+    return update({ states: [...set] });
   }
+
   function setIncludedCategoryIds(ids: number[] | null) {
-    state.value = { ...state.value, include_category_ids: ids };
-    save(state.value);
+    return update({ include_category_ids: ids });
   }
 
   return {
     filter,
+    loaded,
+    saving,
     lookbackValue,
     lookbackUnit,
     states,
     includedCategoryIds,
+    load,
+    update,
     setLookback,
     toggleState,
     setIncludedCategoryIds,

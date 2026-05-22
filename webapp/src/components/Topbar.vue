@@ -1,17 +1,28 @@
-<!-- Top bar — wordmark + ticket count + tweaks toggles.
-     Recency slider + filter drawer land in T035; for the scaffold we just
-     surface the four tweaks affecting the current card rendering. -->
+<!-- Top bar — wordmark, page nav, refresh, display tweaks, settings.
+     Reference: tasks.md T036 (refresh + last-refreshed), T035 (settings entry). -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import Mono from './Mono.vue';
+import { useCategoriesStore } from '@/stores/categories';
+import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 import { useTweaksStore } from '@/stores/tweaks';
+import { useViewStore } from '@/stores/view';
+import type { View } from '@/stores/view';
 import type { Density } from '@/types/api';
 
 const tickets = useTicketsStore();
 const tweaks = useTweaksStore();
+const settings = useSettingsStore();
+const categories = useCategoriesStore();
+const view = useViewStore();
 
 const densities: Density[] = ['compact', 'balanced', 'comfy'];
+const NAV: { id: View; label: string }[] = [
+  { id: 'board', label: 'Board' },
+  { id: 'categories', label: 'Categories' },
+  { id: 'proposals', label: 'Proposals' },
+];
 
 const lastSync = computed(() => {
   const t = tickets.lastRefresh;
@@ -21,6 +32,12 @@ const lastSync = computed(() => {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   return `${Math.floor(s / 3600)}h ago`;
 });
+
+const proposalCount = computed(() => categories.pendingProposals.length);
+
+function refresh() {
+  void tickets.refresh(settings.filter);
+}
 
 function toggleDark() {
   tweaks.setDarkMode(!tweaks.darkMode);
@@ -35,15 +52,38 @@ function toggleDark() {
       <Mono :size="10">v0.1</Mono>
     </div>
 
+    <!-- Page nav -->
+    <nav class="seg">
+      <button
+        v-for="n in NAV"
+        :key="n.id"
+        :class="{ active: view.view === n.id }"
+        @click="view.go(n.id)"
+      >
+        <span class="mono">{{ n.label }}</span>
+        <span v-if="n.id === 'proposals' && proposalCount" class="nav-badge">{{
+          proposalCount
+        }}</span>
+      </button>
+    </nav>
+
     <div class="sep" />
 
     <Mono>{{ tickets.tickets.length }} tickets</Mono>
 
     <div v-if="tickets.isMock" class="badge mock">
-      <Mono :color="'var(--accent)'">Mock data — backend /tickets/fetch pending T025</Mono>
+      <Mono :color="'var(--accent)'">Sample data — /tickets/fetch unavailable</Mono>
     </div>
 
     <div class="spacer" />
+
+    <!-- Refresh (T036) -->
+    <button class="ghost" :disabled="tickets.loading" @click="refresh">
+      <span class="mono">{{ tickets.loading ? 'Refreshing…' : 'Refresh' }}</span>
+    </button>
+    <Mono>{{ lastSync }}</Mono>
+
+    <div class="sep" />
 
     <!-- Density picker -->
     <div class="seg">
@@ -57,23 +97,29 @@ function toggleDark() {
       </button>
     </div>
 
-    <!-- Toggles -->
-    <button class="ghost" :class="{ active: tweaks.showSummary }" @click="tweaks.setShowSummary(!tweaks.showSummary)">
+    <button
+      class="ghost"
+      :class="{ active: tweaks.showSummary }"
+      @click="tweaks.setShowSummary(!tweaks.showSummary)"
+    >
       <span class="mono">Summary</span>
     </button>
-    <button class="ghost" :class="{ active: tweaks.showConfidence }" @click="tweaks.setShowConfidence(!tweaks.showConfidence)">
+    <button
+      class="ghost"
+      :class="{ active: tweaks.showConfidence }"
+      @click="tweaks.setShowConfidence(!tweaks.showConfidence)"
+    >
       <span class="mono">Conf</span>
     </button>
 
-    <!-- Accent picker -->
     <div class="swatches">
       <button
         v-for="c in tweaks.ACCENT_SWATCHES"
         :key="c"
         :class="{ active: tweaks.accent === c }"
         :style="{ background: c }"
-        @click="tweaks.setAccent(c)"
         :title="`Accent ${c}`"
+        @click="tweaks.setAccent(c)"
       />
     </div>
 
@@ -81,7 +127,10 @@ function toggleDark() {
       <span class="mono">{{ tweaks.darkMode ? 'Light' : 'Dark' }}</span>
     </button>
 
-    <Mono>· last sync {{ lastSync }}</Mono>
+    <!-- Settings drawer (T035) -->
+    <button class="ghost" title="Filter settings" @click="view.openDrawer()">
+      <span class="mono">Settings</span>
+    </button>
   </header>
 </template>
 
@@ -134,7 +183,10 @@ function toggleDark() {
   overflow: hidden;
 }
 .seg button {
-  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
   border: 0;
   background: transparent;
   color: var(--ink-3);
@@ -144,6 +196,15 @@ function toggleDark() {
   background: var(--ink);
   color: var(--bg);
 }
+.nav-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: #fff;
+  line-height: 14px;
+}
 .ghost {
   padding: 4px 10px;
   border: var(--hairline) solid var(--line);
@@ -151,6 +212,10 @@ function toggleDark() {
   background: transparent;
   color: var(--ink);
   cursor: pointer;
+}
+.ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .ghost.active {
   background: var(--ink);

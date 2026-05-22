@@ -8,10 +8,7 @@ const props = withDefaults(defineProps<Props>(), { size: 10.5 });
 </script>
 
 <template>
-  <span
-    class="mono"
-    :style="{ color: props.color ?? 'var(--ink-3)', fontSize: `${props.size}px` }"
-  >
+  <span class="mono" :style="{ color: props.color ?? 'var(--ink-3)', fontSize: `${props.size}px` }">
     <slot />
   </span>
 </template>

@@ -42,6 +42,10 @@ export interface CategoriesResponse {
   pending_proposals: CategoryProposal[];
 }
 
+export interface ProposalsResponse {
+  proposals: CategoryProposal[];
+}
+
 // ── Tickets (Phase 5 — wire when T025 lands) ─────────────────────────────────
 
 export type TicketState = 'open' | 'snoozed' | 'closed';
@@ -103,13 +107,4 @@ export interface FilterSettings {
   lookback_value: number; // 1..720
   states: TicketState[];
   include_category_ids: number[] | null;
-}
-
-export interface AppSettings extends FilterSettings {
-  mute_alarms: boolean;
-  dark_mode?: boolean;
-  accent?: string;
-  density?: Density;
-  show_summary?: boolean;
-  show_confidence?: boolean;
 }
