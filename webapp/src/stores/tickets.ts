@@ -55,6 +55,13 @@ export const useTicketsStore = defineStore('tickets', () => {
     return map;
   });
 
+  /** Every visible ticket keyed by id — for O(1) lookup by id. */
+  const byId = computed(() => {
+    const map = new Map<string, Ticket>();
+    for (const t of state.value.tickets) map.set(t.id, t);
+    return map;
+  });
+
   /** Reload the stored board. Filter settings are applied server-side. */
   async function refresh() {
     state.value.loading = true;
@@ -132,6 +139,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     lastRefresh,
     byCategory,
     byProposal,
+    byId,
     refresh,
     applyOverride,
     editTicket,

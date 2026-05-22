@@ -9,6 +9,7 @@ import AlarmBanners from '@/components/AlarmBanners.vue';
 import Board from '@/components/Board.vue';
 import CategoriesPage from '@/components/CategoriesPage.vue';
 import ExtensionCallout from '@/components/ExtensionCallout.vue';
+import FollowupBoard from '@/components/FollowupBoard.vue';
 import ProposalsPage from '@/components/ProposalsPage.vue';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
 import TicketFlyout from '@/components/TicketFlyout.vue';
@@ -19,6 +20,8 @@ import { useNotesStore } from '@/stores/notes';
 import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
+import { useTweaksStore } from '@/stores/tweaks';
+import { notify, permission } from '@/utils/notify';
 
 const categories = useCategoriesStore();
 const settings = useSettingsStore();
@@ -26,6 +29,7 @@ const tickets = useTicketsStore();
 const followups = useFollowupsStore();
 const notes = useNotesStore();
 const view = useViewStore();
+const tweaks = useTweaksStore();
 
 const COLUMN_STEP = 296; // column width (280) + gutter
 
@@ -78,6 +82,16 @@ function alarmTick() {
   const fired = followups.tick();
   // FR-021 — the banner always shows; the mute flag suppresses only the audio.
   if (fired.length > 0 && !settings.muteAlarms) playPing();
+  // Desktop notifications — gated independently of mute_alarms by the
+  // per-browser tweaks preference. No-op unless permission was granted.
+  if (fired.length > 0 && tweaks.desktopNotifications && permission() === 'granted') {
+    for (const id of fired) {
+      const f = followups.get(id);
+      notify(`Follow-up due — ${id}`, f?.reason ?? 'No reason given', id, () =>
+        view.selectTicket(id),
+      );
+    }
+  }
 }
 
 /** Global shortcuts (T036): `r` refreshes, ←/→ scroll the board columns. */
@@ -132,6 +146,7 @@ onBeforeUnmount(() => {
         <ExtensionCallout v-if="tickets.isEmpty" mode="empty" />
         <Board v-else />
       </template>
+      <FollowupBoard v-else-if="view.view === 'followups'" />
       <CategoriesPage v-else-if="view.view === 'categories'" />
       <ProposalsPage v-else />
     </template>
