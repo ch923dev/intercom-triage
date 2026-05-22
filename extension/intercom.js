@@ -210,7 +210,9 @@ export function normalizeConversation(detail, appId, summary) {
     id,
     title: detail.title ?? null,
     state: detail.state ?? null,
-    priority: detail.priority ?? null,
+    // Intercom returns a boolean here (`false` = not priority); the backend
+    // schema expects `string | null`, so coerce.
+    priority: typeof detail.priority === 'string' ? detail.priority : detail.priority ? 'priority' : null,
     created_at: createdIso,
     updated_at: toIso(updatedRaw, createdIso),
     author,
