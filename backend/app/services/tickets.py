@@ -8,7 +8,7 @@ search → hydrate → cache-split → AI on misses → write cache → apply ov
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -366,6 +366,22 @@ async def edit_ticket(
             row.summary = ""  # explicit clear; AI fills on next sync
     await session.commit()
     metrics.incr("tickets_edited_total")
+
+
+async def get_sync_state(session: AsyncSession) -> dict[str, datetime]:
+    """Return `{ticket_id: updated_at}` for every stored ticket.
+
+    The Chrome extension calls this before a sync: it lists Intercom
+    conversations (cheap) and only fetches the full conversation detail
+    (expensive) for ids whose Intercom `last_updated` is newer than the value
+    here. Tickets already stored with an unchanged conversation are skipped
+    entirely — no Intercom detail call, no re-categorization.
+
+    Timestamps are stored naive-UTC; tag them as UTC so the JSON carries an
+    explicit offset and the extension's `Date.parse` agrees on the epoch.
+    """
+    rows = (await session.execute(select(Ticket.id, Ticket.updated_at))).all()
+    return {row.id: row.updated_at.replace(tzinfo=UTC) for row in rows}
 
 
 async def get_tickets(session: AsyncSession) -> list[TicketSchema]:

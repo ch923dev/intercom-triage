@@ -15,6 +15,7 @@ import {
   fetchFollowups,
   fetchSettings,
   getStoredTickets,
+  getSyncState,
   ingestTickets,
   markFollowupFired,
   overrideCategory,
@@ -416,9 +417,12 @@ async function sync() {
   try {
     const settings = await fetchSettings();
     const states = settings.states?.length ? settings.states : ['open'];
+    // Already-stored tickets with an unchanged conversation are skipped — the
+    // detail fetch + AI call only run for new / replied-to conversations.
+    const knownState = await getSyncState().catch(() => ({}));
     const batches = await Promise.all(
       states.map((state) =>
-        fetchHydratedBatch({ appId, state, count: 60, concurrency: 4 }).catch((e) => {
+        fetchHydratedBatch({ appId, state, count: 60, concurrency: 4, knownState }).catch((e) => {
           if (e instanceof IntercomSessionError) throw e;
           return [];
         }),
@@ -426,11 +430,11 @@ async function sync() {
     );
     const hydrated = batches.flat();
     if (hydrated.length === 0) {
-      setSyncStatus('No conversations matched the current filter');
+      setSyncStatus('Up to date — no new or changed conversations');
     } else {
       setSyncStatus(`Categorizing ${hydrated.length}…`);
       const result = await ingestTickets(hydrated);
-      setSyncStatus(`Synced ${result.received} (AI: ${result.categorized})`);
+      setSyncStatus(`Synced ${result.received} changed (AI: ${result.categorized})`);
     }
     await load();
   } catch (e) {

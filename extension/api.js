@@ -44,6 +44,10 @@ export const fetchTickets = (filter) =>
 /** The stored board — ingested + categorized by the extension. */
 export const getStoredTickets = () => request('/tickets');
 
+/** `{ticket_id: updated_at}` for every stored ticket. The sync flow uses this
+ *  to skip Intercom detail fetches for conversations already stored unchanged. */
+export const getSyncState = () => request('/tickets/sync-state');
+
 /** Push a batch of HydratedTicket records the extension fetched from Intercom. */
 export const ingestTickets = (hydrated) =>
   request('/tickets/ingest', { method: 'POST', body: JSON.stringify(hydrated) });

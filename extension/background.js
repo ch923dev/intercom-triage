@@ -10,7 +10,13 @@
 //      onto the action badge.
 // Interval "Off" clears the alarm and the badge — no background calls.
 
-import { fetchCategories, fetchSettings, getStoredTickets, ingestTickets } from './api.js';
+import {
+  fetchCategories,
+  fetchSettings,
+  getStoredTickets,
+  getSyncState,
+  ingestTickets,
+} from './api.js';
 import { fetchHydratedBatch, getAppId, IntercomSessionError } from './intercom.js';
 
 const ALARM = 'triage-poll';
@@ -21,9 +27,11 @@ async function ingestFromIntercom(settings) {
   const appId = await getAppId();
   if (!appId) return; // operator hasn't set the workspace yet
   const states = settings.states?.length ? settings.states : ['open'];
+  // Skip Intercom detail fetches for conversations already stored unchanged.
+  const knownState = await getSyncState().catch(() => ({}));
   const batches = await Promise.all(
     states.map((state) =>
-      fetchHydratedBatch({ appId, state, count: 60, concurrency: 4 }).catch((e) => {
+      fetchHydratedBatch({ appId, state, count: 60, concurrency: 4, knownState }).catch((e) => {
         // Session expired / not signed in is the only failure worth surfacing;
         // any other error just leaves the stored board unchanged for this tick.
         if (e instanceof IntercomSessionError && (e.status === 401 || e.status === 403)) {

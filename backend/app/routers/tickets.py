@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +32,13 @@ async def list_tickets(session: AsyncSession = Depends(get_session)) -> list[Tic
     """Serve the stored board — extension-ingested tickets, no live Intercom
     call. Honors the saved filter settings."""
     return await svc.get_tickets(session)
+
+
+@router.get("/sync-state", response_model=dict[str, datetime])
+async def sync_state(session: AsyncSession = Depends(get_session)) -> dict[str, datetime]:
+    """`{ticket_id: updated_at}` for every stored ticket — lets the extension
+    skip Intercom detail fetches for conversations it already has unchanged."""
+    return await svc.get_sync_state(session)
 
 
 @router.post("/ingest", response_model=IngestResponse)

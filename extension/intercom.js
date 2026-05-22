@@ -105,6 +105,16 @@ export async function getConversation(appId, id) {
   return requestJson(`/ember/inbox/conversations/${encodeURIComponent(id)}`, { app_id: appId });
 }
 
+/** Epoch-ms of a list summary's last activity. Intercom uses a few different
+ *  field names depending on the endpoint version; accept any of them. Returns
+ *  `null` when none is present. */
+function summaryUpdatedMs(summary) {
+  const raw = summary?.last_updated ?? summary?.updated_at ?? summary?.sorting_updated_at;
+  if (raw === null || raw === undefined || raw === '') return null;
+  const iso = toIso(raw, null);
+  return iso ? Date.parse(iso) : null;
+}
+
 // ── Normalizer ──────────────────────────────────────────────────────────────
 //
 // Intercom's `renderable_data.blocks` is an array of typed nodes: paragraphs,
@@ -265,11 +275,25 @@ export function normalizeConversation(detail, appId, summary) {
 /**
  * Fetch a page of conversations + their detail records, normalized for the
  * backend ingest endpoint. Concurrency-limited so we don't hammer Intercom.
+ *
+ * `knownState` is the backend's `{ticket_id: updated_at}` map (from
+ * `GET /tickets/sync-state`). A conversation already stored with a `last_updated`
+ * no newer than the stored value is skipped entirely — no detail fetch, no
+ * re-categorization. New + changed conversations still go through.
+ *
+ * Returns only the conversations that were fetched (the changed ones). The
+ * skipped tickets keep their existing stored row untouched.
  */
-export async function fetchHydratedBatch({ appId, state = 'open', count = 40, concurrency = 4 }) {
+export async function fetchHydratedBatch({
+  appId,
+  state = 'open',
+  count = 40,
+  concurrency = 4,
+  knownState = {},
+}) {
   const summaries = await listConversations({ appId, state, count });
 
-  const out = new Array(summaries.length);
+  const out = new Array(summaries.length).fill(null);
   let cursor = 0;
 
   async function worker() {
@@ -277,13 +301,23 @@ export async function fetchHydratedBatch({ appId, state = 'open', count = 40, co
       const i = cursor++;
       if (i >= summaries.length) return;
       const summary = summaries[i];
+      // Skip a conversation we already have stored unchanged. The list call is
+      // cheap; this avoids the per-conversation detail fetch + an AI call.
+      const knownIso = knownState[String(summary.id)];
+      if (knownIso) {
+        const updMs = summaryUpdatedMs(summary);
+        const knownMs = Date.parse(knownIso);
+        if (updMs !== null && Number.isFinite(knownMs) && updMs <= knownMs) {
+          continue; // leaves out[i] === null
+        }
+      }
       const detail = await getConversation(appId, summary.id);
       out[i] = normalizeConversation(detail, appId, summary);
     }
   }
 
   await Promise.all(Array.from({ length: Math.min(concurrency, summaries.length) }, worker));
-  return out;
+  return out.filter((t) => t !== null);
 }
 
 export { IntercomSessionError };
