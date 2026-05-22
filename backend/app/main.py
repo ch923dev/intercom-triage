@@ -23,6 +23,7 @@ from app.models import init_db
 from app.observability import configure_logging, log_event
 from app.routers import categories as categories_router
 from app.routers import health as health_router
+from app.routers import metrics as metrics_router
 from app.routers import proposals as proposals_router
 from app.routers import settings as settings_router
 from app.routers import tickets as tickets_router
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(proposals_router.router)
     app.include_router(tickets_router.router)
     app.include_router(settings_router.router)
+    app.include_router(metrics_router.router)
 
     return app
 

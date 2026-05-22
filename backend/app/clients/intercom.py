@@ -99,8 +99,7 @@ class IntercomClient:
         if not self.workspace_id:
             return None
         return (
-            f"https://app.intercom.com/a/apps/{self.workspace_id}"
-            f"/conversations/{conversation_id}"
+            f"https://app.intercom.com/a/apps/{self.workspace_id}/conversations/{conversation_id}"
         )
 
     # ── T009 — search ─────────────────────────────────────────────────────────

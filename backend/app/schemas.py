@@ -160,3 +160,13 @@ class FilterSettings(BaseModel):
     lookback_value: int = Field(default=24, ge=1, le=720)
     states: list[TicketState] = Field(default_factory=_default_states)
     include_category_ids: list[int] | None = None
+
+
+# ── Metrics ───────────────────────────────────────────────────────────────────
+
+
+class MetricsResponse(BaseModel):
+    """Process-lifetime counters (plan §11). Keys with a `.` carry a label,
+    e.g. `ai_calls_total.ok`, `proposals_resolved_total.rejected`."""
+
+    counters: dict[str, int]
