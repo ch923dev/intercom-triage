@@ -1,0 +1,129 @@
+/* Design tokens — plan.md §8b. Lifted from `Intercom Triage.html`.
+ *
+ * Color tokens are exposed as CSS variables on :root so the entire tree picks
+ * up dark mode + accent changes by toggling `data-theme` / writing
+ * `--accent` on `<html>`.
+ */
+
+:root {
+  /* Type */
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Light palette (default) */
+  --bg: #faf9f6;
+  --panel: #ffffff;
+  --ink: #111111;
+  --ink-2: #555555;
+  --ink-3: #8a8a82;
+  --line: #e6e3db;
+  --line-soft: #efece4;
+  --chip-bg: #f3efe6;
+  --hover: #f5f2ea;
+  --shadow: 0 12px 32px rgba(40, 30, 20, 0.1);
+
+  /* Accent — operator-selectable */
+  --accent: #ff4d2e;
+  --accent-soft: rgba(255, 77, 46, 0.08);
+  --accent-soft-2: rgba(255, 77, 46, 0.12);
+
+  /* Sizing */
+  --hairline: 0.5px;
+  --radius-card: 4px;
+  --radius-chip: 3px;
+  --radius-pill: 999px;
+}
+
+html[data-theme='dark'] {
+  --bg: #0e0f0e;
+  --panel: #15161a;
+  --ink: #f5f4ef;
+  --ink-2: #a3a39d;
+  --ink-3: #6a6a64;
+  --line: #26282d;
+  --line-soft: #1e2025;
+  --chip-bg: #1c1d22;
+  --hover: #1a1b20;
+  --shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  --accent-soft: rgba(255, 77, 46, 0.06);
+  --accent-soft-2: rgba(255, 77, 46, 0.14);
+}
+
+/* Animations — plan §8b */
+@keyframes triagePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes triageRing {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 77, 46, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 14px rgba(255, 77, 46, 0);
+  }
+}
+@keyframes triageSlide {
+  from {
+    transform: translateX(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Reset + global */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+/* Mono micro-label utility */
+.mono {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Hairline border utility */
+.hairline {
+  border: var(--hairline) solid var(--line);
+}
+
+/* Scrollbar — keep it discreet */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

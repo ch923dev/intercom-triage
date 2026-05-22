@@ -221,54 +221,58 @@ class RejectedProposalSignature(Base):
 
 
 # ── Seed data ─────────────────────────────────────────────────────────────────
+#
+# Swatches use oklch to match the design palette (plan.md §8b).
+# Browsers Chrome 111+, Firefox 113+, Safari 15.4+ render oklch in CSS;
+# values are stored as opaque strings and surfaced as-is in the client.
 
 DEFAULT_CATEGORIES: list[dict[str, Any]] = [
     {
         "name": "Urgent",
         "description": "Outage, data loss, security incident, blocking issue, or angry customer threatening churn.",
-        "color": "#ef4444",
+        "color": "oklch(0.62 0.20 25)",
         "sort_order": 0,
         "is_fallback": False,
     },
     {
         "name": "Bug",
         "description": "Something is broken or behaving unexpectedly (and is not urgent).",
-        "color": "#f59e0b",
+        "color": "oklch(0.56 0.18 285)",
         "sort_order": 1,
         "is_fallback": False,
     },
     {
         "name": "Feature Request",
         "description": "Customer is asking for capability that doesn't exist.",
-        "color": "#8b5cf6",
+        "color": "oklch(0.66 0.13 205)",
         "sort_order": 2,
         "is_fallback": False,
     },
     {
         "name": "Question",
         "description": "How-to, clarification, or a docs gap.",
-        "color": "#3b82f6",
+        "color": "oklch(0.72 0.13 92)",
         "sort_order": 3,
         "is_fallback": False,
     },
     {
         "name": "Billing",
         "description": "Invoices, charges, plan changes, refunds, payment failures.",
-        "color": "#10b981",
+        "color": "oklch(0.62 0.13 148)",
         "sort_order": 4,
         "is_fallback": False,
     },
     {
         "name": "Complaint",
         "description": "Dissatisfaction without a specific bug (UX, support quality, pricing).",
-        "color": "#ec4899",
+        "color": "oklch(0.66 0.16 50)",
         "sort_order": 5,
         "is_fallback": False,
     },
     {
         "name": "Other",
         "description": "Anything that genuinely doesn't fit the categories above.",
-        "color": "#6b7280",
+        "color": "oklch(0.65 0.00 0)",
         "sort_order": 6,
         "is_fallback": True,
     },

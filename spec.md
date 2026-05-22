@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 1.2 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 1.3 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v1.2:** added the **follow-up / alarm / notes** capability surfaced by the design (`Intercom Triage.html`). US-012 lets the operator pin a follow-up reminder on a ticket; US-013 fires a visible + audible alarm when the reminder comes due; US-014 lets the operator capture how-to-proceed notes per ticket. Surfaces a status pill in both the webapp and the popup. No removals.
 
 **Changes from v1.1:** multi-tenant scope removed. The system is a single-user local tool: one Intercom workspace, one taxonomy, one operator. Authentication, tenant isolation, and managed identity are out. The dynamic-category proposal flow is kept — it's useful even for one user. Persona collapses to a single operator role.
 
@@ -119,6 +121,40 @@ Acceptance:
 - Merging moves all tickets from the source category to the target and archives the source.
 - The fallback category cannot be archived.
 
+### US-012 — Per-ticket follow-up reminders
+I can pin a follow-up reminder on a ticket with a relative duration, and see a live countdown on the card.
+
+Acceptance:
+- I can set a reminder using a preset (`15m`, `1h`, `4h`, `EOD`, `24h`) or a custom duration in minutes.
+- A follow-up records an optional short reason string (≤ 80 chars).
+- I can clear a follow-up at any time.
+- A ticket has at most one active follow-up at any time; setting a new one overwrites the old.
+- The follow-up survives reloads of both surfaces until cleared or its ticket's `updated_at` advances past `dueAt` AND the reminder has fired.
+- The card displays a follow-up chip: `F/U in 15m` while pending, `Follow up · due now` once due.
+- Due tickets pin to the top of their column.
+
+### US-013 — Audible + visible alarm when a follow-up comes due
+When a follow-up reaches its due time, the surface raises an alarm I can act on without leaving the board.
+
+Acceptance:
+- An alarm banner appears top-right of the webapp board and at the top of the popup.
+- A short audio cue plays once per newly-firing alarm.
+- I can mute the audio cue from a single control in the top bar; the muted state persists across reloads.
+- Each alarm banner exposes actions: open the ticket flyout, snooze 15 m, snooze 1 h, dismiss.
+- Snoozing reschedules the follow-up by the chosen interval.
+- Dismissing hides the banner but leaves the follow-up record in place (the card still shows `due now`).
+- The top-bar status pill shows the count of pending follow-ups, and flips to an accent-pulse state when at least one alarm is firing.
+
+### US-014 — Per-ticket next-step notes
+I can capture how-to-proceed notes on a ticket and append common actions in one click.
+
+Acceptance:
+- The flyout exposes a freeform notes textarea per ticket.
+- A row of one-click chips appends preset actions (`Page @on-call`, `Reply with workaround`, `Escalate to AE`, `Ask for repro / logs`, `Wait for customer`, `Route to Eng triage`, `Refund / credit`) as bullets into the textarea.
+- Notes persist across reloads and across both surfaces.
+- The card displays a `Notes (N)` chip where N is the number of non-empty bullet lines.
+- Clearing the textarea removes the notes record server-side.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -141,6 +177,12 @@ Acceptance:
 | FR-016 | I can approve, merge, or reject proposals; resolution reassigns affected tickets accordingly. | US-010 |
 | FR-017 | I can create, rename, recolor, reorder, archive, and merge active categories. | US-011 |
 | FR-018 | The system seeds a default taxonomy on first run: Urgent, Bug, Feature Request, Question, Billing, Complaint, Other. "Other" is the non-archivable fallback. | US-002, US-011 |
+| FR-019 | Each ticket may carry at most one active follow-up record with `due_at`, optional `reason`, and a `fired` flag. | US-012 |
+| FR-020 | A surface evaluates follow-up due-ness on a once-per-second tick; a follow-up is "due" when `due_at ≤ now`. | US-013 |
+| FR-021 | A surface plays an audio cue and shows an alarm banner exactly once when a follow-up transitions from pending to due. The mute toggle suppresses the audio cue but not the banner. | US-013 |
+| FR-022 | Snoozing an alarm sets `due_at = now + snooze_minutes` and clears `fired`. Dismissing the alarm does not reschedule the follow-up. | US-013 |
+| FR-023 | Each ticket may carry one notes record with a free-text body. Empty body deletes the record. | US-014 |
+| FR-024 | Settings include a `mute_alarms` boolean; both surfaces read and write through the existing settings endpoint. | US-013 |
 
 ## 6. Non-functional requirements
 

@@ -1,8 +1,10 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 1.2 · **Implements:** `spec.md` v1.2 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 1.3 · **Implements:** `spec.md` v1.3 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
+
+**Changes from v1.2:** added two persistence tables (`followups`, `ticket_notes`), the matching endpoints, the front-end alarm loop spec, and the design-system tokens lifted from `Intercom Triage.html`. Category seed colors converted to **oklch** to match the design palette.
 
 **Changes from v1.1:** all cloud and auth infrastructure removed. SQLite replaces Cloud SQL Postgres. KMS removed (Intercom token in `.env`). Identity Platform / OAuth removed (no users, no JWT verification). Alembic dropped in favor of SQLAlchemy `create_all` on startup. Backend is a single-process FastAPI on `localhost`.
 
@@ -92,6 +94,28 @@ FilterSettings {
 }
 
 CategoryUpdate { category_id: int }        # PATCH override body
+
+Followup {                                 # server ↔ client (US-012, US-013)
+  ticket_id: string
+  due_at:    ISO8601
+  reason:    string | null                 # ≤ 80 chars
+  fired:     boolean                       # set true once the alarm has rung
+  created_at: ISO8601
+  updated_at: ISO8601
+}
+
+FollowupSet {                              # PUT body
+  due_at: ISO8601                          # absolute; client computes from preset minutes
+  reason: string | null
+}
+
+TicketNote {                               # server ↔ client (US-014)
+  ticket_id: string
+  body:      string
+  updated_at: ISO8601
+}
+
+TicketNoteSet { body: string }             # PUT body; empty string deletes the row
 ```
 
 ## 4. API contract
@@ -112,8 +136,15 @@ No auth header. Backend listens on `127.0.0.1` only.
 | POST | `/proposals/{id}/reject` | — | `{ok}` | FR-016 |
 | POST | `/tickets/fetch` | `FilterSettings` | `Ticket[]`, sorted | FR-001, FR-004, FR-005, FR-006, FR-008, FR-011, FR-013 |
 | PATCH | `/tickets/{id}/category` | `CategoryUpdate` | `{ok, category_id}` | FR-009 |
-| GET | `/settings` | — | stored `FilterSettings` | FR-012 |
-| PUT | `/settings` | `FilterSettings` | stored `FilterSettings` | FR-012 |
+| GET | `/settings` | — | stored `FilterSettings` + `mute_alarms` | FR-012, FR-024 |
+| PUT | `/settings` | `FilterSettings` + `mute_alarms` | stored settings | FR-012, FR-024 |
+| GET | `/followups` | — | all active follow-ups (one row per ticket) | FR-019 |
+| PUT | `/followups/{ticket_id}` | `FollowupSet` | stored `Followup` | FR-019, FR-022 |
+| POST | `/followups/{ticket_id}/snooze` | `{minutes:int}` | stored `Followup` | FR-022 |
+| POST | `/followups/{ticket_id}/mark-fired` | — | `{ok}` | FR-021 |
+| DELETE | `/followups/{ticket_id}` | — | `{ok}` | US-012 |
+| GET | `/notes` | — | all non-empty `TicketNote[]` | FR-023 |
+| PUT | `/notes/{ticket_id}` | `TicketNoteSet` | stored `TicketNote` or `{ok, deleted:true}` | FR-023 |
 
 Error contract: `502` on upstream Intercom failure, `422` on schema violation, `404` on unknown id, `409` on archive of fallback or other invalid state transition.
 
@@ -174,9 +205,28 @@ rejected_proposal_signatures
   signature      text pk
   rejected_name  text not null
   rejected_at    datetime default now
+
+followups
+  ticket_id   text pk
+  due_at      datetime not null
+  reason      text                          -- ≤ 80 chars; CHECK length(reason) <= 80
+  fired       boolean default false
+  created_at  datetime default now
+  updated_at  datetime default now
+
+ticket_notes
+  ticket_id   text pk
+  body        text not null                 -- non-empty; empty body deletes the row
+  updated_at  datetime default now
 ```
 
-Behavioral notes. `ai_cache` enforces "exactly one of `category_id`, `proposal_id`" via a check constraint — this matches the AI output resolver (§7). Foreign keys cascade so that when a category or proposal is hard-deleted, dependent cache rows go with it. `overrides` cascades from category too. The `settings` table is a singleton via `CHECK (id = 1)`; the app inserts the row at first startup. Partial unique indexes prevent two active categories or two pending proposals from sharing a name, while letting archived/resolved rows reuse names.
+Settings additions for FR-024:
+
+```text
+settings.mute_alarms  boolean default false       -- column added to the existing singleton
+```
+
+Behavioral notes. `ai_cache` enforces "exactly one of `category_id`, `proposal_id`" via a check constraint — this matches the AI output resolver (§7). Foreign keys cascade so that when a category or proposal is hard-deleted, dependent cache rows go with it. `overrides` cascades from category too. The `settings` table is a singleton via `CHECK (id = 1)`; the app inserts the row at first startup. Partial unique indexes prevent two active categories or two pending proposals from sharing a name, while letting archived/resolved rows reuse names. `followups` and `ticket_notes` are keyed by `ticket_id` only — no FK because the ticket id is owned by Intercom, not this DB; rows are deleted when the operator clears the follow-up or empties the notes; `/tickets/fetch` joins both in by ticket id when composing the response.
 
 ## 6. Intercom integration
 
@@ -216,6 +266,91 @@ The AI returns one of three assignment shapes (see prompt builder for the strict
 - **Reject:** mark proposal rejected with `resolved_category_id=<fallback>`. Repoint cache rows to fallback. Insert normalized signature into `rejected_proposal_signatures` so the AI doesn't re-propose the same name.
 
 **Active-category mutations.** Rename/recolor/reorder are in-place; ids stable. Archive sets `is_active=false, archived_at=now()` and runs an inline sweep that repoints `ai_cache.category_id` and `overrides.category_id` from the archived category to the fallback. Merging A → B updates all `ai_cache` and `overrides` rows from A to B and archives A. All multi-row updates run in a single transaction.
+
+## 8a. Follow-ups, alarms, notes
+
+**Persistence.** Both `followups` and `ticket_notes` are upserts keyed by `ticket_id`. The `PUT /followups/{ticket_id}` endpoint accepts an absolute `due_at` — the client computes the timestamp from preset minutes (`+15m`, `+1h`, `+4h`, `+EOD`, `+24h`) so server clock and client clock stay in sync at the moment the operator sets it. Empty `body` on `PUT /notes/{ticket_id}` deletes the row (idempotent if already absent).
+
+**Server-side alarm role:** none. The backend is a passive store; alarm evaluation runs in each client surface. This keeps the backend stateless wrt timing and lets the popup raise alarms even when the webapp isn't open.
+
+**Client alarm loop** (webapp + popup):
+1. On open, `GET /followups` to populate state; `GET /settings.mute_alarms` to read the mute flag.
+2. Tick once per second. For each follow-up not yet `fired` with `due_at ≤ now`:
+   - Push a banner record into a local stack.
+   - If `mute_alarms` is false, play a short WebAudio two-note ping (700 ms, 880 → 1175 Hz). The audio object is created on the first user interaction (browser autoplay policy).
+   - `POST /followups/{ticket_id}/mark-fired` so subsequent reloads don't re-ring the same alarm.
+3. **Pin-to-top:** when grouping tickets by category, due (`due_at ≤ now`) tickets sort before others within the same column.
+4. **Snooze:** `POST /followups/{ticket_id}/snooze` with `{minutes}`. Server resets `due_at` and clears `fired`.
+5. **Dismiss:** purely client-side; banner record drops, follow-up row keeps `fired=true`.
+
+**Card surfaces.** A non-due follow-up renders as a `F/U in 15m` chip in mono. A due follow-up renders as `Follow up · due now` with an accent border and a 0.5 px outer ring (`0 0 0 4px rgba(255,77,46,.08)`). A non-empty note renders as a `Notes (N)` chip where N is `body.split('\n').filter(Boolean).length`.
+
+**Flyout surfaces.** A *Follow-up* section with preset chips + a *Clear* action. A *Next steps* section with the seven preset action chips that append `\n• <preset>` into the textarea, plus the freeform textarea bound to `PUT /notes/{ticket_id}` debounced 400 ms.
+
+## 8b. Design system
+
+Lifted from the canonical design at `design_bundle/intercom-ticket-management-with-ai-categorization/project/`. Webapp + popup must match.
+
+**Type:** Geist (400/500/600/700) for prose, JetBrains Mono (400/500/600) for labels, ids, counts, deltas. Loaded from Google Fonts in `index.html`.
+
+**Color tokens (light):**
+
+```text
+--bg        #faf9f6   (warm off-white)
+--panel     #ffffff
+--ink       #111111
+--ink2      #555555
+--ink3      #8a8a82
+--line      #e6e3db
+--line-soft #efece4
+--chip-bg   #f3efe6
+--hover     #f5f2ea
+--accent    #ff4d2e   (configurable; 5 swatches in tweaks)
+--shadow    0 12px 32px rgba(40,30,20,.10)
+```
+
+**Color tokens (dark):**
+
+```text
+--bg        #0e0f0e
+--panel     #15161a
+--ink       #f5f4ef
+--ink2      #a3a39d
+--ink3      #6a6a64
+--line      #26282d
+--line-soft #1e2025
+--chip-bg   #1c1d22
+--hover     #1a1b20
+--shadow    0 12px 36px rgba(0,0,0,.45)
+```
+
+**Category swatches** (oklch — overrides v1.2 hex):
+
+```text
+urgent     oklch(0.62 0.20 25)
+bug        oklch(0.56 0.18 285)
+feature    oklch(0.66 0.13 205)
+question   oklch(0.72 0.13 92)
+billing    oklch(0.62 0.13 148)
+complaint  oklch(0.66 0.16 50)
+other      oklch(0.65 0.00 0)
+```
+
+**Borders.** 0.5 px hairlines. 4 px card radius. 3 px button/chip radius. Filter pills 999 px.
+
+**Mono micro-labels.** 10–11 px, `letter-spacing: .04em`, `text-transform: uppercase`. Used for ids (`INT-48211`), updated-ago (`4m ago`), counts (`8 msgs`), section headers (`Customer`, `Plan`), follow-up chips (`F/U in 15m`).
+
+**Animations.** Three keyframes total:
+
+```css
+@keyframes triagePulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+@keyframes triageRing  { 0%{box-shadow:0 0 0 0 rgba(255,77,46,.55)} 100%{box-shadow:0 0 0 14px rgba(255,77,46,0)} }
+@keyframes triageSlide { from{transform:translateX(20px);opacity:0} to{transform:translateX(0);opacity:1} }
+```
+
+**Density variants.** `compact` (12.5 px title, 2-line clamp, 8/10 px padding), `balanced` (13.5 px title, 3-line clamp, 11/12 px padding, **default**), `comfy` (same title, 4-line summary clamp).
+
+**Tweaks panel** (operator-toggleable, persisted in `settings`): dark mode, accent swatch, density, show summary, show confidence. Mute alarms is the sixth toggle.
 
 ## 9. Settings
 
