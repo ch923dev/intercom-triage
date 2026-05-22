@@ -2,7 +2,7 @@
      title (when the ticket is loaded), the reason, a live countdown, and the
      Open / Snooze / Done actions. -->
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import Mono from './Mono.vue';
 import { useFollowupsStore } from '@/stores/followups';
 import { useTicketsStore } from '@/stores/tickets';
@@ -26,14 +26,28 @@ const countdown = computed(() =>
   formatCountdown(Date.parse(props.followup.due_at) - followups.now),
 );
 
+/** A failed Snooze/Done shows its message on the card instead of silently
+ *  swallowing the rejection. */
+const actionError = ref('');
+
 function open() {
   view.selectTicket(props.followup.ticket_id);
 }
-function snooze(minutes: number) {
-  void followups.snooze(props.followup.ticket_id, minutes);
+async function snooze(minutes: number) {
+  actionError.value = '';
+  try {
+    await followups.snooze(props.followup.ticket_id, minutes);
+  } catch (e) {
+    actionError.value = (e as Error).message;
+  }
 }
-function done() {
-  void followups.clearFollowup(props.followup.ticket_id);
+async function done() {
+  actionError.value = '';
+  try {
+    await followups.clearFollowup(props.followup.ticket_id);
+  } catch (e) {
+    actionError.value = (e as Error).message;
+  }
 }
 </script>
 
@@ -51,6 +65,7 @@ function done() {
       <button class="act" @click="snooze(60)">1h</button>
       <button class="act" @click="done">Done</button>
     </div>
+    <p v-if="actionError" class="action-error">{{ actionError }}</p>
   </article>
 </template>
 
@@ -111,5 +126,10 @@ header {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+.action-error {
+  margin: 6px 0 0;
+  font-size: 10.5px;
+  color: var(--accent);
 }
 </style>
