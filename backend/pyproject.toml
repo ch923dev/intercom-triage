@@ -22,8 +22,11 @@ select = [
     "RUF",      # ruff-specific
 ]
 ignore = [
-    "E501",   # line length (handled by formatter when feasible)
-    "S101",   # asserts (used in tests)
+    "E501",     # line length (handled by formatter when feasible)
+    "S101",     # asserts (used in tests + narrowing)
+    "RUF001",   # ambiguous unicode in strings — en dashes are house style
+    "RUF002",   # ambiguous unicode in docstrings — same
+    "RUF003",   # ambiguous unicode in comments — section dividers use en dashes
 ]
 
 [tool.ruff.lint.per-file-ignores]
