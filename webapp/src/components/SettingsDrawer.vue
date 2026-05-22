@@ -3,19 +3,23 @@
      includes. Every change is persisted via `/settings` and re-fetches the
      board so the filter takes effect immediately. -->
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import CatDot from './CatDot.vue';
 import Mono from './Mono.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
+import { useTweaksStore } from '@/stores/tweaks';
+import { permission, requestPermission, supported } from '@/utils/notify';
 import type { LookbackUnit, TicketState } from '@/types/api';
 
 const settings = useSettingsStore();
 const tickets = useTicketsStore();
 const categories = useCategoriesStore();
 const view = useViewStore();
+const tweaks = useTweaksStore();
+const notifyHint = ref('');
 
 const STATES: TicketState[] = ['open', 'snoozed', 'closed'];
 const UNITS: LookbackUnit[] = ['hours', 'days'];
@@ -67,6 +71,30 @@ function pickSpecific() {
 /** AI toggle — no board refresh; it only affects the next ingest. */
 function onToggleUseAi(event: Event) {
   void settings.setUseAi((event.target as HTMLInputElement).checked);
+}
+
+/** Desktop notifications toggle — turning it on prompts for browser
+ *  permission the first time; a denial reverts the checkbox with a hint. */
+async function onToggleNotifications(event: Event) {
+  const input = event.target as HTMLInputElement;
+  notifyHint.value = '';
+  if (!input.checked) {
+    tweaks.setDesktopNotifications(false);
+    return;
+  }
+  if (!supported()) {
+    notifyHint.value = 'This browser does not support notifications.';
+    input.checked = false;
+    return;
+  }
+  let perm = permission();
+  if (perm === 'default') perm = await requestPermission();
+  if (perm === 'granted') {
+    tweaks.setDesktopNotifications(true);
+  } else {
+    notifyHint.value = 'Notifications blocked — allow them in browser site settings.';
+    input.checked = false;
+  }
 }
 </script>
 
@@ -168,6 +196,24 @@ function onToggleUseAi(event: Event) {
           <p class="hint">
             When off, synced tickets land in the fallback category with no AI
             subject or summary — set those yourself on each ticket.
+          </p>
+        </section>
+
+        <!-- Desktop notifications -->
+        <section>
+          <Mono>Desktop notifications</Mono>
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="tweaks.desktopNotifications"
+              @change="onToggleNotifications"
+            />
+            <span class="sentence">Notify on the desktop when a follow-up is due</span>
+          </label>
+          <p v-if="notifyHint" class="hint">{{ notifyHint }}</p>
+          <p v-else class="hint">
+            A browser notification fires alongside the in-app alarm, even when
+            this tab is in the background.
           </p>
         </section>
       </div>
