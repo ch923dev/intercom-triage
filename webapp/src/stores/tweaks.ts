@@ -16,6 +16,7 @@ interface TweaksState {
   density: Density;
   showSummary: boolean;
   showConfidence: boolean;
+  desktopNotifications: boolean;
 }
 
 const DEFAULTS: TweaksState = {
@@ -24,6 +25,7 @@ const DEFAULTS: TweaksState = {
   density: 'balanced',
   showSummary: true,
   showConfidence: true,
+  desktopNotifications: false,
 };
 
 const ACCENT_SWATCHES = ['#ff4d2e', '#2e7fff', '#22a06b', '#a855f7', '#111111'] as const;
@@ -46,6 +48,7 @@ export const useTweaksStore = defineStore('tweaks', () => {
   const density = computed(() => state.value.density);
   const showSummary = computed(() => state.value.showSummary);
   const showConfidence = computed(() => state.value.showConfidence);
+  const desktopNotifications = computed(() => state.value.desktopNotifications);
 
   function setDarkMode(v: boolean) {
     state.value.darkMode = v;
@@ -61,6 +64,9 @@ export const useTweaksStore = defineStore('tweaks', () => {
   }
   function setShowConfidence(v: boolean) {
     state.value.showConfidence = v;
+  }
+  function setDesktopNotifications(v: boolean) {
+    state.value.desktopNotifications = v;
   }
 
   // Persist + apply to <html>.
@@ -81,11 +87,13 @@ export const useTweaksStore = defineStore('tweaks', () => {
     density,
     showSummary,
     showConfidence,
+    desktopNotifications,
     setDarkMode,
     setAccent,
     setDensity,
     setShowSummary,
     setShowConfidence,
+    setDesktopNotifications,
     ACCENT_SWATCHES,
   };
 });
