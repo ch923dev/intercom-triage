@@ -47,3 +47,10 @@ export const overrideCategory = (ticketId, categoryId) =>
     method: 'PATCH',
     body: JSON.stringify({ category_id: categoryId }),
   });
+
+/** Active follow-up reminders — one row per ticket (T053). */
+export const fetchFollowups = () => request('/followups');
+
+/** Flag a follow-up's alarm as rung so reloads don't re-ring it. */
+export const markFollowupFired = (ticketId) =>
+  request(`/followups/${encodeURIComponent(ticketId)}/mark-fired`, { method: 'POST' });

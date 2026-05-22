@@ -70,7 +70,9 @@ the category-management and proposal-review pages plus the filter drawer.
 
 The toolbar popup is a mini-board with the same taxonomy; it talks directly to
 the backend on `:8000`. Background polling is **off by default** — pick an
-interval in the popup footer to have it badge the Urgent count.
+interval in the popup footer to have it badge the Urgent count. The popup also
+mirrors the webapp's follow-up alarms: a due banner, per-row countdown chips,
+and an audio cue (shared mute via `GET /settings`).
 
 ## API surface
 

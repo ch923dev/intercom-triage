@@ -282,3 +282,69 @@ body {
   height: 7px;
   border-radius: 2px;
 }
+
+/* ── Follow-up due banner + chip (T053) ────────────────────────────────── */
+@keyframes triagePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--accent);
+  color: #fff;
+  border-bottom: var(--hairline) solid var(--accent);
+  animation: triagePulse 1.6s ease-in-out infinite;
+}
+
+.banner-text {
+  font-weight: 600;
+  flex: 1;
+}
+
+.banner-act {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border: var(--hairline) solid rgba(255, 255, 255, 0.6);
+  border-radius: 3px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.banner-act:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.fu-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: var(--hairline) solid var(--line);
+  background: var(--chip-bg);
+  color: var(--ink-2);
+}
+
+.fu-chip.due {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.card.due {
+  border-left: 2px solid var(--accent);
+}

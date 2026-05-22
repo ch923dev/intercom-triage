@@ -1,17 +1,33 @@
-// Popup mini-board. Reference: tasks.md T041 — US-006.
+// Popup mini-board. Reference: tasks.md T041 (US-006), T053 (follow-up mirror).
 //
 // The full taxonomy (active categories + pending proposals) renders as column
 // tabs; selecting a tab lists its tickets. Each card has a tap-to-move action
 // — a button list of categories, sized for the popup — instead of the webapp's
 // drag-and-drop. Overrides hit `PATCH /tickets/{id}/category`, which the
 // backend persists, so a move survives the popup closing and reopening.
+//
+// T053 mirrors the webapp's alarm surface: `GET /followups` on open, the same
+// once-per-second tick, a due banner at the top, a per-row countdown chip, and
+// a 2 px accent left-bar on due rows.
 
-import { fetchCategories, fetchSettings, fetchTickets, overrideCategory, FULL_BOARD_URL } from './api.js';
+import {
+  fetchCategories,
+  fetchFollowups,
+  fetchSettings,
+  fetchTickets,
+  markFollowupFired,
+  overrideCategory,
+  FULL_BOARD_URL,
+} from './api.js';
 
 const state = {
   categories: [],
   proposals: [],
   tickets: [],
+  followups: {}, // ticket_id → follow-up record
+  muteAlarms: false,
+  now: Date.now(),
+  dismissed: new Set(), // ticket ids whose due banner the user dismissed
   activeTab: null, // 'cat-<id>' | 'prop-<id>'
   error: null,
   loading: true,
@@ -20,11 +36,17 @@ const state = {
 const el = {
   count: document.getElementById('count'),
   tabs: document.getElementById('tabs'),
+  banner: document.getElementById('banner'),
   list: document.getElementById('list'),
   refresh: document.getElementById('refresh'),
   interval: document.getElementById('interval'),
   openBoard: document.getElementById('openBoard'),
 };
+
+/** Per-render lookup of a ticket's countdown chip + card, so the tick loop can
+ *  update them in place without a disruptive full re-render. */
+let chipRefs = new Map();
+let cardRefs = new Map();
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,6 +77,17 @@ function ticketsForTab(key) {
   return kind === 'cat'
     ? state.tickets.filter((t) => t.category_id === id)
     : state.tickets.filter((t) => t.proposal_id === id);
+}
+
+function isDue(followup) {
+  return Date.parse(followup.due_at) <= state.now;
+}
+
+/** Countdown chip label: `due now` once due, else `F/U 15m` / `F/U 2h`. */
+function chipLabel(followup) {
+  if (isDue(followup)) return 'due now';
+  const mins = Math.round((Date.parse(followup.due_at) - state.now) / 60000);
+  return mins < 60 ? `F/U ${mins}m` : `F/U ${Math.round(mins / 60)}h`;
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
@@ -103,6 +136,9 @@ function renderCard(ticket) {
   const card = node('article', 'card');
   if (ticket.user_override) card.classList.add('overridden');
 
+  const followup = state.followups[ticket.id];
+  if (followup && isDue(followup)) card.classList.add('due');
+
   const head = node('div', 'card-head');
   head.append(node('span', 'mono muted', ticket.id));
   head.append(node('span', 'mono muted', ago(ticket.updated_at)));
@@ -113,6 +149,14 @@ function renderCard(ticket) {
 
   const meta = node('div', 'card-meta');
   meta.append(node('span', 'customer', ticket.author?.name || '—'));
+
+  if (followup) {
+    const chip = node('span', 'fu-chip', chipLabel(followup));
+    if (isDue(followup)) chip.classList.add('due');
+    meta.append(chip);
+    chipRefs.set(ticket.id, chip);
+  }
+
   const moveBtn = node('button', 'move-btn', 'Move ▾');
   meta.append(moveBtn);
   card.append(meta);
@@ -137,11 +181,14 @@ function renderCard(ticket) {
     card.append(picker);
   });
 
+  cardRefs.set(ticket.id, card);
   return card;
 }
 
 function renderList() {
   el.list.replaceChildren();
+  chipRefs = new Map();
+  cardRefs = new Map();
 
   if (state.loading) {
     el.list.append(node('p', 'state mono', 'Loading…'));
@@ -158,12 +205,102 @@ function renderList() {
   }
   rows
     .slice()
-    .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+    .sort((a, b) => {
+      // Due follow-ups pinned to the top, then most-recently-updated.
+      const dueA = Number(Boolean(state.followups[a.id] && isDue(state.followups[a.id])));
+      const dueB = Number(Boolean(state.followups[b.id] && isDue(state.followups[b.id])));
+      if (dueA !== dueB) return dueB - dueA;
+      return new Date(b.updated_at) - new Date(a.updated_at);
+    })
     .forEach((t) => el.list.append(renderCard(t)));
+}
+
+/** The due banner — shown while at least one non-dismissed follow-up is due. */
+function renderBanner() {
+  const due = Object.values(state.followups).filter(
+    (f) => isDue(f) && !state.dismissed.has(f.ticket_id),
+  );
+  if (due.length === 0) {
+    el.banner.hidden = true;
+    el.banner.replaceChildren();
+    return;
+  }
+  el.banner.hidden = false;
+  el.banner.replaceChildren();
+  const label =
+    due.length === 1
+      ? `Follow-up due — ${due[0].ticket_id}`
+      : `${due.length} follow-ups due`;
+  el.banner.append(node('span', 'banner-text mono', label));
+
+  const open = node('button', 'banner-act', 'Open board');
+  open.addEventListener('click', () => chrome.tabs.create({ url: FULL_BOARD_URL }));
+  el.banner.append(open);
+
+  const dismiss = node('button', 'banner-act', 'Dismiss');
+  dismiss.addEventListener('click', () => {
+    for (const f of due) state.dismissed.add(f.ticket_id);
+    renderBanner();
+  });
+  el.banner.append(dismiss);
 }
 
 function renderCount() {
   el.count.textContent = state.loading ? '' : `${state.tickets.length} tickets`;
+}
+
+// ── Alarm loop (T053) ─────────────────────────────────────────────────────────
+
+let audioCtx = null;
+
+function ensureAudio() {
+  if (audioCtx === null && typeof AudioContext !== 'undefined') {
+    audioCtx = new AudioContext();
+  }
+}
+
+/** A two-note WebAudio ping (880 → 1175 Hz) — matches the webapp cue. */
+function playPing() {
+  ensureAudio();
+  if (audioCtx === null) return;
+  if (audioCtx.state === 'suspended') void audioCtx.resume();
+  const t0 = audioCtx.currentTime;
+  [880, 1175].forEach((freq, i) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const start = t0 + i * 0.34;
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.22, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.3);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(start);
+    osc.stop(start + 0.32);
+  });
+}
+
+/** Once-per-second tick: advance `now`, refresh chips, ring newly-due alarms. */
+function alarmTick() {
+  state.now = Date.now();
+  let newlyDue = false;
+  for (const f of Object.values(state.followups)) {
+    const due = isDue(f);
+    const chip = chipRefs.get(f.ticket_id);
+    if (chip) {
+      chip.textContent = chipLabel(f);
+      chip.classList.toggle('due', due);
+    }
+    const card = cardRefs.get(f.ticket_id);
+    if (card) card.classList.toggle('due', due);
+    if (due && !f.fired) {
+      f.fired = true;
+      newlyDue = true;
+      void markFollowupFired(f.ticket_id);
+    }
+  }
+  if (newlyDue && !state.muteAlarms) playPing();
+  renderBanner();
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────────
@@ -189,9 +326,15 @@ async function load() {
   renderCount();
   renderList();
   try {
-    const [settings, catResp] = await Promise.all([fetchSettings(), fetchCategories()]);
+    const [settings, catResp, followups] = await Promise.all([
+      fetchSettings(),
+      fetchCategories(),
+      fetchFollowups(),
+    ]);
     state.categories = catResp.categories;
     state.proposals = catResp.pending_proposals;
+    state.muteAlarms = Boolean(settings.mute_alarms);
+    state.followups = Object.fromEntries(followups.map((f) => [f.ticket_id, f]));
     state.tickets = await fetchTickets(settings);
 
     // Keep the selected tab if it still exists, else default to the first.
@@ -205,9 +348,11 @@ async function load() {
   } finally {
     state.loading = false;
   }
+  state.now = Date.now();
   renderCount();
   renderTabs();
   renderList();
+  renderBanner();
 }
 
 // ── Wiring ───────────────────────────────────────────────────────────────────
@@ -224,8 +369,12 @@ el.interval.addEventListener('change', async () => {
   chrome.runtime.sendMessage({ type: 'reschedule' });
 });
 
+// Unlock audio on the first interaction inside the popup (autoplay policy).
+window.addEventListener('pointerdown', ensureAudio, { once: true });
+
 (async function init() {
   const { pollMinutes = 0 } = await chrome.storage.local.get('pollMinutes');
   el.interval.value = String(pollMinutes);
   await load();
+  setInterval(alarmTick, 1000);
 })();
