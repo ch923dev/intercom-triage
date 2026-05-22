@@ -1,19 +1,51 @@
-<!-- One column of the follow-up board. Static (no drag) — header with label +
-     count, body is a scrollable stack of FollowupCards. -->
+<!-- One column of the follow-up board. Drop target for drag-to-reschedule —
+     dropping a card here computes a new due_at per the bucket's rules (or
+     calls markFired for the `fired` column). Header shows label + count;
+     body is a scrollable stack of FollowupCards. -->
 <script setup lang="ts">
+import { computed, ref } from 'vue';
 import FollowupCard from './FollowupCard.vue';
 import Mono from './Mono.vue';
+import { useFollowupsStore, type Bucket } from '@/stores/followups';
 import type { Followup } from '@/types/api';
 
 interface Props {
   label: string;
   followups: Followup[];
+  bucket: Bucket;
 }
 const props = defineProps<Props>();
+
+const followupsStore = useFollowupsStore();
+
+/** dragenter/dragleave fire on every child element, so we ref-count entries
+ *  to know when the cursor has actually left the column (count back to 0). */
+const dragCounter = ref(0);
+const isDragover = computed(() => dragCounter.value > 0);
+
+function onDragEnter() {
+  dragCounter.value++;
+}
+function onDragLeave() {
+  dragCounter.value = Math.max(0, dragCounter.value - 1);
+}
+async function onDrop(e: DragEvent) {
+  dragCounter.value = 0;
+  const ticketId = e.dataTransfer?.getData('text/plain') ?? '';
+  if (ticketId === '') return;
+  await followupsStore.rescheduleToBucket(ticketId, props.bucket);
+}
 </script>
 
 <template>
-  <section class="column">
+  <section
+    class="column"
+    :class="{ dragover: isDragover }"
+    @dragover.prevent
+    @dragenter.prevent="onDragEnter"
+    @dragleave="onDragLeave"
+    @drop.prevent="onDrop"
+  >
     <header>
       <div class="name">{{ props.label }}</div>
       <Mono class="count">{{ props.followups.length }}</Mono>
@@ -31,6 +63,10 @@ const props = defineProps<Props>();
   display: flex;
   flex-direction: column;
   border-right: var(--hairline) solid var(--line-soft);
+  transition: background 80ms ease;
+}
+.column.dragover {
+  background: var(--hover);
 }
 header {
   padding: 14px 14px 10px;

@@ -13,6 +13,7 @@ const followups = useFollowupsStore();
     <FollowupColumn
       v-for="b in BUCKET_ORDER"
       :key="b"
+      :bucket="b"
       :label="BUCKET_LABEL[b]"
       :followups="followups.buckets[b]"
     />
