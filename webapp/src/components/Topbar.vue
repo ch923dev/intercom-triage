@@ -22,6 +22,7 @@ const view = useViewStore();
 const densities: Density[] = ['compact', 'balanced', 'comfy'];
 const NAV: { id: View; label: string }[] = [
   { id: 'board', label: 'Board' },
+  { id: 'followups', label: 'Follow-ups' },
   { id: 'categories', label: 'Categories' },
   { id: 'proposals', label: 'Proposals' },
 ];
@@ -66,6 +67,10 @@ function toggleDark() {
         <span v-if="n.id === 'proposals' && proposalCount" class="nav-badge">{{
           proposalCount
         }}</span>
+        <span
+          v-else-if="n.id === 'followups' && followups.pendingCount"
+          class="nav-badge"
+        >{{ followups.pendingCount }}</span>
       </button>
     </nav>
 
