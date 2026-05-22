@@ -88,7 +88,7 @@ async def sweep_expired(session: AsyncSession, ttl_seconds: int) -> int:
     Returns the count of rows deleted.
     """
     cutoff = naive_utcnow() - timedelta(seconds=ttl_seconds)
-    result: CursorResult[tuple[()]] = await session.execute(  # type: ignore[assignment]
+    result: CursorResult[tuple[()]] = await session.execute(
         delete(AICacheEntry).where(AICacheEntry.cached_at < cutoff),
     )
     await session.commit()
