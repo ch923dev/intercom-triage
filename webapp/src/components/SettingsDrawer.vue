@@ -73,6 +73,12 @@ function onToggleUseAi(event: Event) {
   void settings.setUseAi((event.target as HTMLInputElement).checked);
 }
 
+/** Background sync interval selector — saves to the tweaks store (localStorage). */
+function onAutoSyncChange(event: Event) {
+  const raw = Number((event.target as HTMLSelectElement).value) as 0 | 30 | 60 | 300;
+  tweaks.setAutoSyncSeconds(raw);
+}
+
 /** Desktop notifications toggle — turning it on prompts for browser
  *  permission the first time; a denial reverts the checkbox with a hint. */
 async function onToggleNotifications(event: Event) {
@@ -216,6 +222,27 @@ async function onToggleNotifications(event: Event) {
             this tab is in the background.
           </p>
         </section>
+
+        <!-- Background sync -->
+        <section>
+          <Mono>Background sync</Mono>
+          <div class="row">
+            <select
+              class="sync-select"
+              :value="tweaks.autoSyncSeconds"
+              @change="onAutoSyncChange"
+            >
+              <option :value="0">Off</option>
+              <option :value="30">30s</option>
+              <option :value="60">1m</option>
+              <option :value="300">5m</option>
+            </select>
+          </div>
+          <p class="hint">
+            Refreshes the board silently when the extension or another browser
+            session ingests new tickets.
+          </p>
+        </section>
       </div>
     </aside>
   </div>
@@ -329,5 +356,15 @@ section {
   cursor: pointer;
   font-size: 12px;
   padding: 0;
+}
+.sync-select {
+  padding: 5px 8px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
 }
 </style>

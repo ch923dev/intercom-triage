@@ -36,6 +36,23 @@ const lastSync = computed(() => {
   return `${Math.floor(s / 3600)}h ago`;
 });
 
+/** Faint auto-sync indicator appended to the last-sync timestamp.
+ *  Shows the active interval label (e.g. "· auto · 30s") when polling is on. */
+const autoSyncLabel = computed(() => {
+  const s = tweaks.autoSyncSeconds;
+  if (!s) return '';
+  if (s < 60) return `· auto · ${s}s`;
+  return `· auto · ${s / 60}m`;
+});
+
+/** Ticket count display. Shows "visible of total" when a query is active,
+ *  plain count otherwise. */
+const ticketCountLabel = computed(() => {
+  const q = tickets.query.trim();
+  if (!q) return `${tickets.tickets.length} tickets`;
+  return `${tickets.visibleTickets.length} of ${tickets.tickets.length}`;
+});
+
 const proposalCount = computed(() => categories.pendingProposals.length);
 
 function refresh() {
@@ -44,6 +61,10 @@ function refresh() {
 
 function toggleDark() {
   tweaks.setDarkMode(!tweaks.darkMode);
+}
+
+function onSearchInput(e: Event) {
+  tickets.setQuery((e.target as HTMLInputElement).value);
 }
 </script>
 
@@ -76,7 +97,19 @@ function toggleDark() {
 
     <div class="sep" />
 
-    <Mono>{{ tickets.tickets.length }} tickets</Mono>
+    <!-- Search input. Positioned between the nav and the ticket count so it
+         sits in the natural reading flow: brand → nav → search → count → actions.
+         Width is fixed at ~200px to avoid layout shift while typing. The
+         `.search-input` class is targeted by the `/` keyboard shortcut in App.vue. -->
+    <input
+      class="search-input"
+      type="search"
+      placeholder="Search title / summary / customer"
+      :value="tickets.query"
+      @input="onSearchInput"
+    />
+
+    <Mono>{{ ticketCountLabel }}</Mono>
 
     <!-- Follow-up status pill (T051) — accent-pulse while an alarm is firing. -->
     <button
@@ -96,7 +129,7 @@ function toggleDark() {
     <button class="ghost" :disabled="tickets.loading" @click="refresh">
       <span class="mono">{{ tickets.loading ? 'Refreshing…' : 'Refresh' }}</span>
     </button>
-    <Mono>{{ lastSync }}</Mono>
+    <Mono>{{ lastSync }}<span v-if="autoSyncLabel" class="auto-label">{{ autoSyncLabel }}</span></Mono>
 
     <div class="sep" />
 
@@ -269,5 +302,32 @@ function toggleDark() {
   border-color: var(--accent);
   color: #fff;
   animation: triagePulse 1.4s ease-in-out infinite;
+}
+/* Search input — ghost style matching the rest of the topbar controls. */
+.search-input {
+  width: 200px;
+  padding: 4px 8px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  outline: none;
+}
+.search-input::placeholder {
+  color: var(--ink-3);
+}
+.search-input:focus {
+  border-color: var(--accent);
+}
+/* Clear button inside native search input (WebKit) */
+.search-input::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+/* Faint auto-sync indicator appended to the last-sync timestamp. */
+.auto-label {
+  opacity: 0.55;
+  margin-left: 2px;
 }
 </style>

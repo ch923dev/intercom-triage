@@ -28,15 +28,39 @@ export const useTicketsStore = defineStore('tickets', () => {
     pendingOverrides: {},
   });
 
+  /** Active search query. Empty string means no filter. */
+  const query = ref('');
+
   const tickets = computed(() => state.value.tickets);
   const loading = computed(() => state.value.loading);
   const error = computed(() => state.value.error);
   const lastRefresh = computed(() => state.value.lastRefresh);
 
-  /** Group visible tickets by `category_id` (applying optimistic overrides). */
+  /** Subset of `state.tickets` matching the current `query`.
+   *  Matches case-insensitively against title, summary, author.name, author.email.
+   *  Returns the full list when the query is empty or whitespace-only. */
+  const visibleTickets = computed(() => {
+    const q = query.value.trim().toLowerCase();
+    if (!q) return state.value.tickets;
+    return state.value.tickets.filter((t) => {
+      const title = (t.title ?? '').toLowerCase();
+      const summary = (t.summary ?? '').toLowerCase();
+      const authorName = (t.author.name ?? '').toLowerCase();
+      const authorEmail = (t.author.email ?? '').toLowerCase();
+      return (
+        title.includes(q) ||
+        summary.includes(q) ||
+        authorName.includes(q) ||
+        authorEmail.includes(q)
+      );
+    });
+  });
+
+  /** Group visible tickets by `category_id` (applying optimistic overrides).
+   *  Derives from visibleTickets so search filters the board columns. */
   const byCategory = computed(() => {
     const map = new Map<number, Ticket[]>();
-    for (const t of state.value.tickets) {
+    for (const t of visibleTickets.value) {
       const catId = state.value.pendingOverrides[t.id] ?? t.category_id;
       if (catId === null) continue; // pending proposal — keyed by proposal_id elsewhere
       if (!map.has(catId)) map.set(catId, []);
@@ -45,9 +69,10 @@ export const useTicketsStore = defineStore('tickets', () => {
     return map;
   });
 
+  /** Derives from visibleTickets so search filters proposal columns too. */
   const byProposal = computed(() => {
     const map = new Map<number, Ticket[]>();
-    for (const t of state.value.tickets) {
+    for (const t of visibleTickets.value) {
       if (t.proposal_id === null) continue;
       if (!map.has(t.proposal_id)) map.set(t.proposal_id, []);
       map.get(t.proposal_id)!.push(t);
@@ -55,7 +80,9 @@ export const useTicketsStore = defineStore('tickets', () => {
     return map;
   });
 
-  /** Every visible ticket keyed by id — for O(1) lookup by id. */
+  /** Every ticket keyed by id — intentionally walks the raw list, NOT
+   *  visibleTickets, so flyout and follow-up lookups resolve tickets that are
+   *  filtered out by the current search query. */
   const byId = computed(() => {
     const map = new Map<string, Ticket>();
     for (const t of state.value.tickets) map.set(t.id, t);
@@ -75,6 +102,25 @@ export const useTicketsStore = defineStore('tickets', () => {
       state.value.lastRefresh = new Date();
       state.value.loading = false;
     }
+  }
+
+  /** Silent board refresh for auto-sync polling — does NOT set loading=true so
+   *  the "Loading…" banner never flickers. Error state is still updated on
+   *  failure. */
+  async function silentRefresh() {
+    state.value.error = null;
+    try {
+      state.value.tickets = await api.listTickets();
+    } catch (e) {
+      state.value.error = (e as Error).message;
+    } finally {
+      state.value.lastRefresh = new Date();
+    }
+  }
+
+  /** Set the live search query that filters the board. */
+  function setQuery(q: string) {
+    query.value = q;
   }
 
   /** Edit the AI-supplied title / summary. Optimistic local update; rolls back
@@ -137,10 +183,14 @@ export const useTicketsStore = defineStore('tickets', () => {
     loading,
     error,
     lastRefresh,
+    query,
+    visibleTickets,
     byCategory,
     byProposal,
     byId,
     refresh,
+    silentRefresh,
+    setQuery,
     applyOverride,
     editTicket,
     isEmpty: computed(() => !state.value.loading && state.value.tickets.length === 0),
