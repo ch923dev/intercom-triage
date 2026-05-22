@@ -17,6 +17,8 @@ interface TweaksState {
   showSummary: boolean;
   showConfidence: boolean;
   desktopNotifications: boolean;
+  /** 0 = off; 30 | 60 | 300 = poll interval in seconds. Per-browser pref. */
+  autoSyncSeconds: 0 | 30 | 60 | 300;
 }
 
 const DEFAULTS: TweaksState = {
@@ -26,6 +28,7 @@ const DEFAULTS: TweaksState = {
   showSummary: true,
   showConfidence: true,
   desktopNotifications: false,
+  autoSyncSeconds: 0,
 };
 
 const ACCENT_SWATCHES = ['#ff4d2e', '#2e7fff', '#22a06b', '#a855f7', '#111111'] as const;
@@ -49,6 +52,7 @@ export const useTweaksStore = defineStore('tweaks', () => {
   const showSummary = computed(() => state.value.showSummary);
   const showConfidence = computed(() => state.value.showConfidence);
   const desktopNotifications = computed(() => state.value.desktopNotifications);
+  const autoSyncSeconds = computed(() => state.value.autoSyncSeconds);
 
   function setDarkMode(v: boolean) {
     state.value.darkMode = v;
@@ -67,6 +71,9 @@ export const useTweaksStore = defineStore('tweaks', () => {
   }
   function setDesktopNotifications(v: boolean) {
     state.value.desktopNotifications = v;
+  }
+  function setAutoSyncSeconds(v: 0 | 30 | 60 | 300) {
+    state.value.autoSyncSeconds = v;
   }
 
   // Persist + apply to <html>.
@@ -88,12 +95,14 @@ export const useTweaksStore = defineStore('tweaks', () => {
     showSummary,
     showConfidence,
     desktopNotifications,
+    autoSyncSeconds,
     setDarkMode,
     setAccent,
     setDensity,
     setShowSummary,
     setShowConfidence,
     setDesktopNotifications,
+    setAutoSyncSeconds,
     ACCENT_SWATCHES,
   };
 });

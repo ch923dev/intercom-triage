@@ -4,7 +4,7 @@
      (T035), the ticket flyout (T050/T052), and the once-per-second alarm loop
      (T051). -->
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue';
+import { onBeforeUnmount, onMounted, watch } from 'vue';
 import AlarmBanners from '@/components/AlarmBanners.vue';
 import Board from '@/components/Board.vue';
 import CategoriesPage from '@/components/CategoriesPage.vue';
@@ -78,6 +78,36 @@ function playPing() {
 
 let tickHandle = 0;
 
+// ── Auto-sync (background polling) ───────────────────────────────────────────
+//
+// Arms a setInterval based on tweaks.autoSyncSeconds. Zero disables polling.
+// The silent path never sets loading=true so the status banner doesn't flicker.
+// Skips the poll tick when the document is hidden (saves cycles) or when a
+// manual refresh is already in flight (concurrency safety).
+
+let syncHandle = 0;
+
+function armAutoSync(seconds: number) {
+  if (syncHandle) {
+    clearInterval(syncHandle);
+    syncHandle = 0;
+  }
+  if (seconds <= 0) return;
+  syncHandle = window.setInterval(() => {
+    if (document.visibilityState === 'hidden') return;
+    if (tickets.loading) return; // manual refresh in flight — skip this tick
+    void tickets.silentRefresh();
+  }, seconds * 1000);
+}
+
+function onVisibilityChange() {
+  // When the tab becomes visible again after being hidden, fire an immediate
+  // silent refresh so the board catches up without waiting for the next tick.
+  if (document.visibilityState === 'visible' && tweaks.autoSyncSeconds > 0) {
+    if (!tickets.loading) void tickets.silentRefresh();
+  }
+}
+
 function alarmTick() {
   // Early-return is cheaper than the watcher lifecycle dance; same CPU savings.
   if (followups.pendingCount === 0 && followups.banners.length === 0) return;
@@ -96,19 +126,39 @@ function alarmTick() {
   }
 }
 
-/** Global shortcuts (T036): `r` refreshes, ←/→ scroll the board columns. */
+/** Global shortcuts (T036): `r` refreshes, ←/→ scroll the board columns,
+ *  `/` focuses the search input, Escape clears search / closes flyout. */
 function onKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement | null;
-  if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+  // Let keystrokes through normally when focus is inside a form control,
+  // EXCEPT for Escape — which we still handle to clear/blur the search input.
+  const inFormControl = target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
+  if (e.key === 'Escape') {
+    if (tickets.query) {
+      // First Escape clears the search query and blurs the input.
+      tickets.setQuery('');
+      document.querySelector<HTMLInputElement>('.search-input')?.blur();
+      return;
+    }
+    if (view.selectedTicketId !== null) {
+      view.closeFlyout();
+      return;
+    }
+    return;
+  }
+
+  if (inFormControl) return;
+
+  if (e.key === '/') {
+    e.preventDefault();
+    document.querySelector<HTMLInputElement>('.search-input')?.focus();
+    return;
+  }
   if (e.key === 'r') {
     e.preventDefault();
     void tickets.refresh();
-    return;
-  }
-  if (e.key === 'Escape' && view.selectedTicketId !== null) {
-    view.closeFlyout();
     return;
   }
   if (view.view !== 'board') return;
@@ -126,12 +176,23 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener('keydown', onKeydown);
   window.addEventListener('pointerdown', ensureAudio, { once: true });
+  window.addEventListener('visibilitychange', onVisibilityChange);
   tickHandle = window.setInterval(alarmTick, 1000);
+  // Arm auto-sync from the saved preference on first load.
+  armAutoSync(tweaks.autoSyncSeconds);
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown);
+  window.removeEventListener('visibilitychange', onVisibilityChange);
   clearInterval(tickHandle);
+  if (syncHandle) clearInterval(syncHandle);
 });
+
+// Re-arm the sync interval whenever the preference changes.
+watch(
+  () => tweaks.autoSyncSeconds,
+  (seconds) => armAutoSync(seconds),
+);
 </script>
 
 <template>
@@ -158,7 +219,7 @@ onBeforeUnmount(() => {
         Last {{ settings.lookbackValue }} {{ settings.lookbackUnit }} · auto-categorized · drag to
         override
       </span>
-      <span class="mono">r refresh · ←/→ columns</span>
+      <span class="mono">r refresh · ←/→ columns · / search</span>
     </footer>
 
     <SettingsDrawer />
