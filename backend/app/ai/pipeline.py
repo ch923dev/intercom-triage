@@ -110,7 +110,11 @@ def parse_response(raw: str) -> ParsedAssignment:
         if category_id is None:
             raise ValueError("existing assignment without a valid category_id")
         return ParsedAssignment(
-            "existing", summary, confidence, subject, category_id=category_id,
+            "existing",
+            summary,
+            confidence,
+            subject,
+            category_id=category_id,
         )
 
     if assignment == "pending_proposal":
@@ -169,14 +173,22 @@ async def resolve(
         if parsed.category_id not in state.active_category_ids:
             raise ValueError(f"category_id {parsed.category_id} is not active")
         return CategorizationResult(
-            parsed.category_id, None, parsed.summary, parsed.confidence, parsed.subject,
+            parsed.category_id,
+            None,
+            parsed.summary,
+            parsed.confidence,
+            parsed.subject,
         )
 
     if parsed.kind == "pending_proposal":
         if parsed.proposal_id not in state.pending_proposal_ids:
             raise ValueError(f"proposal_id {parsed.proposal_id} is not pending")
         return CategorizationResult(
-            None, parsed.proposal_id, parsed.summary, parsed.confidence, parsed.subject,
+            None,
+            parsed.proposal_id,
+            parsed.summary,
+            parsed.confidence,
+            parsed.subject,
         )
 
     # new_proposal
@@ -189,7 +201,11 @@ async def resolve(
     existing = state.pending_by_signature.get(signature)
     if existing is not None:
         return CategorizationResult(
-            None, existing, parsed.summary, parsed.confidence, parsed.subject,
+            None,
+            existing,
+            parsed.summary,
+            parsed.confidence,
+            parsed.subject,
         )
 
     proposal = CategoryProposal(
@@ -204,7 +220,11 @@ async def resolve(
     state.pending_proposal_ids.add(proposal.id)
     metrics.incr("proposals_created_total")
     return CategorizationResult(
-        None, proposal.id, parsed.summary, parsed.confidence, parsed.subject,
+        None,
+        proposal.id,
+        parsed.summary,
+        parsed.confidence,
+        parsed.subject,
     )
 
 
