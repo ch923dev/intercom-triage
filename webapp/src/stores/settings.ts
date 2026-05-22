@@ -13,6 +13,7 @@ const DEFAULTS: FilterSettings = {
   states: ['open'],
   include_category_ids: null,
   mute_alarms: false,
+  use_ai: true,
 };
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -26,6 +27,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const states = computed(() => state.value.states);
   const includedCategoryIds = computed(() => state.value.include_category_ids);
   const muteAlarms = computed(() => state.value.mute_alarms);
+  const useAi = computed(() => state.value.use_ai);
 
   /** Load the stored filter. Falls back to defaults if the backend is down. */
   async function load() {
@@ -70,6 +72,12 @@ export const useSettingsStore = defineStore('settings', () => {
     return update({ mute_alarms: v });
   }
 
+  /** Toggle AI categorization. Affects future ingests only — the stored board
+   *  is left as-is, so no board refresh is needed here. */
+  function setUseAi(v: boolean) {
+    return update({ use_ai: v });
+  }
+
   return {
     filter,
     loaded,
@@ -79,11 +87,13 @@ export const useSettingsStore = defineStore('settings', () => {
     states,
     includedCategoryIds,
     muteAlarms,
+    useAi,
     load,
     update,
     setLookback,
     toggleState,
     setIncludedCategoryIds,
     setMuteAlarms,
+    setUseAi,
   };
 });

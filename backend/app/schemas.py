@@ -258,6 +258,9 @@ class FilterSettings(BaseModel):
     states: list[TicketState] = Field(default_factory=_default_states)
     include_category_ids: list[int] | None = None
     mute_alarms: bool = False
+    # When False, ingest skips AI categorization — tickets land in the fallback
+    # category and the operator writes subject/summary by hand.
+    use_ai: bool = True
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────────

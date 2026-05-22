@@ -16,6 +16,7 @@ async def test_get_returns_seeded_defaults(client: AsyncClient) -> None:
     assert body["states"] == ["open"]
     assert body["include_category_ids"] is None
     assert body["mute_alarms"] is False
+    assert body["use_ai"] is True
 
 
 @pytest.mark.asyncio
@@ -26,12 +27,28 @@ async def test_put_then_get_roundtrips(client: AsyncClient) -> None:
         "states": ["open", "snoozed"],
         "include_category_ids": [1, 2, 3],
         "mute_alarms": True,
+        "use_ai": False,
     }
     put = await client.put("/settings", json=new_settings)
     assert put.status_code == 200
 
     got = await client.get("/settings")
     assert got.json() == new_settings
+
+
+@pytest.mark.asyncio
+async def test_use_ai_defaults_true_when_omitted(client: AsyncClient) -> None:
+    put = await client.put(
+        "/settings",
+        json={
+            "lookback_unit": "hours",
+            "lookback_value": 12,
+            "states": ["open"],
+            "include_category_ids": None,
+        },
+    )
+    assert put.status_code == 200
+    assert put.json()["use_ai"] is True
 
 
 @pytest.mark.asyncio

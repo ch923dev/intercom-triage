@@ -63,6 +63,11 @@ function onToggleCategory(id: number) {
 function pickSpecific() {
   void apply(() => settings.setIncludedCategoryIds(categories.categories.map((c) => c.id)));
 }
+
+/** AI toggle — no board refresh; it only affects the next ingest. */
+function onToggleUseAi(event: Event) {
+  void settings.setUseAi((event.target as HTMLInputElement).checked);
+}
 </script>
 
 <template>
@@ -146,6 +151,24 @@ function pickSpecific() {
           <button v-else class="link" :disabled="settings.saving" @click="pickSpecific">
             Pick specific categories…
           </button>
+        </section>
+
+        <!-- AI categorization toggle -->
+        <section>
+          <Mono>AI categorization</Mono>
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="settings.useAi"
+              :disabled="settings.saving"
+              @change="onToggleUseAi"
+            />
+            <span class="sentence">Use AI to categorize &amp; summarize</span>
+          </label>
+          <p class="hint">
+            When off, synced tickets land in the fallback category with no AI
+            subject or summary — set those yourself on each ticket.
+          </p>
         </section>
       </div>
     </aside>
@@ -242,6 +265,10 @@ section {
 }
 .check.indent {
   padding-left: 4px;
+}
+/* Sentence-length labels must not be title-cased like the single-word ones. */
+.check .sentence {
+  text-transform: none;
 }
 .cat-list {
   display: flex;

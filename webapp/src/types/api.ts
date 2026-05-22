@@ -121,4 +121,7 @@ export interface FilterSettings {
   states: TicketState[];
   include_category_ids: number[] | null;
   mute_alarms: boolean; // FR-024 — shared by webapp + popup
+  /** When false, ingest skips AI categorization — tickets land in the fallback
+   *  category and the operator writes subject/summary by hand. */
+  use_ai: boolean;
 }

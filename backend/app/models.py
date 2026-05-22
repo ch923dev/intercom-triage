@@ -199,6 +199,13 @@ class Settings(Base):
         server_default=text("0"),
         nullable=False,
     )
+    # When False, ingest skips AI categorization entirely — every ticket lands
+    # in the fallback category and the operator fills in subject/summary by hand.
+    use_ai: Mapped[bool] = mapped_column(
+        default=True,
+        server_default=text("1"),
+        nullable=False,
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=text("CURRENT_TIMESTAMP"),
@@ -416,6 +423,16 @@ def _ensure_internal_notes_column(conn: Any) -> None:
     conn.exec_driver_sql("ALTER TABLE tickets ADD COLUMN internal_notes JSON DEFAULT '[]' NOT NULL")
 
 
+def _ensure_use_ai_column(conn: Any) -> None:
+    """Add `settings.use_ai` (default 1) for DBs created before the AI toggle.
+    No-op once present."""
+    inspector = sqla_inspect(conn)
+    columns = {col["name"] for col in inspector.get_columns("settings")}
+    if "use_ai" in columns:
+        return
+    conn.exec_driver_sql("ALTER TABLE settings ADD COLUMN use_ai BOOLEAN DEFAULT 1 NOT NULL")
+
+
 def _ensure_user_edited_columns(conn: Any) -> None:
     """Add `tickets.title_user_edited` + `tickets.summary_user_edited` for DBs
     ingested before operator-editable title/summary landed. No-op once present."""
@@ -453,6 +470,8 @@ async def init_db(engine: AsyncEngine, session_factory: async_sessionmaker[Async
         await conn.run_sync(_ensure_internal_notes_column)
         # …and the operator-edit flags on `tickets`.
         await conn.run_sync(_ensure_user_edited_columns)
+        # …and the `settings.use_ai` toggle.
+        await conn.run_sync(_ensure_use_ai_column)
 
     async with session_factory() as session:
         # Seed categories if empty.

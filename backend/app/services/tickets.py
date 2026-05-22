@@ -285,9 +285,30 @@ async def ingest_tickets(
     """Categorize a batch of extension-supplied conversations and store them.
 
     Cache-aware (FR-008) — an unchanged conversation skips the AI call. Without
-    an OpenRouter client every ticket degrades to the fallback category.
+    an OpenRouter client, or with the `use_ai` setting off, every ticket
+    degrades to the fallback category and the operator fills in the subject /
+    summary by hand.
     """
     fallback = await get_fallback(session)
+    settings = await get_settings(session)
+
+    if not settings.use_ai:
+        # AI disabled — degrade every ticket to the fallback category. The AI
+        # cache is bypassed entirely (not read, not written) so flipping the
+        # toggle back on re-categorizes on the next sync.
+        fallback_results = await categorize_many(
+            hydrated,
+            session=session,
+            client=None,
+            model=config.openrouter_model,
+            concurrency=config.ai_concurrency,
+            fallback_category_id=fallback.id,
+        )
+        for ticket in hydrated:
+            await _upsert_ticket(session, ticket, fallback_results[ticket.id])
+        await session.commit()
+        metrics.incr("tickets_ingested_total", len(hydrated))
+        return IngestResponse(received=len(hydrated), categorized=0)
 
     # Cache key is the last-part timestamp (see `_content_signature`) — AI only
     # re-fires on a new customer-visible message. Internal teammate notes and
