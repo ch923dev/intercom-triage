@@ -86,7 +86,9 @@ and an audio cue (shared mute via `GET /settings`).
 | `POST /categories/{src}/merge-into/{dst}` | Merge categories |
 | `GET /proposals` | Pending AI category proposals + example tickets |
 | `POST /proposals/{id}/approve` · `/merge-into/{cat}` · `/reject` | Resolve a proposal |
-| `POST /tickets/fetch` | Fetch + categorize tickets (each carries its follow-up + note) |
+| `GET /tickets` | The stored board — extension-ingested + categorized tickets |
+| `POST /tickets/ingest` | Receive conversations from the extension; categorize + store |
+| `POST /tickets/fetch` | Legacy: fetch direct from Intercom via an Access Token |
 | `PATCH /tickets/{id}/category` | Manually override a ticket's category |
 | `GET /settings` · `PUT /settings` | The stored filter settings + `mute_alarms` |
 | `GET /followups` | All active follow-up reminders |

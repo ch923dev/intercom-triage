@@ -271,6 +271,47 @@ class TicketNote(Base):
     )
 
 
+class Ticket(Base):
+    """An ingested + categorized conversation — the operator's board data.
+
+    The Chrome extension fetches conversations from Intercom via the operator's
+    logged-in session and pushes them to `POST /tickets/ingest`; the backend
+    categorizes them and stores the result here, so `GET /tickets` serves the
+    board without a live Intercom call. `author` + `parts` are JSON blobs of
+    the hydrated conversation (parts carry ISO `created_at` strings).
+    """
+
+    __tablename__ = "tickets"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    title: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str | None] = mapped_column(Text)
+    priority: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
+    author: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    parts: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="SET NULL"),
+    )
+    proposal_id: Mapped[int | None] = mapped_column(
+        ForeignKey("category_proposals.id", ondelete="SET NULL"),
+    )
+    summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    ai_confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_tickets_updated_at", "updated_at"),
+        Index("ix_tickets_category", "category_id"),
+    )
+
+
 # ── Seed data ─────────────────────────────────────────────────────────────────
 #
 # Swatches use oklch to match the design palette (plan.md §8b).

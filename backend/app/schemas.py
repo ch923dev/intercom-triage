@@ -5,10 +5,25 @@ Reference: plan.md §3 (data contracts), §4 (API contract).
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Literal
+from datetime import UTC, datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+
+
+def _naive_utc(value: datetime) -> datetime:
+    """Coerce a datetime to naive UTC — the schema used by every DB column.
+
+    Extension-supplied conversations may carry tz-aware ISO timestamps; the
+    legacy Intercom path produces naive ones. Normalize both to naive UTC.
+    """
+    if value.tzinfo is not None:
+        return value.astimezone(UTC).replace(tzinfo=None)
+    return value
+
+
+# A datetime field that always stores naive UTC, whatever tz the input carried.
+NaiveUTCDatetime = Annotated[datetime, AfterValidator(_naive_utc)]
 
 TicketState = Literal["open", "snoozed", "closed"]
 LookbackUnit = Literal["hours", "days"]
@@ -153,7 +168,7 @@ class TicketAuthorSchema(BaseModel):
 class ConversationPartSchema(BaseModel):
     author: TicketAuthorSchema
     body: str
-    created_at: datetime
+    created_at: NaiveUTCDatetime
 
 
 class HydratedTicket(BaseModel):
@@ -163,8 +178,8 @@ class HydratedTicket(BaseModel):
     title: str | None
     state: TicketState | None
     priority: str | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: NaiveUTCDatetime
+    updated_at: NaiveUTCDatetime
     author: TicketAuthorSchema
     url: str | None
     parts: list[ConversationPartSchema]
@@ -191,6 +206,13 @@ class CategoryUpdate(BaseModel):
 class OverrideResponse(BaseModel):
     ok: Literal[True] = True
     category_id: int
+
+
+class IngestResponse(BaseModel):
+    """`POST /tickets/ingest` result — counts for the extension's sync UI."""
+
+    received: int
+    categorized: int  # how many needed a fresh AI call (the rest were cache hits)
 
 
 # ── Filter + settings ─────────────────────────────────────────────────────────

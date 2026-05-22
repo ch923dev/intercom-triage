@@ -405,7 +405,6 @@ Each task is a single PR. Every task lists what spec requirement it implements a
 ## Phase 9 — Backlog
 
 - **T100** — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to webapp and extension.
-- **T101** — Per-category Slack hook (Urgent → `#support-urgent`).
 - **T102** — Token / cost meter surfacing OpenRouter spend per day.
 - **T103** — Multi-user expansion: add a `users` table + simple session cookie auth + per-user overrides and settings. Path back to v1.1 architecture.
 - **T104** — Alembic migrations: introduce when the first schema change is needed beyond `create_all`.
