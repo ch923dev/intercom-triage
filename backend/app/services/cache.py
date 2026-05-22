@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from sqlalchemy import delete
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.pipeline import CategorizationResult
@@ -74,3 +76,20 @@ async def set_cached(
     row.confidence = result.confidence
     row.ticket_updated_at = signature
     row.cached_at = now
+
+
+async def sweep_expired(session: AsyncSession, ttl_seconds: int) -> int:
+    """Delete cache rows whose TTL has elapsed.
+
+    Stale-on-signature rows are left alone -- they'll be overwritten the next
+    time the ticket is re-categorized, and they're typically the most
+    interesting historical data. Only TTL-expired rows are deleted here.
+
+    Returns the count of rows deleted.
+    """
+    cutoff = naive_utcnow() - timedelta(seconds=ttl_seconds)
+    result: CursorResult[tuple[()]] = await session.execute(  # type: ignore[assignment]
+        delete(AICacheEntry).where(AICacheEntry.cached_at < cutoff),
+    )
+    await session.commit()
+    return result.rowcount
