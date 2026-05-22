@@ -14,6 +14,38 @@ export interface AlarmBanner {
   reason: string | null;
 }
 
+/** A follow-up board column. */
+export type Bucket = 'overdue' | 'within1h' | 'today' | 'later' | 'fired';
+
+/** Board columns, left → right by urgency. */
+export const BUCKET_ORDER: Bucket[] = ['overdue', 'within1h', 'today', 'later', 'fired'];
+
+/** Column header label per bucket. */
+export const BUCKET_LABEL: Record<Bucket, string> = {
+  overdue: 'Overdue',
+  within1h: 'Within 1h',
+  today: 'Today',
+  later: 'Later',
+  fired: 'Fired',
+};
+
+/**
+ * The board column a follow-up belongs to at instant `nowMs`. A fired
+ * follow-up (alarm already rang) sits in `fired` until cleared or re-snoozed;
+ * an un-fired one is bucketed by how soon its `due_at` falls. "Today" ends at
+ * local 23:59:59.999.
+ */
+export function bucketOf(f: Followup, nowMs: number): Bucket {
+  if (f.fired) return 'fired';
+  const due = Date.parse(f.due_at);
+  if (due <= nowMs) return 'overdue';
+  if (due <= nowMs + 3_600_000) return 'within1h';
+  const endOfDay = new Date(nowMs);
+  endOfDay.setHours(23, 59, 59, 999);
+  if (due <= endOfDay.getTime()) return 'today';
+  return 'later';
+}
+
 export const useFollowupsStore = defineStore('followups', () => {
   /** ticket_id → follow-up record. */
   const map = ref<Record<string, Followup>>({});
@@ -27,6 +59,25 @@ export const useFollowupsStore = defineStore('followups', () => {
   const pendingCount = computed(() => all.value.length);
   /** True while at least one alarm banner is showing — pill goes accent-pulse. */
   const firing = computed(() => banners.value.length > 0);
+
+  /** Follow-ups grouped into board columns, each column sorted by due_at
+   *  ascending (most urgent first). Re-evaluates every tick via `now`. */
+  const buckets = computed<Record<Bucket, Followup[]>>(() => {
+    const grouped: Record<Bucket, Followup[]> = {
+      overdue: [],
+      within1h: [],
+      today: [],
+      later: [],
+      fired: [],
+    };
+    for (const f of Object.values(map.value)) {
+      grouped[bucketOf(f, now.value)].push(f);
+    }
+    for (const key of BUCKET_ORDER) {
+      grouped[key].sort((a, b) => Date.parse(a.due_at) - Date.parse(b.due_at));
+    }
+    return grouped;
+  });
 
   function get(ticketId: string): Followup | undefined {
     return map.value[ticketId];
@@ -149,6 +200,7 @@ export const useFollowupsStore = defineStore('followups', () => {
     all,
     pendingCount,
     firing,
+    buckets,
     get,
     isDue,
     load,
