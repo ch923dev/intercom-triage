@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from httpx import AsyncClient
 
@@ -44,6 +46,20 @@ async def test_snooze_updates_due_at_and_clears_fired(client: AsyncClient) -> No
     body = snoozed.json()
     assert body["fired"] is False
     assert body["due_at"] != _DUE  # rescheduled to now + 15m
+
+
+@pytest.mark.asyncio
+async def test_snooze_returns_utc_aware_due_at(client: AsyncClient) -> None:
+    """Regression: a tz-naive `due_at` string is parsed by JS `Date` as *local*
+    time, so a 15-min snooze fires immediately for any operator east of UTC.
+    The API must emit a `Z`-suffixed UTC instant ~15m in the future."""
+    await client.put("/followups/T1", json={"due_at": _DUE, "reason": None})
+    snoozed = await client.post("/followups/T1/snooze", json={"minutes": 15})
+
+    due_at = snoozed.json()["due_at"]
+    assert due_at.endswith("Z"), f"due_at not UTC-aware: {due_at!r}"
+    delta = (datetime.fromisoformat(due_at) - datetime.now(UTC)).total_seconds()
+    assert 13 * 60 < delta < 16 * 60, f"due_at not ~15m ahead: {delta}s"
 
 
 @pytest.mark.asyncio

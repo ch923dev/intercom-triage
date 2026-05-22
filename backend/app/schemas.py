@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer
 
 
 def _naive_utc(value: datetime) -> datetime:
@@ -22,8 +22,30 @@ def _naive_utc(value: datetime) -> datetime:
     return value
 
 
-# A datetime field that always stores naive UTC, whatever tz the input carried.
-NaiveUTCDatetime = Annotated[datetime, AfterValidator(_naive_utc)]
+def _isoformat_utc(value: datetime) -> str:
+    """Serialize a datetime as a `Z`-suffixed UTC ISO string.
+
+    DB columns store *naive* UTC. A naive datetime emitted with no tz marker is
+    parsed by JS `Date`/`Date.parse` as the operator's *local* time, shifting
+    every timestamp by their UTC offset — which fires snoozed follow-ups
+    immediately for anyone east of UTC. Stamping the marker keeps the client's
+    `Date` parse anchored to true UTC.
+    """
+    aware = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    return aware.isoformat().replace("+00:00", "Z")
+
+
+# Emits a `Z`-suffixed UTC ISO string on output. Use for every datetime that
+# leaves the API in a response model.
+UTCDatetime = Annotated[datetime, PlainSerializer(_isoformat_utc, return_type=str)]
+
+# A datetime field that always stores naive UTC, whatever tz the input carried,
+# and serializes back out as `Z`-suffixed UTC.
+NaiveUTCDatetime = Annotated[
+    datetime,
+    AfterValidator(_naive_utc),
+    PlainSerializer(_isoformat_utc, return_type=str),
+]
 
 TicketState = Literal["open", "snoozed", "closed"]
 LookbackUnit = Literal["hours", "days"]
@@ -58,8 +80,8 @@ class CategoryRead(BaseModel):
     is_active: bool
     is_fallback: bool
     source: CategorySource
-    created_at: datetime
-    archived_at: datetime | None
+    created_at: UTCDatetime
+    archived_at: UTCDatetime | None
 
 
 class CategoryCreate(BaseModel):
@@ -85,8 +107,8 @@ class CategoryProposalRead(BaseModel):
     example_ticket_ids: list[str] = Field(default_factory=list)
     status: ProposalStatus
     resolved_category_id: int | None
-    created_at: datetime
-    resolved_at: datetime | None
+    created_at: UTCDatetime
+    resolved_at: UTCDatetime | None
 
 
 class CategoriesResponse(BaseModel):
@@ -119,11 +141,11 @@ class FollowupRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     ticket_id: str
-    due_at: datetime
+    due_at: UTCDatetime
     reason: str | None
     fired: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
 
 class FollowupSet(BaseModel):
@@ -143,7 +165,7 @@ class TicketNoteRead(BaseModel):
 
     ticket_id: str
     body: str
-    updated_at: datetime
+    updated_at: UTCDatetime
 
 
 class TicketNoteSet(BaseModel):
