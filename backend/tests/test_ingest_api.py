@@ -5,7 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from app.models import Category
+from tests.helpers import FakeOpenRouter, existing_assignment
 
 
 def _hydrated(ticket_id: str, *, state: str = "open", title: str = "Need help") -> dict:
@@ -80,14 +85,48 @@ async def test_get_tickets_applies_manual_override(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_ingest_warm_cache_skips_recategorization(client: AsyncClient) -> None:
-    first = await client.post("/tickets/ingest", json=[_hydrated("C1")])
+async def test_ingest_warm_cache_skips_recategorization(
+    app: FastAPI,
+    client: AsyncClient,
+) -> None:
+    # A genuine AI result IS cached — re-ingesting the unchanged conversation
+    # is a cache hit and skips the AI call.
+    app.state.openrouter = FakeOpenRouter({"C2": existing_assignment(1)})
+    payload = _hydrated("C2")
+
+    first = await client.post("/tickets/ingest", json=[payload])
     assert first.json()["categorized"] == 1
 
-    # Same conversation, unchanged `updated_at` would be a cache hit — but
-    # `_hydrated` re-stamps now, so this is a fresh timestamp → recategorized.
-    # Re-post the very same payload to exercise the warm path instead.
-    payload = _hydrated("C2")
-    await client.post("/tickets/ingest", json=[payload])
     again = await client.post("/tickets/ingest", json=[payload])
     assert again.json()["categorized"] == 0  # served from the AI cache
+
+
+@pytest.mark.asyncio
+async def test_ingest_does_not_cache_ai_failure(app: FastAPI, client: AsyncClient) -> None:
+    """A failed AI call degrades the ticket to the fallback category but must
+    NOT be cached — a later sync re-attempts categorization rather than serving
+    the poisoned fallback from cache."""
+    async with app.state.session_factory() as s:
+        fallback_id = await s.scalar(select(Category.id).where(Category.is_fallback.is_(True)))
+    assert fallback_id is not None
+
+    payload = _hydrated("C1")
+
+    # First sync: AI has no canned response for C1 → FakeOpenRouter raises →
+    # the ticket degrades to the fallback category.
+    app.state.openrouter = FakeOpenRouter({})
+    first = await client.post("/tickets/ingest", json=[payload])
+    assert first.json()["categorized"] == 1
+
+    degraded = (await client.get("/tickets")).json()[0]
+    assert degraded["category_id"] == fallback_id
+    assert degraded["ai_confidence"] == 0.0
+
+    # Second sync: AI recovers. The unchanged conversation must be re-attempted
+    # (not a cache hit) and pick up the real category.
+    app.state.openrouter = FakeOpenRouter({"C1": existing_assignment(2)})
+    again = await client.post("/tickets/ingest", json=[payload])
+    assert again.json()["categorized"] == 1  # re-attempted, cache was not poisoned
+
+    recovered = (await client.get("/tickets")).json()[0]
+    assert recovered["category_id"] == 2

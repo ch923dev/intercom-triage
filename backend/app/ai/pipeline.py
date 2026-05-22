@@ -46,6 +46,11 @@ class CategorizationResult:
     confidence: float
     subject: str = ""  # <=80 chars; AI-generated title. Used when Intercom's
     # conversation title is empty. Operator can override via PATCH /tickets/{id}.
+    fallback: bool = False  # True when this result is the degraded fallback (AI
+    # call failed or unavailable). Callers must NOT cache a fallback result —
+    # caching it would pin the ticket to the fallback category until a new
+    # customer message arrives. A cached result read back is always a genuine
+    # categorization, so this stays False on the cache-read path.
 
 
 # ── T014 — parser ─────────────────────────────────────────────────────────────
@@ -216,6 +221,7 @@ def _fallback(ticket: HydratedTicket, fallback_category_id: int) -> Categorizati
         # No AI subject available — leave empty so `_upsert_ticket` falls back to
         # Intercom's title (which may itself be empty; UI shows the placeholder).
         subject="",
+        fallback=True,
     )
 
 

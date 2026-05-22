@@ -114,7 +114,10 @@ async def fetch_tickets(
     )
     for ticket in uncached:
         result = fresh[ticket.id]
-        await set_cached(session, ticket.id, result, _content_signature(ticket))
+        # Skip caching a fallback — a failed AI call must retry on the next
+        # fetch, not pin the ticket to the fallback category (see pipeline._fallback).
+        if not result.fallback:
+            await set_cached(session, ticket.id, result, _content_signature(ticket))
         results[ticket.id] = result
 
     # Persist new proposals + cache writes before reading overrides.
@@ -340,7 +343,11 @@ async def ingest_tickets(
     )
     for ticket in uncached:
         result = fresh[ticket.id]
-        await set_cached(session, ticket.id, result, _content_signature(ticket))
+        # Skip caching a fallback — a transient OpenRouter failure must retry on
+        # the next sync, not poison the cache with the fallback category until a
+        # new customer message arrives (see pipeline._fallback).
+        if not result.fallback:
+            await set_cached(session, ticket.id, result, _content_signature(ticket))
         results[ticket.id] = result
 
     for ticket in hydrated:
