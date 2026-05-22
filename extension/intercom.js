@@ -13,8 +13,8 @@
 // Endpoints (workspace = `app_id`):
 //   - list  : GET /ember/inbox/conversations/list
 //   - detail: GET /ember/inbox/conversations/{id}
-// Detail carries `renderable_parts[]`; only `renderable_type` 1 (inbound) and
-// 24 (admin reply) hold conversation text — events (5/14/etc.) are skipped.
+// Detail carries `renderable_parts[]`; only the message types below hold
+// conversation text — events (5/14/etc.) are skipped.
 
 const INTERCOM_BASE = 'https://app.intercom.com';
 const APP_ID_STORAGE_KEY = 'intercomAppId';
@@ -22,18 +22,18 @@ const APP_ID_STORAGE_KEY = 'intercomAppId';
 // Renderable types we know carry conversation text. Decoded via live
 // inspection — assignment/attribute/translation events fall through and are
 // filtered out implicitly because `blocksToPlainText` yields '' for them.
-//   1  — Messenger inbound (customer)            → parts[], is_admin=false
-//   12 — Email inbound (customer)                → parts[], is_admin=false
-//   24 — Admin reply visible to the customer     → parts[], is_admin=true
-//   2  — Admin internal team note (NOT outbound) → internal_notes[]
-//   71 — Bot / AI translation event              → skip
+//   1  — Messenger inbound (customer)        → parts[], is_admin=false
+//   12 — Email inbound (customer)            → parts[], is_admin=false
+//   2  — Admin reply visible to the customer → parts[], is_admin=true
+//   24 — Admin reply visible to the customer → parts[], is_admin=true
+//   71 — Bot / AI translation event          → skip
+//
+// NOTE: an earlier guess that `renderable_type` 2 was an internal team note
+// was wrong — in this workspace type 2 carries an ordinary admin reply sent
+// to the customer (the bodies read as customer-facing replies). It is treated
+// as part of the conversation, same as type 24.
 const INBOUND_RENDERABLE_TYPES = new Set([1, 12]);
-const ADMIN_REPLY_RENDERABLE_TYPE = 24;
-const INTERNAL_NOTE_RENDERABLE_TYPE = 2;
-const MESSAGE_RENDERABLE_TYPES = new Set([
-  ...INBOUND_RENDERABLE_TYPES,
-  ADMIN_REPLY_RENDERABLE_TYPE,
-]);
+const ADMIN_REPLY_RENDERABLE_TYPES = new Set([2, 24]);
 
 class IntercomSessionError extends Error {
   constructor(status, message) {
@@ -189,8 +189,8 @@ function authorFromSummary(summary) {
   };
 }
 
-/** Admin replies (renderable_type 24) carry the teammate in `entity`; internal
- *  notes (type 2) carry them in `admin_summary`. Either way it's an admin. */
+/** Admin replies carry the teammate in `entity` (type 24) or `admin_summary`
+ *  (type 2). Either way it's an admin. */
 function authorFromAdminBlob(blob) {
   if (!blob || typeof blob !== 'object') return { id: null, name: null, email: null, type: 'admin' };
   return {
@@ -217,7 +217,6 @@ export function normalizeConversation(detail, appId, summary) {
   const createdIso = toIso(detail.created_at, nowIso);
 
   const parts = [];
-  const internalNotes = [];
   for (const node of detail.renderable_parts ?? []) {
     const renderableType = node?.renderable_type;
     const data = node.renderable_data ?? {};
@@ -232,20 +231,11 @@ export function normalizeConversation(detail, appId, summary) {
         created_at: createdAt,
         is_admin: false,
       });
-    } else if (renderableType === ADMIN_REPLY_RENDERABLE_TYPE) {
+    } else if (ADMIN_REPLY_RENDERABLE_TYPES.has(renderableType)) {
       const body = blocksToPlainText(data.blocks);
       if (!body) continue;
       parts.push({
         author: authorFromAdminBlob(data.entity || data.admin_summary || data.author),
-        body,
-        created_at: createdAt,
-        is_admin: true,
-      });
-    } else if (renderableType === INTERNAL_NOTE_RENDERABLE_TYPE) {
-      const body = blocksToPlainText(data.blocks);
-      if (!body) continue;
-      internalNotes.push({
-        author: authorFromAdminBlob(data.admin_summary || data.entity || data.author),
         body,
         created_at: createdAt,
         is_admin: true,
@@ -268,7 +258,9 @@ export function normalizeConversation(detail, appId, summary) {
     author,
     url: `https://app.intercom.com/a/inbox/${appId}/inbox/conversation/${id}`,
     parts,
-    internal_notes: internalNotes,
+    // No internal-note channel any more (type 2 turned out to be a customer
+    // reply). Kept as an empty list for backend-schema compatibility.
+    internal_notes: [],
   };
 }
 

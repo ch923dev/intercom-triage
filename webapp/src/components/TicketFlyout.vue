@@ -309,14 +309,59 @@ async function resetField(field: 'title' | 'summary') {
 <template>
   <Teleport to="body">
     <div v-if="ticket" class="scrim" @click.self="close">
-      <aside class="flyout">
+      <div class="modal">
         <header>
           <Mono :size="11">{{ ticket.id }}</Mono>
           <button class="x" title="Close" @click="close">✕</button>
         </header>
 
-        <div class="body">
-          <!-- Editable subject. Click to edit; Enter saves, Esc cancels. -->
+        <div class="panes">
+          <!-- Conversation — centre pane, scrolls on its own. -->
+          <div class="convo-pane">
+            <div class="convo-head mono">
+              <span>Conversation</span>
+              <span class="convo-count">
+                {{ messageCount }} message{{ messageCount === 1 ? '' : 's' }}
+                <template v-if="noteCount">
+                  · {{ noteCount }} note{{ noteCount === 1 ? '' : 's' }}</template>
+              </span>
+            </div>
+
+            <p v-if="!timeline.length" class="convo-empty mono">
+              No conversation messages yet
+            </p>
+            <div v-else class="chat">
+              <template v-for="(m, i) in timeline" :key="i">
+                <!-- Internal note — centred inset, side-channel context. -->
+                <div v-if="m.kind === 'note'" class="note-item">
+                  <div class="note-head">
+                    <span class="note-tag">Internal note</span>
+                    <span class="note-author">{{ m.author.name ?? 'Teammate' }}</span>
+                    <span class="note-time">{{ partTime(m.created_at) }}</span>
+                  </div>
+                  <p class="note-body">{{ m.body }}</p>
+                </div>
+
+                <!-- Chat message — customer (left) or teammate reply (right). -->
+                <div v-else class="chat-row" :class="m.kind">
+                  <div class="avatar" :class="m.kind">{{ initials(m.author.name) }}</div>
+                  <div class="bubble-wrap">
+                    <div class="bubble-head">
+                      <span class="bubble-author">
+                        {{ m.author.name ?? (m.kind === 'admin' ? 'Teammate' : 'Customer') }}
+                      </span>
+                      <span class="bubble-time">{{ partTime(m.created_at) }}</span>
+                    </div>
+                    <div class="bubble" :class="m.kind">{{ m.body }}</div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Ticket controls — side pane, scrolls on its own. -->
+          <aside class="detail-pane">
+            <!-- Editable subject. Click to edit; Enter saves, Esc cancels. -->
           <div class="title-row">
             <input
               v-if="titleEditing"
@@ -395,42 +440,6 @@ async function resetField(field: 'title' | 'summary') {
 
           <div v-if="editError" class="mono err">{{ editError }}</div>
 
-          <!-- Conversation timeline — customer + teammate replies + internal
-               notes, merged chronologically. -->
-          <section v-if="timeline.length" class="block">
-            <div class="mono label">
-              Conversation · {{ messageCount }} message{{ messageCount === 1 ? '' : 's' }}
-              <span v-if="noteCount"> · {{ noteCount }} note{{ noteCount === 1 ? '' : 's' }}</span>
-            </div>
-            <div class="chat">
-              <template v-for="(m, i) in timeline" :key="i">
-                <!-- Internal note — full-width inset, side-channel context. -->
-                <div v-if="m.kind === 'note'" class="note-item">
-                  <div class="note-head">
-                    <span class="note-tag">Internal note</span>
-                    <span class="note-author">{{ m.author.name ?? 'Teammate' }}</span>
-                    <span class="note-time">{{ partTime(m.created_at) }}</span>
-                  </div>
-                  <p class="note-body">{{ m.body }}</p>
-                </div>
-
-                <!-- Chat message — customer (left) or teammate reply (right). -->
-                <div v-else class="chat-row" :class="m.kind">
-                  <div class="avatar" :class="m.kind">{{ initials(m.author.name) }}</div>
-                  <div class="bubble-wrap">
-                    <div class="bubble-head">
-                      <span class="bubble-author">
-                        {{ m.author.name ?? (m.kind === 'admin' ? 'Teammate' : 'Customer') }}
-                      </span>
-                      <span class="bubble-time">{{ partTime(m.created_at) }}</span>
-                    </div>
-                    <div class="bubble" :class="m.kind">{{ m.body }}</div>
-                  </div>
-                </div>
-              </template>
-            </div>
-          </section>
-
           <div class="row">
             <span class="customer">{{ ticket.author.name ?? '—' }}</span>
             <a
@@ -502,8 +511,9 @@ async function resetField(field: 'title' | 'summary') {
               </button>
             </div>
           </section>
+          </aside>
         </div>
-      </aside>
+      </div>
     </div>
   </Teleport>
 </template>
@@ -512,21 +522,101 @@ async function resetField(field: 'title' | 'summary') {
 .scrim {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.28);
+  background: rgba(0, 0, 0, 0.42);
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: center;
   z-index: 40;
 }
-.flyout {
-  width: 420px;
-  max-width: 92vw;
-  height: 100%;
+/* Centred modal: a conversation pane (centre) + a controls pane (side). */
+.modal {
+  width: min(980px, 95vw);
+  height: min(86vh, 820px);
   background: var(--bg);
-  border-left: var(--hairline) solid var(--line);
+  border: var(--hairline) solid var(--line);
+  border-radius: 14px;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
-  animation: triageSlide 0.16s ease-out;
+  overflow: hidden;
+  animation: triagePop 0.16s ease-out;
+}
+@keyframes triagePop {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+/* Conversation pane — its message list scrolls independently. */
+.convo-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.convo-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: var(--hairline) solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.convo-count {
+  color: var(--ink-3);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.convo-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+}
+/* Controls pane — title, summary, follow-up, notes; scrolls independently. */
+.detail-pane {
+  flex: 0 0 320px;
+  overflow-y: auto;
+  padding: 16px;
+  border-left: var(--hairline) solid var(--line);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+@media (max-width: 760px) {
+  .modal {
+    width: 96vw;
+    height: 92vh;
+  }
+  .panes {
+    flex-direction: column;
+  }
+  .convo-pane {
+    min-height: 220px;
+  }
+  .detail-pane {
+    flex: 0 0 auto;
+    border-left: 0;
+    border-top: var(--hairline) solid var(--line);
+  }
 }
 header {
   display: flex;
@@ -541,13 +631,6 @@ header {
   color: var(--ink-3);
   cursor: pointer;
   font-size: 14px;
-}
-.body {
-  padding: 16px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 .title-row {
   display: flex;
@@ -747,9 +830,13 @@ header {
 }
 /* ── Conversation timeline — modern chat ──────────────────────────────────── */
 .chat {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 11px;
+  padding: 16px 20px;
 }
 .chat-row {
   display: flex;
@@ -834,9 +921,10 @@ html[data-theme='dark'] .bubble.admin {
   border-color: oklch(0.42 0.07 145);
   color: oklch(0.9 0.07 145);
 }
-/* Internal note — full-width inset, dashed amber, side-channel context. */
+/* Internal note — centred inset, dashed amber, side-channel context. */
 .note-item {
-  align-self: stretch;
+  align-self: center;
+  width: 88%;
   background: oklch(0.96 0.035 95);
   border: var(--hairline) dashed oklch(0.78 0.09 95);
   border-radius: 8px;
