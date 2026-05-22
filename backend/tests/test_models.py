@@ -217,6 +217,48 @@ async def test_init_db_stamps_preexisting_schema() -> None:
 
 
 @pytest.mark.asyncio
+async def test_init_db_stamps_after_failed_prior_boot() -> None:
+    """A prior failed migration leaves alembic_version present but EMPTY
+    (SQLite commits the DDL non-transactionally; the row insert never runs).
+    init_db must treat that the same as a missing version table and stamp
+    head, not re-run migrations from scratch."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "halfmigrated.db"
+        url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+
+        from app.models import Base
+
+        engine = make_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                # Mirror the relic of a failed Alembic boot: the version table
+                # exists but no row was ever inserted.
+                await conn.execute(
+                    text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"),
+                )
+        finally:
+            await engine.dispose()
+
+        engine = make_engine(url)
+        factory = make_session_factory(engine)
+        try:
+            await init_db(engine, factory)
+            alembic_cfg = AlembicConfig(str(_ALEMBIC_INI))
+            script = ScriptDirectory.from_config(alembic_cfg)
+            head_revision = script.get_current_head()
+            async with engine.connect() as conn:
+                result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+                row = result.fetchone()
+            assert row is not None and row[0] == head_revision
+        finally:
+            await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_followup_reason_length_constraint() -> None:
     """T045 — a follow-up reason longer than 80 chars is rejected."""
     from datetime import datetime

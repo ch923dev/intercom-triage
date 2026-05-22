@@ -429,12 +429,14 @@ def _run_migrations_sync(connection: Any) -> None:
     bypassing `env.py` entirely, which is the correct approach for programmatic
     use with an existing connection.
 
-    Three cases handled:
-      - `alembic_version` exists  → normal `upgrade head` (idempotent).
-      - `alembic_version` missing but app tables exist (pre-Alembic DB created
-        by the old `create_all` + `_ensure_*_column` path)  → `stamp head`. The
-        schema is already current; we just need to mark the revision so future
-        migrations apply cleanly.
+    Cases handled:
+      - app tables exist AND `alembic_version` has a row  → `upgrade head`
+        (idempotent — Alembic skips applied revisions).
+      - app tables exist AND `alembic_version` is missing OR empty
+        (pre-Alembic DB, or the relic of a previous failed boot which created
+        the version table non-transactionally and never wrote a row)  →
+        `stamp head`. Schema is already at the head shape; we just need to
+        record the revision so future migrations apply cleanly.
       - Empty DB  → `upgrade head` from scratch.
     """
     cfg = _make_alembic_cfg()
@@ -445,11 +447,20 @@ def _run_migrations_sync(connection: Any) -> None:
     # `categories` is a stable proxy for "the app's tables are here" — it's
     # been part of the schema since the first release.
     has_app_tables = "categories" in existing_tables
+    # An empty `alembic_version` table is the fingerprint of a previous failed
+    # migration attempt: SQLite's non-transactional DDL committed the table
+    # but the version row was never written. From Alembic's view that's "at
+    # base"; from ours, the schema is already at head. Treat the same as a
+    # missing version table.
+    version_row_present = False
+    if has_version_table:
+        row = connection.exec_driver_sql("SELECT version_num FROM alembic_version").first()
+        version_row_present = row is not None
 
-    if has_app_tables and not has_version_table:
-        # Pre-Alembic DB. Stamp the head revision without running any scripts.
+    if has_app_tables and not version_row_present:
         context = MigrationContext.configure(
-            connection=connection, opts={"target_metadata": Base.metadata}
+            connection=connection,
+            opts={"target_metadata": Base.metadata},
         )
         context.stamp(script, "head")
         return
