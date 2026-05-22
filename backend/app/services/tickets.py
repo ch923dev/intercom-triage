@@ -11,7 +11,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.pipeline import CategorizationResult, categorize_many
@@ -418,18 +418,47 @@ async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
     filter_settings = await get_settings(session)
     threshold = _threshold_datetime(filter_settings)
 
-    rows = (await session.scalars(select(Ticket))).all()
-    overrides = {o.ticket_id: o for o in (await session.scalars(select(Override))).all()}
-    followups = {f.ticket_id: f for f in (await session.scalars(select(Followup))).all()}
-    notes = {n.ticket_id: n for n in (await session.scalars(select(TicketNote))).all()}
+    # Push threshold + state filters into SQL so ix_tickets_updated_at is used
+    # and Python never loads rows that will be discarded.
+    ticket_q = select(Ticket).where(Ticket.updated_at >= threshold)
+    states = list(filter_settings.states)
+    if states:
+        # Mirror the Python rule: rows with state IS NULL are kept regardless;
+        # rows with a non-NULL state must be in the allowed set.
+        ticket_q = ticket_q.where(or_(Ticket.state.is_(None), Ticket.state.in_(states)))
+    rows = (await session.scalars(ticket_q)).all()
+
+    # Scope side-table reads to the result set — avoids full-table scans for
+    # overrides / followups / notes that belong to out-of-window tickets.
+    ticket_ids = [row.id for row in rows]
+    if ticket_ids:
+        overrides = {
+            o.ticket_id: o
+            for o in (
+                await session.scalars(select(Override).where(Override.ticket_id.in_(ticket_ids)))
+            ).all()
+        }
+        followups = {
+            f.ticket_id: f
+            for f in (
+                await session.scalars(select(Followup).where(Followup.ticket_id.in_(ticket_ids)))
+            ).all()
+        }
+        notes = {
+            n.ticket_id: n
+            for n in (
+                await session.scalars(
+                    select(TicketNote).where(TicketNote.ticket_id.in_(ticket_ids))
+                )
+            ).all()
+        }
+    else:
+        overrides = {}
+        followups = {}
+        notes = {}
 
     composed: list[TicketSchema] = []
     for row in rows:
-        if row.updated_at < threshold:
-            continue
-        if row.state is not None and row.state not in filter_settings.states:
-            continue
-
         category_id = row.category_id
         proposal_id = row.proposal_id
         user_override = False
@@ -445,7 +474,7 @@ async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
             TicketSchema(
                 id=row.id,
                 title=row.title,
-                state=row.state,
+                state=row.state,  # type: ignore[arg-type]
                 priority=row.priority,
                 created_at=row.created_at,
                 updated_at=row.updated_at,

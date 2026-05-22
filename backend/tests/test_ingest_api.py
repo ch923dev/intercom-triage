@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from app.models import Category
+from app.models import Category, Ticket
 from tests.helpers import FakeOpenRouter, existing_assignment
 
 
@@ -130,3 +130,66 @@ async def test_ingest_does_not_cache_ai_failure(app: FastAPI, client: AsyncClien
 
     recovered = (await client.get("/tickets")).json()[0]
     assert recovered["category_id"] == 2
+
+
+@pytest.mark.asyncio
+async def test_get_tickets_sql_threshold_cutoff(app: FastAPI, client: AsyncClient) -> None:
+    """SQL pushdown regression — tickets outside the lookback window must be
+    excluded at the query level, not in Python.  A ticket inside the window
+    with the correct state must be returned."""
+    # Retrieve the fallback category id so we can build a minimal Ticket row.
+    async with app.state.session_factory() as s:
+        fallback_id = await s.scalar(select(Category.id).where(Category.is_fallback.is_(True)))
+    assert fallback_id is not None
+
+    author = {"id": "u1", "name": "Customer", "email": "c@example.com", "type": "user"}
+    now = datetime.now(UTC).replace(tzinfo=None)  # naive UTC, matching stored convention
+    old = now - timedelta(days=7)  # well outside the default 24 h lookback
+
+    async with app.state.session_factory() as s:
+        # Ticket inside the window — should appear in GET /tickets.
+        s.add(
+            Ticket(
+                id="RECENT-1",
+                title="recent ticket",
+                state="open",
+                priority=None,
+                url=None,
+                author=author,
+                parts=[],
+                internal_notes=[],
+                created_at=now,
+                updated_at=now,
+                category_id=fallback_id,
+                proposal_id=None,
+                summary="",
+                ai_confidence=0.0,
+                ingested_at=now,
+            )
+        )
+        # Ticket outside the window — must NOT appear in GET /tickets.
+        s.add(
+            Ticket(
+                id="OLD-1",
+                title="old ticket",
+                state="open",
+                priority=None,
+                url=None,
+                author=author,
+                parts=[],
+                internal_notes=[],
+                created_at=old,
+                updated_at=old,
+                category_id=fallback_id,
+                proposal_id=None,
+                summary="",
+                ai_confidence=0.0,
+                ingested_at=old,
+            )
+        )
+        await s.commit()
+
+    rows = (await client.get("/tickets")).json()
+    ids = {t["id"] for t in rows}
+    assert "RECENT-1" in ids, "ticket inside lookback window must be returned"
+    assert "OLD-1" not in ids, "ticket outside lookback window must be excluded"
