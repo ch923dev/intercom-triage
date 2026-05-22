@@ -4,7 +4,7 @@ interface Props {
   color?: string;
   size?: number;
 }
-const props = withDefaults(defineProps<Props>(), { size: 10.5 });
+const props = withDefaults(defineProps<Props>(), { size: 10.5, color: undefined });
 </script>
 
 <template>

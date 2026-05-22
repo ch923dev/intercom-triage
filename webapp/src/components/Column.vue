@@ -23,7 +23,7 @@ interface Props {
 }
 const props = defineProps<Props>();
 
-const tickets = useTicketsStore();
+const ticketsStore = useTicketsStore();
 const emit = defineEmits<{
   (e: 'select', ticket: Ticket): void;
 }>();
@@ -31,7 +31,7 @@ const emit = defineEmits<{
 function onChange(event: { added?: { element: Ticket } }) {
   // vuedraggable fires `added` on the destination list when an item moves in.
   if (event.added) {
-    void tickets.applyOverride(event.added.element.id, props.column.id);
+    void ticketsStore.applyOverride(event.added.element.id, props.column.id);
   }
 }
 
@@ -61,7 +61,7 @@ function modelList() {
         <TicketCard
           :ticket="element"
           :selected="props.selectedId === element.id"
-          :overridden="element.user_override || !!tickets.pendingOverrides[element.id]"
+          :overridden="element.user_override || !!ticketsStore.pendingOverrides[element.id]"
           @click="emit('select', element)"
         />
       </template>
