@@ -1,7 +1,13 @@
 """AI cache read/write. Reference: plan.md §7, tasks.md T017.
 
-A cache row is invalid when its TTL has elapsed OR the incoming ticket's
-`updated_at` is newer than the cached one (the conversation changed).
+A cache row is invalid when its TTL has elapsed OR the incoming `signature` is
+newer than the stored one (the *customer-visible* thread advanced).
+
+`signature` is conceptually the last-part timestamp of the conversation
+(see `services.tickets._content_signature`), not Intercom's `updated_at` — so
+internal teammate notes, assignment changes, and snoozes don't invalidate the
+cache. The column name `ticket_updated_at` is retained for backward compat with
+existing rows; treat it as "content signature".
 """
 
 from __future__ import annotations
@@ -18,15 +24,15 @@ from app.util import naive_utcnow
 async def get_cached(
     session: AsyncSession,
     ticket_id: str,
-    ticket_updated_at: datetime,
+    signature: datetime,
     ttl_seconds: int,
 ) -> CategorizationResult | None:
     """Return a valid cached result, or `None` on miss / stale / expired."""
     row = await session.get(AICacheEntry, ticket_id)
     if row is None:
         return None
-    # Stale: the conversation advanced since we cached.
-    if ticket_updated_at > row.ticket_updated_at:
+    # Stale: a new customer-visible message arrived since we cached.
+    if signature > row.ticket_updated_at:
         return None
     # Expired: TTL elapsed.
     if naive_utcnow() - row.cached_at > timedelta(seconds=ttl_seconds):
@@ -43,7 +49,7 @@ async def set_cached(
     session: AsyncSession,
     ticket_id: str,
     result: CategorizationResult,
-    ticket_updated_at: datetime,
+    signature: datetime,
 ) -> None:
     """Upsert a cache row. Exactly one of `category_id` / `proposal_id` is set —
     the DB XOR check rejects anything else."""
@@ -57,7 +63,7 @@ async def set_cached(
                 proposal_id=result.proposal_id,
                 summary=result.summary,
                 confidence=result.confidence,
-                ticket_updated_at=ticket_updated_at,
+                ticket_updated_at=signature,
                 cached_at=now,
             ),
         )
@@ -66,5 +72,5 @@ async def set_cached(
     row.proposal_id = result.proposal_id
     row.summary = result.summary
     row.confidence = result.confidence
-    row.ticket_updated_at = ticket_updated_at
+    row.ticket_updated_at = signature
     row.cached_at = now

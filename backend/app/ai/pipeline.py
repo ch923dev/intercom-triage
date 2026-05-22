@@ -91,7 +91,9 @@ def parse_response(raw: str) -> ParsedAssignment:
     malformed shape — the caller treats that as a fallback trigger (FR-007)."""
     obj = _extract_json_object(raw)
     assignment = obj.get("assignment")
-    summary = str(obj.get("summary") or "")[:280]
+    # 600-char cap matches the SUMMARY rules in the system prompt (2-3 sentences:
+    # intent, context, next action). Card UI line-clamps; flyout shows in full.
+    summary = str(obj.get("summary") or "")[:600]
     confidence = _clamp_confidence(obj.get("confidence"))
 
     if assignment == "existing":

@@ -27,7 +27,7 @@ A) Assign to an EXISTING active category:
    {
      "assignment":  "existing",
      "category_id": <integer id of one of the ACTIVE CATEGORIES below>,
-     "summary":     "<=280 chars; capture intent and any named entity",
+     "summary":     "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":  <float 0..1>
    }
 
@@ -35,7 +35,7 @@ B) Reuse an already-PENDING proposal:
    {
      "assignment":  "pending_proposal",
      "proposal_id": <integer id of one of the PENDING PROPOSALS below>,
-     "summary":     "<=280 chars",
+     "summary":     "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":  <float 0..1>
    }
 
@@ -45,9 +45,18 @@ C) Propose a NEW category (only when no existing category fits with reasonable
      "assignment":           "new_proposal",
      "proposed_name":        "<short, title case, <=32 chars>",
      "proposed_description": "<one sentence describing what belongs here>",
-     "summary":              "<=280 chars",
+     "summary":              "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":           <float 0..1>
    }
+
+SUMMARY rules (applies to all three options):
+- 2 to 3 sentences, total length <= 600 characters.
+- Sentence 1: what the customer is asking or reporting, with any named entity
+  (order id, plan name, error code).
+- Sentence 2: relevant context already gathered in the thread (what's been
+  tried, what the admin has replied, what's still unknown).
+- Sentence 3 (optional): the next concrete action the operator should take.
+- Plain prose. No bullets, no markdown, no greetings, no closing phrases.
 
 Rules:
 - Prefer existing categories. Propose new only when the existing set genuinely

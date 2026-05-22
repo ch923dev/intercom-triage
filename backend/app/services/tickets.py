@@ -41,6 +41,25 @@ def _threshold_unix(filter_settings: FilterSettings, *, now: float | None = None
     return int(now - filter_settings.lookback_value * per_unit)
 
 
+def _content_signature(ticket: HydratedTicket) -> datetime:
+    """Cache key for a hydrated conversation — the timestamp of the most recent
+    customer-visible part (inbound message or admin reply).
+
+    Intercom's `updated_at` advances on assignment changes, snoozes, attribute
+    edits, and internal teammate notes — none of which change the *content* the
+    AI is categorizing. Using the last-part timestamp instead means the AI runs
+    again only when the customer-visible thread genuinely advanced (a new
+    customer message or a new admin reply), and skips re-categorizing for
+    internal-only updates.
+
+    Falls back to `created_at` when a conversation has no renderable parts —
+    rare, but handles the edge cleanly.
+    """
+    if ticket.parts:
+        return max(p.created_at for p in ticket.parts)
+    return ticket.created_at
+
+
 async def fetch_tickets(
     *,
     session: AsyncSession,
@@ -65,14 +84,17 @@ async def fetch_tickets(
 
     fallback = await get_fallback(session)
 
-    # Split cached vs uncached (FR-008).
+    # Split cached vs uncached (FR-008). Cache key is the last-part timestamp
+    # (see `_content_signature`), so AI only re-fires on a new customer-visible
+    # message — internal notes / assignment changes still hit the cache.
     results: dict[str, CategorizationResult] = {}
     uncached: list[HydratedTicket] = []
     for ticket in hydrated:
+        signature = _content_signature(ticket)
         cached = await get_cached(
             session,
             ticket.id,
-            ticket.updated_at,
+            signature,
             config.cache_ttl_seconds,
         )
         if cached is not None:
@@ -92,7 +114,7 @@ async def fetch_tickets(
     )
     for ticket in uncached:
         result = fresh[ticket.id]
-        await set_cached(session, ticket.id, result, ticket.updated_at)
+        await set_cached(session, ticket.id, result, _content_signature(ticket))
         results[ticket.id] = result
 
     # Persist new proposals + cache writes before reading overrides.
@@ -251,13 +273,18 @@ async def ingest_tickets(
     """
     fallback = await get_fallback(session)
 
+    # Cache key is the last-part timestamp (see `_content_signature`) — AI only
+    # re-fires on a new customer-visible message. Internal teammate notes and
+    # assignment changes bump Intercom's `updated_at` but leave parts[] alone,
+    # so they get a cache hit (no AI call, no token spend).
     results: dict[str, CategorizationResult] = {}
     uncached: list[HydratedTicket] = []
     for ticket in hydrated:
+        signature = _content_signature(ticket)
         cached = await get_cached(
             session,
             ticket.id,
-            ticket.updated_at,
+            signature,
             config.cache_ttl_seconds,
         )
         if cached is not None:
@@ -276,7 +303,7 @@ async def ingest_tickets(
     )
     for ticket in uncached:
         result = fresh[ticket.id]
-        await set_cached(session, ticket.id, result, ticket.updated_at)
+        await set_cached(session, ticket.id, result, _content_signature(ticket))
         results[ticket.id] = result
 
     for ticket in hydrated:
@@ -320,7 +347,7 @@ async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
             TicketSchema(
                 id=row.id,
                 title=row.title,
-                state=row.state,  # type: ignore[arg-type]
+                state=row.state,
                 priority=row.priority,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
