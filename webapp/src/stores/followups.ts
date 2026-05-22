@@ -60,8 +60,15 @@ export const useFollowupsStore = defineStore('followups', () => {
   /** True while at least one alarm banner is showing — pill goes accent-pulse. */
   const firing = computed(() => banners.value.length > 0);
 
-  /** Follow-ups grouped into board columns, each column sorted by due_at
-   *  ascending (most urgent first). Re-evaluates every tick via `now`. */
+  /** Follow-ups pre-sorted by due_at. Recomputed only when map changes, not
+   *  on every tick — due_at is immutable between ticks (snooze mutates map). */
+  const _sortedByDueAt = computed(() =>
+    Object.values(map.value).sort((a, b) => Date.parse(a.due_at) - Date.parse(b.due_at)),
+  );
+
+  /** Follow-ups grouped into board columns, each column already in due_at
+   *  ascending order (most urgent first). Reuses the pre-sorted list so no
+   *  per-column sort is needed on each tick. */
   const buckets = computed<Record<Bucket, Followup[]>>(() => {
     const grouped: Record<Bucket, Followup[]> = {
       overdue: [],
@@ -70,11 +77,8 @@ export const useFollowupsStore = defineStore('followups', () => {
       later: [],
       fired: [],
     };
-    for (const f of Object.values(map.value)) {
+    for (const f of _sortedByDueAt.value) {
       grouped[bucketOf(f, now.value)].push(f);
-    }
-    for (const key of BUCKET_ORDER) {
-      grouped[key].sort((a, b) => Date.parse(a.due_at) - Date.parse(b.due_at));
     }
     return grouped;
   });
