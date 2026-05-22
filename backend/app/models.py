@@ -306,6 +306,18 @@ class Ticket(Base):
     )
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
     ai_confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    # When True, the operator manually edited the field via PATCH /tickets/{id}.
+    # The ingest pipeline preserves edited values across re-syncs (FR-???).
+    title_user_edited: Mapped[bool] = mapped_column(
+        default=False,
+        server_default=text("0"),
+        nullable=False,
+    )
+    summary_user_edited: Mapped[bool] = mapped_column(
+        default=False,
+        server_default=text("0"),
+        nullable=False,
+    )
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=text("CURRENT_TIMESTAMP"),
@@ -404,6 +416,23 @@ def _ensure_internal_notes_column(conn: Any) -> None:
     conn.exec_driver_sql("ALTER TABLE tickets ADD COLUMN internal_notes JSON DEFAULT '[]' NOT NULL")
 
 
+def _ensure_user_edited_columns(conn: Any) -> None:
+    """Add `tickets.title_user_edited` + `tickets.summary_user_edited` for DBs
+    ingested before operator-editable title/summary landed. No-op once present."""
+    inspector = sqla_inspect(conn)
+    if "tickets" not in inspector.get_table_names():
+        return
+    columns = {col["name"] for col in inspector.get_columns("tickets")}
+    if "title_user_edited" not in columns:
+        conn.exec_driver_sql(
+            "ALTER TABLE tickets ADD COLUMN title_user_edited BOOLEAN DEFAULT 0 NOT NULL",
+        )
+    if "summary_user_edited" not in columns:
+        conn.exec_driver_sql(
+            "ALTER TABLE tickets ADD COLUMN summary_user_edited BOOLEAN DEFAULT 0 NOT NULL",
+        )
+
+
 async def init_db(engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]) -> None:
     """Create schema if missing; seed defaults + singleton settings row if empty.
 
@@ -422,6 +451,8 @@ async def init_db(engine: AsyncEngine, session_factory: async_sessionmaker[Async
         await conn.run_sync(_ensure_mute_alarms_column)
         # Same story for the `internal_notes` column added later on `tickets`.
         await conn.run_sync(_ensure_internal_notes_column)
+        # …and the operator-edit flags on `tickets`.
+        await conn.run_sync(_ensure_user_edited_columns)
 
     async with session_factory() as session:
         # Seed categories if empty.

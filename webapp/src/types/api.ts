@@ -100,6 +100,12 @@ export interface Ticket {
   summary: string;
   ai_confidence: number;
   user_override: boolean;
+  /** True when the operator has manually edited the title via PATCH
+   *  `/tickets/{id}`. The edited value is preserved across re-syncs; clear it
+   *  by PATCHing `title: ""` to revert to the AI/Intercom-derived title. */
+  title_user_edited: boolean;
+  /** Same semantics as `title_user_edited`, but for `summary`. */
+  summary_user_edited: boolean;
   followup: Followup | null;
   note: TicketNote | null;
 }

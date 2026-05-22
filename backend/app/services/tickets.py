@@ -212,12 +212,26 @@ def _threshold_datetime(filter_settings: FilterSettings) -> datetime:
     return naive_utcnow() - timedelta(seconds=filter_settings.lookback_value * per_unit)
 
 
+def _resolve_title(hydrated: HydratedTicket, result: CategorizationResult) -> str | None:
+    """Pick the stored title: Intercom's conversation title wins when non-empty
+    (it's what the human-set subject line would be); otherwise the AI's
+    `subject`. Returns `None` only when both sides are empty."""
+    intercom_title = (hydrated.title or "").strip()
+    if intercom_title:
+        return hydrated.title
+    return result.subject or None
+
+
 async def _upsert_ticket(
     session: AsyncSession,
     hydrated: HydratedTicket,
     result: CategorizationResult,
 ) -> None:
-    """Insert or update one stored ticket row from its hydrated + AI data."""
+    """Insert or update one stored ticket row from its hydrated + AI data.
+
+    Operator edits are sticky: a row with `title_user_edited` / `summary_user_edited`
+    keeps its existing values across re-syncs (PATCH /tickets/{id} sets these).
+    """
     author = hydrated.author.model_dump(mode="json")
     parts = [p.model_dump(mode="json") for p in hydrated.parts]
     internal_notes = [n.model_dump(mode="json") for n in hydrated.internal_notes]
@@ -226,7 +240,7 @@ async def _upsert_ticket(
         session.add(
             Ticket(
                 id=hydrated.id,
-                title=hydrated.title,
+                title=_resolve_title(hydrated, result),
                 state=hydrated.state,
                 priority=hydrated.priority,
                 url=hydrated.url,
@@ -243,7 +257,8 @@ async def _upsert_ticket(
             ),
         )
         return
-    row.title = hydrated.title
+    if not row.title_user_edited:
+        row.title = _resolve_title(hydrated, result)
     row.state = hydrated.state
     row.priority = hydrated.priority
     row.url = hydrated.url
@@ -254,7 +269,8 @@ async def _upsert_ticket(
     row.updated_at = hydrated.updated_at
     row.category_id = result.category_id
     row.proposal_id = result.proposal_id
-    row.summary = result.summary
+    if not row.summary_user_edited:
+        row.summary = result.summary
     row.ai_confidence = result.confidence
     row.ingested_at = naive_utcnow()
 
@@ -314,6 +330,44 @@ async def ingest_tickets(
     return IngestResponse(received=len(hydrated), categorized=len(uncached))
 
 
+async def edit_ticket(
+    session: AsyncSession,
+    ticket_id: str,
+    *,
+    title: str | None,
+    summary: str | None,
+) -> None:
+    """Apply operator edits to title / summary. Either field omitted → unchanged;
+    `None` (explicit null) on `title` clears it back to auto. A non-None value
+    sets the corresponding `*_user_edited` flag so re-syncs keep the edit.
+
+    Raises 404 if the ticket isn't stored.
+    """
+    row = await session.get(Ticket, ticket_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"ticket {ticket_id!r} not found")
+
+    # `title` is treated as "set to this exact string"; an empty string clears
+    # the override and reverts to AI/Intercom-derived title on next sync.
+    if title is not None:
+        stripped = title.strip()
+        if stripped:
+            row.title = stripped[:120]
+            row.title_user_edited = True
+        else:
+            row.title_user_edited = False  # next sync re-derives from AI/Intercom
+    if summary is not None:
+        stripped_summary = summary.strip()
+        if stripped_summary:
+            row.summary = stripped_summary[:600]
+            row.summary_user_edited = True
+        else:
+            row.summary_user_edited = False
+            row.summary = ""  # explicit clear; AI fills on next sync
+    await session.commit()
+    metrics.incr("tickets_edited_total")
+
+
 async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
     """Serve the board from stored tickets — no live Intercom call. Honors the
     stored filter settings (lookback / states / included categories)."""
@@ -360,6 +414,8 @@ async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
                 summary=row.summary,
                 ai_confidence=row.ai_confidence,
                 user_override=user_override,
+                title_user_edited=row.title_user_edited,
+                summary_user_edited=row.summary_user_edited,
                 followup=FollowupRead.model_validate(followup) if followup is not None else None,
                 note=TicketNoteRead.model_validate(note) if note is not None else None,
             ),

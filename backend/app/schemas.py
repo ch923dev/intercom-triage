@@ -201,6 +201,10 @@ class TicketSchema(HydratedTicket):
     Inherits `parts` + `internal_notes` from `HydratedTicket`. `note` is the
     operator's local next-step jot (FR-023), independent of any Intercom team
     notes carried in `internal_notes`.
+
+    `title_user_edited` / `summary_user_edited` flag fields edited via
+    `PATCH /tickets/{id}`; the UI shows a small indicator next to the edited
+    field, and re-syncs from Intercom preserve the operator's value.
     """
 
     category_id: int | None
@@ -208,6 +212,8 @@ class TicketSchema(HydratedTicket):
     summary: str
     ai_confidence: float
     user_override: bool
+    title_user_edited: bool = False
+    summary_user_edited: bool = False
     followup: FollowupRead | None = None
     note: TicketNoteRead | None = None
 
@@ -216,6 +222,15 @@ class CategoryUpdate(BaseModel):
     """PATCH /tickets/{id}/category body."""
 
     category_id: int
+
+
+class TicketEdit(BaseModel):
+    """PATCH /tickets/{id} body — operator edits the AI/Intercom-supplied
+    headline + description. Omit a field to leave it unchanged. Empty string
+    on either clears the operator override (next sync restores AI values)."""
+
+    title: str | None = Field(default=None, max_length=200)
+    summary: str | None = Field(default=None, max_length=600)
 
 
 class OverrideResponse(BaseModel):

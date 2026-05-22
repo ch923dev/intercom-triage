@@ -15,7 +15,9 @@ from app.schemas import (
     FilterSettings,
     HydratedTicket,
     IngestResponse,
+    OkResponse,
     OverrideResponse,
+    TicketEdit,
     TicketSchema,
 )
 from app.services import tickets as svc
@@ -75,3 +77,20 @@ async def override_category(
     """T026 — persist a manual category override for a ticket."""
     category_id = await svc.set_override(session, ticket_id, body.category_id)
     return OverrideResponse(category_id=category_id)
+
+
+@router.patch("/{ticket_id}", response_model=OkResponse)
+async def edit_ticket(
+    ticket_id: str,
+    body: TicketEdit,
+    session: AsyncSession = Depends(get_session),
+) -> OkResponse:
+    """Operator edits the AI/Intercom title + summary. Edited values are sticky
+    across re-syncs; an empty string on either clears the override."""
+    await svc.edit_ticket(
+        session,
+        ticket_id,
+        title=body.title,
+        summary=body.summary,
+    )
+    return OkResponse()

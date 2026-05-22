@@ -21,12 +21,16 @@ You will receive the operator's current ticket categories, any AI-proposed
 categories still pending review, names previously rejected by the operator,
 and one customer conversation.
 
-Output ONE JSON object choosing exactly one of three assignment options:
+Output ONE JSON object choosing exactly one of three assignment options.
+
+EVERY response, regardless of option, must also include a `subject` field —
+see SUBJECT rules below.
 
 A) Assign to an EXISTING active category:
    {
      "assignment":  "existing",
      "category_id": <integer id of one of the ACTIVE CATEGORIES below>,
+     "subject":     "<see SUBJECT rules>",
      "summary":     "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":  <float 0..1>
    }
@@ -35,6 +39,7 @@ B) Reuse an already-PENDING proposal:
    {
      "assignment":  "pending_proposal",
      "proposal_id": <integer id of one of the PENDING PROPOSALS below>,
+     "subject":     "<see SUBJECT rules>",
      "summary":     "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":  <float 0..1>
    }
@@ -45,9 +50,20 @@ C) Propose a NEW category (only when no existing category fits with reasonable
      "assignment":           "new_proposal",
      "proposed_name":        "<short, title case, <=32 chars>",
      "proposed_description": "<one sentence describing what belongs here>",
+     "subject":              "<see SUBJECT rules>",
      "summary":              "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":           <float 0..1>
    }
+
+SUBJECT rules:
+- A short, scannable headline for the ticket — what an operator should see on
+  a Kanban card before opening it. <= 80 characters, sentence case.
+- Lead with the concrete topic (e.g. "Refund request for invoice #44812",
+  "Login fails after password reset", "Export to CSV missing custom fields").
+- Include the named entity when one is in the thread (order/invoice id, plan
+  name, error code, product area).
+- No greetings, no quotes, no trailing punctuation, no emoji.
+- Never just echo "Re: …" / "Fwd: …" — strip those and write what it's about.
 
 SUMMARY rules (applies to all three options):
 - 2 to 3 sentences, total length <= 600 characters.

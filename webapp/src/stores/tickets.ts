@@ -70,6 +70,45 @@ export const useTicketsStore = defineStore('tickets', () => {
     }
   }
 
+  /** Edit the AI-supplied title / summary. Optimistic local update; rolls back
+   *  on server failure. An empty string on either clears the override
+   *  server-side (next sync restores the AI value). */
+  async function editTicket(
+    ticketId: string,
+    patch: { title?: string; summary?: string },
+  ) {
+    const idx = state.value.tickets.findIndex((t) => t.id === ticketId);
+    if (idx === -1) return;
+    const prev = state.value.tickets[idx]!;
+    const optimistic: Ticket = { ...prev };
+    if (patch.title !== undefined) {
+      const trimmed = patch.title.trim();
+      optimistic.title = trimmed || prev.title;
+      optimistic.title_user_edited = trimmed.length > 0;
+    }
+    if (patch.summary !== undefined) {
+      const trimmed = patch.summary.trim();
+      optimistic.summary = trimmed || '';
+      optimistic.summary_user_edited = trimmed.length > 0;
+    }
+    state.value.tickets = [
+      ...state.value.tickets.slice(0, idx),
+      optimistic,
+      ...state.value.tickets.slice(idx + 1),
+    ];
+    try {
+      await api.editTicket(ticketId, patch);
+    } catch (e) {
+      // Roll back to the pre-edit ticket on failure.
+      state.value.tickets = [
+        ...state.value.tickets.slice(0, idx),
+        prev,
+        ...state.value.tickets.slice(idx + 1),
+      ];
+      throw e;
+    }
+  }
+
   /** Optimistic category override; rolls back on server failure. */
   async function applyOverride(ticketId: string, categoryId: number) {
     const previous = state.value.pendingOverrides[ticketId];
@@ -95,6 +134,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     byProposal,
     refresh,
     applyOverride,
+    editTicket,
     isEmpty: computed(() => !state.value.loading && state.value.tickets.length === 0),
     pendingOverrides: computed(() => state.value.pendingOverrides),
   };

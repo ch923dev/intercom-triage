@@ -89,6 +89,15 @@ export const api = {
       body: JSON.stringify({ category_id: categoryId }),
     }),
 
+  /** Operator-editable title + summary. Omit a field to leave it unchanged;
+   *  pass `""` (empty string) to clear the override and let the next sync
+   *  restore the AI/Intercom-derived value. */
+  editTicket: (ticketId: string, body: { title?: string; summary?: string }) =>
+    request<{ ok: true }>(`/tickets/${ticketId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
   // ── settings ──────────────────────────────────────────────────────────────
   // The backend `/settings` row carries only the filter shape (plan §4); UI
   // tweaks (dark mode, accent, density) stay client-side until T049.

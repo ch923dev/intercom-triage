@@ -31,6 +31,7 @@ class ParsedAssignment:
     kind: AssignmentKind
     summary: str
     confidence: float
+    subject: str  # <=80 chars; the AI's title for the ticket. Empty when omitted.
     category_id: int | None = None
     proposal_id: int | None = None
     proposed_name: str | None = None
@@ -43,6 +44,8 @@ class CategorizationResult:
     proposal_id: int | None
     summary: str
     confidence: float
+    subject: str = ""  # <=80 chars; AI-generated title. Used when Intercom's
+    # conversation title is empty. Operator can override via PATCH /tickets/{id}.
 
 
 # ── T014 — parser ─────────────────────────────────────────────────────────────
@@ -94,13 +97,16 @@ def parse_response(raw: str) -> ParsedAssignment:
     # 600-char cap matches the SUMMARY rules in the system prompt (2-3 sentences:
     # intent, context, next action). Card UI line-clamps; flyout shows in full.
     summary = str(obj.get("summary") or "")[:600]
+    subject = str(obj.get("subject") or "").strip()[:80]
     confidence = _clamp_confidence(obj.get("confidence"))
 
     if assignment == "existing":
         category_id = _coerce_int(obj.get("category_id"))
         if category_id is None:
             raise ValueError("existing assignment without a valid category_id")
-        return ParsedAssignment("existing", summary, confidence, category_id=category_id)
+        return ParsedAssignment(
+            "existing", summary, confidence, subject, category_id=category_id,
+        )
 
     if assignment == "pending_proposal":
         proposal_id = _coerce_int(obj.get("proposal_id"))
@@ -110,6 +116,7 @@ def parse_response(raw: str) -> ParsedAssignment:
             "pending_proposal",
             summary,
             confidence,
+            subject,
             proposal_id=proposal_id,
         )
 
@@ -122,6 +129,7 @@ def parse_response(raw: str) -> ParsedAssignment:
             "new_proposal",
             summary,
             confidence,
+            subject,
             proposed_name=name,
             proposed_description=description,
         )
@@ -155,12 +163,16 @@ async def resolve(
     if parsed.kind == "existing":
         if parsed.category_id not in state.active_category_ids:
             raise ValueError(f"category_id {parsed.category_id} is not active")
-        return CategorizationResult(parsed.category_id, None, parsed.summary, parsed.confidence)
+        return CategorizationResult(
+            parsed.category_id, None, parsed.summary, parsed.confidence, parsed.subject,
+        )
 
     if parsed.kind == "pending_proposal":
         if parsed.proposal_id not in state.pending_proposal_ids:
             raise ValueError(f"proposal_id {parsed.proposal_id} is not pending")
-        return CategorizationResult(None, parsed.proposal_id, parsed.summary, parsed.confidence)
+        return CategorizationResult(
+            None, parsed.proposal_id, parsed.summary, parsed.confidence, parsed.subject,
+        )
 
     # new_proposal
     assert parsed.proposed_name is not None  # guaranteed by parse_response
@@ -171,7 +183,9 @@ async def resolve(
 
     existing = state.pending_by_signature.get(signature)
     if existing is not None:
-        return CategorizationResult(None, existing, parsed.summary, parsed.confidence)
+        return CategorizationResult(
+            None, existing, parsed.summary, parsed.confidence, parsed.subject,
+        )
 
     proposal = CategoryProposal(
         name=parsed.proposed_name,
@@ -184,7 +198,9 @@ async def resolve(
     state.pending_by_signature[signature] = proposal.id
     state.pending_proposal_ids.add(proposal.id)
     metrics.incr("proposals_created_total")
-    return CategorizationResult(None, proposal.id, parsed.summary, parsed.confidence)
+    return CategorizationResult(
+        None, proposal.id, parsed.summary, parsed.confidence, parsed.subject,
+    )
 
 
 # ── T016 — parallel categorization ────────────────────────────────────────────
@@ -195,8 +211,11 @@ def _fallback(ticket: HydratedTicket, fallback_category_id: int) -> Categorizati
     return CategorizationResult(
         category_id=fallback_category_id,
         proposal_id=None,
-        summary=(ticket.title or "")[:280],
+        summary=(ticket.title or "")[:600],
         confidence=0.0,
+        # No AI subject available — leave empty so `_upsert_ticket` falls back to
+        # Intercom's title (which may itself be empty; UI shows the placeholder).
+        subject="",
     )
 
 
