@@ -27,11 +27,8 @@ def test_config() -> AppConfig:
     the schema seeded by `init_db` is visible to every session in the test.
     """
     return AppConfig(
-        intercom_access_token="test-intercom-token",
         openrouter_api_key="test-openrouter-key",
         database_url="sqlite+aiosqlite:///:memory:",
-        host="127.0.0.1",
-        port=8000,
         cache_ttl_seconds=300,
         ai_concurrency=4,
     )
@@ -51,7 +48,6 @@ async def app(test_config: AppConfig) -> AsyncIterator[FastAPI]:
     application.state.engine = engine
     application.state.session_factory = session_factory
     application.state.config = test_config
-    application.state.intercom = None
     application.state.openrouter = None
     application.dependency_overrides[get_config] = lambda: test_config
 

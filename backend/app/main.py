@@ -17,7 +17,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.clients.intercom import IntercomClient, IntercomError
 from app.clients.openrouter import OpenRouterClient
 from app.config import get_config
 from app.db import make_engine, make_session_factory
@@ -70,20 +69,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_db(engine, session_factory)
 
     # External clients — created only when their secret is present (FR-014).
-    intercom: IntercomClient | None = None
-    if config.intercom_configured:
-        intercom = IntercomClient(config.intercom_access_token)
-        try:
-            workspace_id = await intercom.resolve_workspace_id()
-            log_event("intercom_ready", op="startup", workspace_id=workspace_id)
-        except IntercomError as exc:
-            log_event(
-                "intercom_unresolved",
-                level=logging.WARNING,
-                op="startup",
-                error=str(exc),
-            )
-
     openrouter: OpenRouterClient | None = None
     if config.openrouter_configured:
         openrouter = OpenRouterClient(
@@ -95,7 +80,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.config = config
-    app.state.intercom = intercom
     app.state.openrouter = openrouter
 
     if config.missing_secrets:
@@ -119,8 +103,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await sweep_task
         except asyncio.CancelledError:
             pass
-        if intercom is not None:
-            await intercom.aclose()
         if openrouter is not None:
             await openrouter.aclose()
         await engine.dispose()

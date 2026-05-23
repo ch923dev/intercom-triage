@@ -7,15 +7,13 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.intercom import IntercomClient
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig
 from app.db import get_session
-from app.deps import get_app_config, get_intercom, get_openrouter
+from app.deps import get_app_config, get_openrouter
 from app.schemas import (
     AIResolveSet,
     CategoryUpdate,
-    FilterSettings,
     HydratedTicket,
     IngestResponse,
     OkResponse,
@@ -68,25 +66,6 @@ async def ingest_tickets(
         openrouter=openrouter,
         config=config,
         hydrated=body,
-    )
-
-
-@router.post("/fetch", response_model=list[TicketSchema])
-async def fetch_tickets(
-    body: FilterSettings,
-    session: AsyncSession = Depends(get_session),
-    intercom: IntercomClient | None = Depends(get_intercom),
-    openrouter: OpenRouterClient | None = Depends(get_openrouter),
-    config: AppConfig = Depends(get_app_config),
-) -> list[TicketSchema]:
-    """Legacy — search Intercom directly via an Access Token (T025). Dormant
-    unless a token is configured; the extension-ingest path is primary."""
-    return await svc.fetch_tickets(
-        session=session,
-        intercom=intercom,
-        openrouter=openrouter,
-        config=config,
-        filter_settings=body,
     )
 
 

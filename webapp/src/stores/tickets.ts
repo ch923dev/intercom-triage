@@ -36,7 +36,6 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   const tickets = computed(() => state.value.tickets);
   const loading = computed(() => state.value.loading);
-  const error = computed(() => state.value.error);
   const lastRefresh = computed(() => state.value.lastRefresh);
 
   /** Subset of `state.tickets` matching the current `query`.
@@ -129,11 +128,6 @@ export const useTicketsStore = defineStore('tickets', () => {
     } finally {
       state.value.lastRefresh = new Date();
     }
-  }
-
-  /** Fetch only the resolved list (lightweight targeted refresh). */
-  async function refreshResolved() {
-    resolvedTickets.value = await api.listTickets({ resolved: true });
   }
 
   /** Set the live search query that filters the board. */
@@ -285,7 +279,6 @@ export const useTicketsStore = defineStore('tickets', () => {
   return {
     tickets,
     loading,
-    error,
     lastRefresh,
     query,
     visibleTickets,
@@ -301,7 +294,6 @@ export const useTicketsStore = defineStore('tickets', () => {
     pendingOverrides: computed(() => state.value.pendingOverrides),
     // Resolution
     resolvedTickets,
-    refreshResolved,
     markResolved,
     reopen,
     setAiResolve,

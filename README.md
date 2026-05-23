@@ -24,8 +24,8 @@ built, and [`tasks.md`](./tasks.md) for the task breakdown.
 
 - Python 3.11+ (3.12 tested)
 - Node 18+
-- Chrome (for the optional extension)
-- Intercom **Access Token** with the `Read conversations` scope
+- Chrome — required: the extension scrapes conversations from your logged-in
+  Intercom session (no API token)
 - OpenRouter API key
 
 ## Quickstart
@@ -37,7 +37,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1          # PowerShell  (bash: source .venv/bin/activate)
 pip install -r requirements.txt
-copy .env.example .env                # then fill in INTERCOM_ACCESS_TOKEN + OPENROUTER_API_KEY
+copy .env.example .env                # then fill in OPENROUTER_API_KEY
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -62,17 +62,19 @@ The dev server proxies `/api/*` to the backend on `:8000`. Open
 <http://localhost:5173> — the board fetches tickets, and the top bar gives you
 the category-management and proposal-review pages plus the filter drawer.
 
-### 3. Chrome extension (optional)
+### 3. Chrome extension
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. **Load unpacked** → select the `extension/` folder.
 
-The toolbar popup is a mini-board with the same taxonomy; it talks directly to
-the backend on `:8000`. Background polling is **off by default** — pick an
-interval in the popup footer to have it badge the Urgent count. The popup also
-mirrors the webapp's follow-up alarms: a due banner, per-row countdown chips,
-and an audio cue (shared mute via `GET /settings`).
+The extension is the only Intercom integration — it scrapes conversations from
+your logged-in `app.intercom.com` session and pushes them to the backend via
+`POST /tickets/ingest`. The toolbar popup is a mini-board with the same taxonomy;
+it talks directly to the backend on `:8000`. Background polling is **off by
+default** — pick an interval in the popup footer to have it badge the Urgent
+count. The popup also mirrors the webapp's follow-up alarms: a due banner,
+per-row countdown chips, and an audio cue (shared mute via `GET /settings`).
 
 ## API surface
 
@@ -88,8 +90,10 @@ and an audio cue (shared mute via `GET /settings`).
 | `POST /proposals/{id}/approve` · `/merge-into/{cat}` · `/reject` | Resolve a proposal |
 | `GET /tickets` | The stored board — extension-ingested + categorized tickets |
 | `POST /tickets/ingest` | Receive conversations from the extension; categorize + store |
-| `POST /tickets/fetch` | Legacy: fetch direct from Intercom via an Access Token |
+| `GET /tickets/sync-state` | `{id: updated_at}` map the extension uses to skip unchanged conversations |
+| `POST /tickets/{id}/resolve` · `/reopen` · `/dismiss-chip` · `PATCH /ai-resolve` | Manual + AI resolution |
 | `PATCH /tickets/{id}/category` | Manually override a ticket's category |
+| `PATCH /tickets/{id}` | Edit AI-supplied title + summary (sticky across re-syncs) |
 | `GET /settings` · `PUT /settings` | The stored filter settings + `mute_alarms` |
 | `GET /followups` | All active follow-up reminders |
 | `PUT /followups/{id}` · `/snooze` · `/mark-fired` · `DELETE` | Set / snooze / fire / clear a follow-up |

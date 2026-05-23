@@ -1,9 +1,9 @@
 """SQLAlchemy 2.0 async models for the local triage tool.
 
-Ported from `snippets/models.py` (reference). Schema is managed via Alembic
-(see `backend/alembic/`). On first startup `init_db` runs `alembic upgrade
-head`, which creates all tables and applies any pending migrations. Seeding
-(categories + singleton settings row) happens after migrations complete.
+Schema is managed via Alembic (see `backend/alembic/`). On first startup
+`init_db` runs `alembic upgrade head`, which creates all tables and applies
+any pending migrations. Seeding (categories + singleton settings row) happens
+after migrations complete.
 
 Works against SQLite by default (`sqlite+aiosqlite:///./data/triage.db`) and
 against Postgres by swapping `DATABASE_URL` (`postgresql+asyncpg://...`). No
@@ -354,7 +354,7 @@ class Ticket(Base):
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
     ai_confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     # When True, the operator manually edited the field via PATCH /tickets/{id}.
-    # The ingest pipeline preserves edited values across re-syncs (FR-???).
+    # The ingest pipeline preserves edited values across re-syncs.
     title_user_edited: Mapped[bool] = mapped_column(
         default=False,
         server_default=text("0"),

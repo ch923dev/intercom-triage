@@ -1,13 +1,12 @@
-"""Ticket fetch orchestrator + override. Reference: tasks.md T025, T026.
+"""Ticket ingest + override + read service. Reference: tasks.md T026.
 
-`fetch_tickets` runs the full pipeline (plan §2 data flow):
-search → hydrate → cache-split → AI on misses → write cache → apply overrides
-→ filter → sort.
+The Chrome extension fetches conversations from the operator's Intercom
+browser session and pushes them to `ingest_tickets`, which categorizes and
+stores them. `get_tickets` serves the stored board with no live Intercom call.
 """
 
 from __future__ import annotations
 
-import time
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
@@ -15,7 +14,6 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.pipeline import CategorizationResult, categorize_many
-from app.clients.intercom import IntercomClient, IntercomError
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig
 from app.metrics import metrics
@@ -32,13 +30,6 @@ from app.services.cache import get_cached, set_cached
 from app.services.categories import get_fallback
 from app.services.settings import get_settings
 from app.util import naive_utcnow
-
-
-def _threshold_unix(filter_settings: FilterSettings, *, now: float | None = None) -> int:
-    """Convert a recency window to a unix-second cutoff."""
-    now = now if now is not None else time.time()
-    per_unit = 3600 if filter_settings.lookback_unit == "hours" else 86400
-    return int(now - filter_settings.lookback_value * per_unit)
 
 
 def _chip_state(
@@ -92,116 +83,6 @@ def _content_signature(ticket: HydratedTicket) -> datetime:
     return ticket.created_at
 
 
-async def fetch_tickets(
-    *,
-    session: AsyncSession,
-    intercom: IntercomClient | None,
-    openrouter: OpenRouterClient | None,
-    config: AppConfig,
-    filter_settings: FilterSettings,
-) -> list[TicketSchema]:
-    if intercom is None:
-        raise HTTPException(status_code=503, detail="Intercom is not configured")
-
-    threshold = _threshold_unix(filter_settings)
-    try:
-        ids = await intercom.search_conversation_ids(
-            threshold_unix=threshold,
-            states=list(filter_settings.states),
-            max_tickets=config.max_tickets_per_fetch,
-        )
-        hydrated = await intercom.hydrate_many(ids)
-    except IntercomError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    fallback = await get_fallback(session)
-
-    # Split cached vs uncached (FR-008). Cache key is the last-part timestamp
-    # (see `_content_signature`), so AI only re-fires on a new customer-visible
-    # message — internal notes / assignment changes still hit the cache.
-    results: dict[str, CategorizationResult] = {}
-    uncached: list[HydratedTicket] = []
-    for ticket in hydrated:
-        signature = _content_signature(ticket)
-        cached = await get_cached(
-            session,
-            ticket.id,
-            signature,
-            config.cache_ttl_seconds,
-        )
-        if cached is not None:
-            results[ticket.id] = cached
-            metrics.incr("cache_hits_total")
-        else:
-            uncached.append(ticket)
-
-    # AI on the misses; write cache.
-    fresh = await categorize_many(
-        uncached,
-        session=session,
-        client=openrouter,
-        model=config.openrouter_model,
-        concurrency=config.ai_concurrency,
-        fallback_category_id=fallback.id,
-    )
-    for ticket in uncached:
-        result = fresh[ticket.id]
-        # Skip caching a fallback — a failed AI call must retry on the next
-        # fetch, not pin the ticket to the fallback category (see pipeline._fallback).
-        if not result.fallback:
-            await set_cached(session, ticket.id, result, _content_signature(ticket))
-        results[ticket.id] = result
-
-    # Persist new proposals + cache writes before reading overrides.
-    await session.commit()
-
-    overrides = {o.ticket_id: o for o in (await session.scalars(select(Override))).all()}
-
-    # Follow-ups + notes joined in by ticket id (T048, plan §8a).
-    followups = {f.ticket_id: f for f in (await session.scalars(select(Followup))).all()}
-    notes = {n.ticket_id: n for n in (await session.scalars(select(TicketNote))).all()}
-
-    # Compose the response (FR-009 override application).
-    composed: list[TicketSchema] = []
-    for ticket in hydrated:
-        result = results[ticket.id]
-        category_id = result.category_id
-        proposal_id = result.proposal_id
-        user_override = False
-
-        override = overrides.get(ticket.id)
-        if override is not None and ticket.updated_at <= override.set_at:
-            category_id = override.category_id
-            proposal_id = None
-            user_override = True
-
-        followup = followups.get(ticket.id)
-        note = notes.get(ticket.id)
-
-        composed.append(
-            TicketSchema(
-                **ticket.model_dump(),
-                category_id=category_id,
-                proposal_id=proposal_id,
-                summary=result.summary,
-                ai_confidence=result.confidence,
-                user_override=user_override,
-                followup=FollowupRead.model_validate(followup) if followup is not None else None,
-                note=TicketNoteRead.model_validate(note) if note is not None else None,
-            ),
-        )
-
-    # Included-category filter (FR-011). Proposal-assigned tickets always show —
-    # they are pending curation and render as their own columns.
-    if filter_settings.include_category_ids is not None:
-        allowed = set(filter_settings.include_category_ids)
-        composed = [t for t in composed if t.proposal_id is not None or t.category_id in allowed]
-
-    composed.sort(key=lambda t: t.updated_at, reverse=True)  # FR-013
-    metrics.incr("tickets_fetched_total", len(composed))
-    return composed
-
-
 # ── T026 — override ───────────────────────────────────────────────────────────
 
 
@@ -244,12 +125,6 @@ async def set_override(
 
 
 # ── Extension ingest + stored board ───────────────────────────────────────────
-#
-# The operator has no Intercom Access Token, so the Chrome extension fetches
-# conversations from Intercom via the logged-in browser session and pushes them
-# here. `ingest_tickets` categorizes + stores them; `get_tickets` serves the
-# stored board with no live Intercom call. The legacy `fetch_tickets` path above
-# stays dormant — usable only if an Access Token is ever configured.
 
 
 def _threshold_datetime(filter_settings: FilterSettings) -> datetime:

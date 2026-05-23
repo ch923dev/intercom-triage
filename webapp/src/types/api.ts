@@ -1,14 +1,5 @@
 // Server-side data contracts. Mirror of plan.md §3.
 
-export interface HealthResponse {
-  status: 'ok' | 'degraded';
-  version: string;
-  model: string;
-  intercom_configured: boolean;
-  openrouter_configured: boolean;
-  missing_secrets: string[];
-}
-
 export type CategorySource = 'seed' | 'ai_proposed' | 'user_created';
 
 export interface Category {
@@ -50,7 +41,7 @@ export interface ProposalsResponse {
   proposals: CategoryProposal[];
 }
 
-// ── Tickets (Phase 5 — wire when T025 lands) ─────────────────────────────────
+// ── Tickets ──────────────────────────────────────────────────────────────────
 
 export type TicketState = 'open' | 'snoozed' | 'closed';
 

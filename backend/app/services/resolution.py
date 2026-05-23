@@ -7,16 +7,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.metrics import metrics
 from app.models import Ticket
+from app.schemas import ResolvedSource
 from app.util import naive_utcnow
-
-ResolvedSource = Literal["manual", "intercom_closed"]
 
 
 @dataclass

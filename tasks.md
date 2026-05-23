@@ -105,7 +105,7 @@ Each task is a single PR. Every task lists what spec requirement it implements a
 ### T013 — Dynamic prompt builder
 **Depends on:** T012, T006
 **Implements:** plan §7
-**Description:** Adapt `snippets/prompt_builder.py` to the production models. Given active categories, pending proposals, and rejected names, build the user prompt. Build transcript with `[type:name] body`, ≤ 6000 chars middle-truncated.
+**Description:** Build the dynamic user prompt against the production models. Given active categories, pending proposals, and rejected names, assemble the user message. Build transcript with `[type:name] body`, ≤ 6000 chars middle-truncated.
 **Acceptance:** Active categories, pending proposals, and rejected names all appear in the user prompt; a 10 000-char transcript is middle-truncated with marker.
 
 ### T014 — AI response parser
@@ -186,21 +186,22 @@ Each task is a single PR. Every task lists what spec requirement it implements a
 
 ## Phase 5 — Tickets API + overrides + settings
 
-### T025 — `POST /tickets/fetch`
+### T025 — `POST /tickets/ingest` + `GET /tickets`
 **Depends on:** T010, T016, T017, T007
 **Implements:** FR-001, FR-004, FR-005, FR-006, FR-008, FR-011, FR-013
-**Description:** Endpoint accepting `FilterSettings`. Splits cached vs uncached, runs AI on uncached, writes cache, applies `include_category_ids` filter, sorts `updated_at` desc.
+**Description:** The extension scrapes Intercom via the browser session and POSTs `HydratedTicket[]` to `/tickets/ingest`. Backend splits cached vs uncached, runs AI on uncached, writes cache, upserts tickets. `GET /tickets` serves the stored board (open by default, `?resolved=true` for the Resolved column) applying overrides + filters and sorting `updated_at` desc.
 **Acceptance:**
-- Mocked Intercom + mocked OpenRouter → ordered, categorized tickets.
-- Re-call with no changes → zero OpenRouter calls.
+- Ingest a batch with mocked OpenRouter → tickets stored + categorized.
+- Re-ingest unchanged conversations → zero OpenRouter calls (cache hit).
+- `GET /tickets` returns ordered, categorized tickets from storage.
 
 ### T026 — Override endpoint + cache integration
 **Depends on:** T006, T025
 **Implements:** FR-009
-**Description:** `PATCH /tickets/{id}/category` upserts into `overrides` with `set_at=now()`. `/tickets/fetch` applies overrides after AI step and sets `user_override=true`. Override invalidates when `ticket.updated_at > override.set_at`.
+**Description:** `PATCH /tickets/{id}/category` upserts into `overrides` with `set_at=now()`. `GET /tickets` applies overrides after AI step and sets `user_override=true`. Override invalidates when `ticket.updated_at > override.set_at`.
 **Acceptance:**
-- PATCH then fetch → ticket in overridden column, `user_override=true`.
-- Simulating advanced `updated_at` → override dropped on next fetch.
+- PATCH then re-read → ticket in overridden column, `user_override=true`.
+- Simulating advanced `updated_at` → override dropped on next read.
 
 ### T027 — `GET /settings` and `PUT /settings`
 **Depends on:** T006
@@ -306,7 +307,7 @@ Each task is a single PR. Every task lists what spec requirement it implements a
 ### T042 — Background poll + badge
 **Depends on:** T041, T027
 **Implements:** US-006
-**Description:** Service worker polls `/tickets/fetch` on the configured interval (read from server settings, off by default). Badge text shows the Urgent count.
+**Description:** Service worker re-runs the Intercom session scrape + `POST /tickets/ingest` on the configured interval (read from server settings, off by default). Badge text shows the Urgent count.
 **Acceptance:**
 - Interval set → badge updates after next poll.
 - Interval off → no background calls.
@@ -355,12 +356,12 @@ Each task is a single PR. Every task lists what spec requirement it implements a
 - PUT with empty body → row gone.
 - GET returns only non-empty rows.
 
-### T048 — `/tickets/fetch` composes follow-up + note + mute
+### T048 — `GET /tickets` composes follow-up + note + mute
 **Depends on:** T025, T046, T047
 **Implements:** plan §8a
 **Description:** Extend the `Ticket` response shape with `followup: Followup | null` and `note: TicketNote | null` joined from the two new tables by `ticket_id`. The `mute_alarms` flag is exposed through `GET /settings`.
 **Acceptance:**
-- Fetching a ticket with a stored follow-up returns the embedded record.
+- Reading a ticket with a stored follow-up returns the embedded record.
 - Settings response carries `mute_alarms`.
 
 ### T049 — Webapp tokens + dark mode + accent picker
@@ -552,7 +553,7 @@ Each task is a single PR. Every task lists what spec requirement it implements a
 ### T070 — Extension closure pass
 **Depends on:** T059
 **Implements:** US-017, FR-031
-**Description:** Extend the extension sync flow with a closure pass: diff tracked ticket ids against the open list; for any ids no longer present, fetch them from Intercom's closed-conversation list and POST them to `POST /tickets/fetch` so `_upsert_ticket` stamps `resolved_at`. Modify `extension/api.js`, `extension/intercom.js`, and `extension/background.js`.
+**Description:** Extend the extension sync flow with a closure pass: diff tracked ticket ids against the open list; for any ids no longer present, fetch them from Intercom's closed-conversation list and POST them to `POST /tickets/ingest` so `_upsert_ticket` stamps `resolved_at`. Modify `extension/api.js`, `extension/intercom.js`, and `extension/background.js`.
 **Acceptance:**
 - [ ] A ticket tracked as open that Intercom now reports as closed appears as resolved after the next sync.
 - [ ] The closure pass does not trigger an AI categorization call.

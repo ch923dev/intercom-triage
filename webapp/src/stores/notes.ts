@@ -3,7 +3,7 @@
 // the component). An empty body deletes the row server-side.
 
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { ref } from 'vue';
 import { api } from '@/api/client';
 import type { TicketNote } from '@/types/api';
 
@@ -16,8 +16,6 @@ export function countNoteLines(body: string | null | undefined): number {
 export const useNotesStore = defineStore('notes', () => {
   /** ticket_id → note record. */
   const map = ref<Record<string, TicketNote>>({});
-
-  const count = computed(() => Object.keys(map.value).length);
 
   function bodyOf(ticketId: string): string {
     return map.value[ticketId]?.body ?? '';
@@ -45,5 +43,5 @@ export const useNotesStore = defineStore('notes', () => {
     }
   }
 
-  return { map, count, bodyOf, load, setNote };
+  return { bodyOf, load, setNote };
 });

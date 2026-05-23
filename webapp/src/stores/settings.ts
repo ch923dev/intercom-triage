@@ -21,10 +21,8 @@ const DEFAULTS: FilterSettings = {
 
 export const useSettingsStore = defineStore('settings', () => {
   const state = ref<FilterSettings>({ ...DEFAULTS });
-  const loaded = ref(false);
   const saving = ref(false);
 
-  const filter = computed(() => state.value);
   const lookbackValue = computed(() => state.value.lookback_value);
   const lookbackUnit = computed(() => state.value.lookback_unit);
   const states = computed(() => state.value.states);
@@ -41,8 +39,6 @@ export const useSettingsStore = defineStore('settings', () => {
       state.value = await api.getSettings();
     } catch {
       state.value = { ...DEFAULTS };
-    } finally {
-      loaded.value = true;
     }
   }
 
@@ -100,8 +96,6 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   return {
-    filter,
-    loaded,
     saving,
     lookbackValue,
     lookbackUnit,

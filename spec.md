@@ -18,13 +18,13 @@ Reduce the time spent triaging Intercom conversations. The native Intercom UI re
 
 ## 2. Scope
 
-In scope: a local tool with a backend, a webapp surface, and a Chrome extension surface. Intercom integration via API token in local config. AI categorization and summarization against a curated taxonomy. AI proposal flow for new categories. Manual category override that persists. Dynamic category curation.
+In scope: a local tool with a backend, a webapp surface, and a Chrome extension surface. Intercom integration via the operator's logged-in browser session (extension-driven; no API token). AI categorization and summarization against a curated taxonomy. AI proposal flow for new categories. Manual category override that persists. Dynamic category curation.
 
 Out of scope: multi-user collaboration, multi-tenant SaaS, authentication, hosted deployment, replying to tickets from the tool, long-term analytics, helpdesks other than Intercom, mobile-native surfaces, webhook-driven live updates (backlog).
 
 ## 3. Personas
 
-A single **operator** — the person running the tool on their own machine. They configure their Intercom token, triage tickets daily, and curate categories as the taxonomy evolves.
+A single **operator** — the person running the tool on their own machine. They sign in to Intercom in Chrome, install the extension, triage tickets daily, and curate categories as the taxonomy evolves.
 
 ## 4. User stories with acceptance criteria
 

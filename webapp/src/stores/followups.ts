@@ -79,9 +79,8 @@ export const useFollowupsStore = defineStore('followups', () => {
   /** Epoch ms, refreshed every tick so chips + sorters stay reactive. */
   const now = ref(Date.now());
 
-  const all = computed(() => Object.values(map.value));
   /** Pending count for the top-bar status pill. */
-  const pendingCount = computed(() => all.value.length);
+  const pendingCount = computed(() => Object.keys(map.value).length);
   /** True while at least one alarm banner is showing — pill goes accent-pulse. */
   const firing = computed(() => banners.value.length > 0);
 
@@ -244,10 +243,8 @@ export const useFollowupsStore = defineStore('followups', () => {
   }
 
   return {
-    map,
     banners,
     now,
-    all,
     pendingCount,
     firing,
     buckets,

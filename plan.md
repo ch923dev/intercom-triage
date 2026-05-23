@@ -35,13 +35,13 @@ This document defines **how** the system is built. Each section maps back to one
 
 Three components. All run locally; backend listens on `localhost` only.
 
-The **backend** is a FastAPI service. It owns the Intercom integration, the AI integration, the SQLite persistence layer, and the public API surface. Reads its Intercom token and OpenRouter key from `.env`.
+The **backend** is a FastAPI service. It owns the AI integration, the SQLite persistence layer, and the public API surface. Reads its OpenRouter key from `.env`. The backend does NOT call Intercom directly — the extension owns Intercom access via the operator's browser session.
 
 The **webapp** is a Vue 3 SPA. It calls the backend at `http://localhost:<port>`. Owns the Kanban UI, drag-and-drop, settings UI, category admin pages, proposals review queue, and the extension-discovery callout.
 
-The **Chrome extension** is a Manifest V3 extension. Calls the same `localhost` backend. Owns the popup mini-board (full taxonomy as column tabs, override-capable), optional background polling, badge, and "Open full board" handoff.
+The **Chrome extension** is a Manifest V3 extension. It owns Intercom access — scrapes conversations from the logged-in `app.intercom.com` session, strips HTML, and pushes them to the backend. Also calls the localhost backend for the popup mini-board (full taxonomy as column tabs, override-capable), optional background polling, badge, and "Open full board" handoff.
 
-Fetch data flow: client `POST /tickets/fetch` with a `FilterSettings` body → backend queries Intercom Conversations Search with a time-bounded query (FR-001) → hydrates each result, HTML stripped (FR-003) → for each ticket, checks the AI cache (FR-008); on miss, calls OpenRouter with a prompt built from the current taxonomy → resolves AI output into either an existing category id, an existing pending proposal id, or a newly-created proposal (FR-015) → applies user overrides (FR-009) → sorts and returns (FR-013).
+Ingest data flow: extension calls `GET /tickets/sync-state` to read `{id: updated_at}` for stored tickets → walks the operator's Intercom inbox via the ember endpoints → fetches detail only for changed/new conversations → strips HTML (FR-003) → `POST /tickets/ingest` with hydrated conversations → backend checks the AI cache (FR-008); on miss, calls OpenRouter with a prompt built from the current taxonomy → resolves AI output into either an existing category id, an existing pending proposal id, or a newly-created proposal (FR-015) → stores. Reads: `GET /tickets` serves the stored board with overrides applied (FR-009) and sorted (FR-013).
 
 ## 3. Data contracts
 
@@ -136,8 +136,10 @@ No auth header. Backend listens on `127.0.0.1` only.
 | POST | `/proposals/{id}/approve` | optional `{color, sort_order}` | resulting Category | FR-016 |
 | POST | `/proposals/{id}/merge-into/{category_id}` | — | `{ok, moved_count}` | FR-016 |
 | POST | `/proposals/{id}/reject` | — | `{ok}` | FR-016 |
-| POST | `/tickets/fetch` | `FilterSettings` | `Ticket[]`, sorted | FR-001, FR-004, FR-005, FR-006, FR-008, FR-011, FR-013 |
+| POST | `/tickets/ingest` | `HydratedTicket[]` (from extension) | `{received, categorized}` | FR-001, FR-004, FR-005, FR-006, FR-008, FR-011, FR-013 |
+| GET | `/tickets/sync-state` | — | `{ticket_id: updated_at}` | FR-001 |
 | PATCH | `/tickets/{id}/category` | `CategoryUpdate` | `{ok, category_id}` | FR-009 |
+| PATCH | `/tickets/{id}` | `TicketEdit` | `{ok}` | FR-009 |
 | GET | `/settings` | — | stored `FilterSettings` + `mute_alarms` | FR-012, FR-024 |
 | PUT | `/settings` | `FilterSettings` + `mute_alarms` | stored settings | FR-012, FR-024 |
 | GET | `/followups` | — | all active follow-ups (one row per ticket) | FR-019 |
@@ -153,11 +155,11 @@ No auth header. Backend listens on `127.0.0.1` only.
 | PATCH | `/tickets/{id}/ai-resolve` | `{enabled: bool\|null}` | `{ok}` | FR-029, FR-028 |
 | POST | `/tickets/{id}/dismiss-chip` | — | `{ok}` | FR-027, FR-028 |
 
-Error contract: `502` on upstream Intercom failure, `422` on schema violation, `404` on unknown id, `409` on archive of fallback or other invalid state transition.
+Error contract: `502` on upstream AI failure, `422` on schema violation, `404` on unknown id, `409` on archive of fallback or other invalid state transition.
 
 ## 5. Data model
 
-Six tables. SQLAlchemy 2.0 declarative models; created via `metadata.create_all` on first run, then seeded if empty. Concrete models in `snippets/models.py`.
+Six tables. SQLAlchemy 2.0 declarative models; created via `metadata.create_all` on first run, then seeded if empty. Concrete models in `backend/app/models.py`.
 
 ```text
 categories
@@ -260,11 +262,18 @@ settings (resolution columns — same migration):
   ai_resolve_confidence_threshold real default 0.7 check between 0.0 and 1.0
 ```
 
-Behavioral notes. `ai_cache` enforces "exactly one of `category_id`, `proposal_id`" via a check constraint — this matches the AI output resolver (§7). Foreign keys cascade so that when a category or proposal is hard-deleted, dependent cache rows go with it. `overrides` cascades from category too. The `settings` table is a singleton via `CHECK (id = 1)`; the app inserts the row at first startup. Partial unique indexes prevent two active categories or two pending proposals from sharing a name, while letting archived/resolved rows reuse names. `followups` and `ticket_notes` are keyed by `ticket_id` only — no FK because the ticket id is owned by Intercom, not this DB; rows are deleted when the operator clears the follow-up or empties the notes; `/tickets/fetch` joins both in by ticket id when composing the response.
+Behavioral notes. `ai_cache` enforces "exactly one of `category_id`, `proposal_id`" via a check constraint — this matches the AI output resolver (§7). Foreign keys cascade so that when a category or proposal is hard-deleted, dependent cache rows go with it. `overrides` cascades from category too. The `settings` table is a singleton via `CHECK (id = 1)`; the app inserts the row at first startup. Partial unique indexes prevent two active categories or two pending proposals from sharing a name, while letting archived/resolved rows reuse names. `followups` and `ticket_notes` are keyed by `ticket_id` only — no FK because the ticket id is owned by Intercom, not this DB; rows are deleted when the operator clears the follow-up or empties the notes; `GET /tickets` joins both in by ticket id when composing the response.
 
 ## 6. Intercom integration
 
-The backend calls `POST /conversations/search` with the token from `.env`. Query body: `AND([updated_at > threshold, state filter])`, `per_page: 50`, paginated via `starting_after` until either chain end or `MAX_TICKETS_PER_FETCH` (default 100). Each result is hydrated via `GET /conversations/{id}?display_as=plaintext` in parallel; one failure does not fail the batch (NFR-003). The Intercom workspace id is resolved once at startup via `GET /me` and cached in process memory for deep-link composition (FR-010): `https://app.intercom.com/a/apps/<workspace_id>/conversations/<id>`. HTML is stripped (`<br>` → `\n`, `</p>` → `\n`, remaining tags removed) before AI input.
+The operator has no Intercom API token. The Chrome extension scrapes
+conversations from the logged-in `app.intercom.com` session — workspace
+`j3dxf22l` via the internal `ember/` endpoints — strips HTML, and pushes
+hydrated conversations to the backend via `POST /tickets/ingest`. The extension
+first calls `GET /tickets/sync-state` to skip unchanged conversations
+(NFR-003). Deep links resolve client-side: the extension already knows the
+workspace id from the session URL. The backend owns categorization + storage
+only; no upstream HTTP call to Intercom from the server.
 
 ## 7. AI specification
 
@@ -272,7 +281,7 @@ OpenRouter `/chat/completions`, OpenAI-compatible. Headers: `Authorization`, `HT
 
 Request shape: `model`, `messages=[system,user]`, `temperature=0.1`, `max_tokens=400`, `response_format={type:"json_object"}`.
 
-The prompt builder is in `snippets/prompt_builder.py`. It assembles the user message from the current active categories, pending proposals, and rejected-name list, plus the ticket's title, state, and transcript (≤ 6000 chars, middle-truncated).
+The prompt builder is in `backend/app/ai/prompt.py`. It assembles the user message from the current active categories, pending proposals, and rejected-name list, plus the ticket's title, state, and transcript (≤ 6000 chars, middle-truncated).
 
 The AI returns one of three assignment shapes (see prompt builder for the strict JSON contract):
 - `existing` — pick a current active category id

@@ -63,9 +63,7 @@ class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     version: str
     model: str
-    intercom_configured: bool
     openrouter_configured: bool
-    workspace_id: str | None = None
     missing_secrets: list[str]
 
 
@@ -194,8 +192,8 @@ class ConversationPartSchema(BaseModel):
     author: TicketAuthorSchema
     body: str
     created_at: NaiveUTCDatetime
-    # True for admin replies that were visible to the customer (Intercom
-    # `renderable_type` 24). Inbound customer messages (1/12) → False.
+    # True for admin replies visible to the customer (Intercom
+    # `renderable_type` 2 or 24). Inbound customer messages → False.
     is_admin: bool = False
 
 
@@ -204,7 +202,7 @@ class HydratedTicket(BaseModel):
 
     `parts` is what the AI sees: the customer-visible thread (inbound messages
     + admin replies). `internal_notes` is the team-only side-channel (Intercom
-    `renderable_type` 2 — distinct from the operator's local `TicketNote` jot)
+    `renderable_type` 3 — distinct from the operator's local `TicketNote` jot)
     and is NOT fed to the AI prompt; only the UI surfaces it.
     """
 

@@ -17,9 +17,6 @@ alembic>=1.13,<2
 # Optional Postgres swap (uncomment to enable):
 # asyncpg==0.30.0
 
-# Logging
-structlog==24.4.0
-
 # Dev — install via `pip install -r requirements-dev.txt` if you want them
 # ruff
 # mypy

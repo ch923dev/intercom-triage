@@ -10,7 +10,6 @@ async def test_health_ok_when_creds_present(client: AsyncClient) -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert data["intercom_configured"] is True
     assert data["openrouter_configured"] is True
     assert data["missing_secrets"] == []
     assert data["model"] == "anthropic/claude-sonnet-4.5"

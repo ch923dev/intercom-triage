@@ -30,16 +30,11 @@ async function request(path, init = {}) {
   return resp.status === 204 ? undefined : resp.json();
 }
 
-/** Stored filter settings — used verbatim as the `/tickets/fetch` body. */
+/** Stored filter settings — drives the popup's lookback / state filters. */
 export const fetchSettings = () => request('/settings');
 
 /** Active categories + pending proposals. */
 export const fetchCategories = () => request('/categories');
-
-/** Hydrated + categorized tickets for the given filter (legacy direct-Intercom
- *  path; only works when a backend Access Token is configured). */
-export const fetchTickets = (filter) =>
-  request('/tickets/fetch', { method: 'POST', body: JSON.stringify(filter) });
 
 /** The stored board — ingested + categorized by the extension. */
 export const getStoredTickets = () => request('/tickets');

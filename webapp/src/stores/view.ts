@@ -23,9 +23,6 @@ export const useViewStore = defineStore('view', () => {
   function closeDrawer() {
     drawerOpen.value = false;
   }
-  function toggleDrawer() {
-    drawerOpen.value = !drawerOpen.value;
-  }
   /** Open the flyout for a ticket — also jumps to the board so it's visible. */
   function selectTicket(id: string) {
     selectedTicketId.value = id;
@@ -42,7 +39,6 @@ export const useViewStore = defineStore('view', () => {
     go,
     openDrawer,
     closeDrawer,
-    toggleDrawer,
     selectTicket,
     closeFlyout,
   };

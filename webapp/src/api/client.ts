@@ -9,7 +9,6 @@ import type {
   Category,
   FilterSettings,
   Followup,
-  HealthResponse,
   ProposalsResponse,
   ResolvedSource,
   Ticket,
@@ -18,7 +17,7 @@ import type {
 
 const BASE = '/api';
 
-export class ApiError extends Error {
+class ApiError extends Error {
   constructor(
     public status: number,
     public body: unknown,
@@ -43,9 +42,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  // ── health ────────────────────────────────────────────────────────────────
-  health: (): Promise<HealthResponse> => request('/health'),
-
   // ── categories ────────────────────────────────────────────────────────────
   listCategories: (): Promise<CategoriesResponse> => request('/categories'),
 
