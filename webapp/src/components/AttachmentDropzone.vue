@@ -19,14 +19,17 @@ function onDrop(e: DragEvent) {
   emitFiles(e.dataTransfer?.files);
 }
 
-function onPaste(e: ClipboardEvent) {
-  emitFiles(e.clipboardData?.files);
-}
-
 function onPick(e: Event) {
   const input = e.target as HTMLInputElement;
   emitFiles(input.files);
   input.value = '';
+}
+
+function onKey(e: KeyboardEvent) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    inputRef.value?.click();
+  }
 }
 </script>
 
@@ -35,10 +38,12 @@ function onPick(e: Event) {
     class="dropzone"
     :class="{ hover }"
     tabindex="0"
+    role="button"
+    aria-label="Add attachments — drop, paste, or click to browse"
     @dragover.prevent="hover = true"
     @dragleave="hover = false"
     @drop="onDrop"
-    @paste="onPaste"
+    @keydown="onKey"
     @click="inputRef?.click()"
   >
     <span class="mono dim">Drop files, paste, or click to browse</span>
