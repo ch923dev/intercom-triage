@@ -26,6 +26,10 @@ export interface Category {
 
 export type ProposalStatus = 'pending' | 'approved' | 'merged' | 'rejected';
 
+export type ResolvedSource = 'manual' | 'intercom_closed';
+export type ResolutionVerdict = 'resolved' | 'not_resolved';
+export type ResolutionChipState = 'ai_resolved' | 'ai_reopened' | 'new_reply';
+
 export interface CategoryProposal {
   id: number;
   name: string;
@@ -108,6 +112,16 @@ export interface Ticket {
   summary_user_edited: boolean;
   followup: Followup | null;
   note: TicketNote | null;
+  resolved_at: string | null;
+  resolved_source: ResolvedSource | null;
+  /** Effective value — backend merges per-ticket override with settings default. */
+  ai_resolve_enabled: boolean;
+  /** Raw per-ticket override. null = inherit from settings.ai_resolve_default. */
+  ai_resolve_override: boolean | null;
+  ai_resolution_verdict: ResolutionVerdict | null;
+  ai_resolution_confidence: number | null;
+  ai_resolution_reason: string | null;
+  resolution_chip_state: ResolutionChipState | null;
 }
 
 // ── Filter + settings ────────────────────────────────────────────────────────
@@ -124,4 +138,8 @@ export interface FilterSettings {
   /** When false, ingest skips AI categorization — tickets land in the fallback
    *  category and the operator writes subject/summary by hand. */
   use_ai: boolean;
+  /** Global default for AI-powered auto-resolve. Per-ticket override takes precedence. */
+  ai_resolve_default: boolean;
+  /** Confidence threshold (0..1) the AI verdict must meet before auto-resolving. */
+  ai_resolve_confidence_threshold: number;
 }

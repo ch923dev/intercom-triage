@@ -14,6 +14,8 @@ const DEFAULTS: FilterSettings = {
   include_category_ids: null,
   mute_alarms: false,
   use_ai: true,
+  ai_resolve_default: false,
+  ai_resolve_confidence_threshold: 0.7,
 };
 
 export const useSettingsStore = defineStore('settings', () => {
