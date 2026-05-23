@@ -361,6 +361,45 @@ class NoteEntry(Base):
     )
 
 
+class NoteAttachment(Base):
+    """A file attachment owned by either a note entry or a ticket (spec:
+    note attachments). Content-addressed by sha256 on disk so identical
+    uploads dedupe automatically. Polymorphic owner — `owner_kind` is
+    'entry' (owner_id = str of NoteEntry.id) or 'ticket' (owner_id =
+    ticket_id). `ticket_id` is always populated so list-by-ticket is one
+    index lookup regardless of owner kind."""
+
+    __tablename__ = "note_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    owner_id: Mapped[str] = mapped_column(Text, nullable=False)
+    ticket_id: Mapped[str] = mapped_column(Text, nullable=False)
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    mime: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    stored_path: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint(
+            "owner_kind IN ('entry','ticket')",
+            name="note_attachments_owner_kind_check",
+        ),
+        CheckConstraint("length(sha256) = 64", name="note_attachments_sha256_len_check"),
+        CheckConstraint("size_bytes >= 0", name="note_attachments_size_nonneg_check"),
+        Index("ix_note_attachments_owner", "owner_kind", "owner_id"),
+        Index("ix_note_attachments_ticket", "ticket_id"),
+        Index("ix_note_attachments_sha256", "sha256"),
+    )
+
+
 class Ticket(Base):
     """An ingested + categorized conversation — the operator's board data.
 
