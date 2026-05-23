@@ -28,6 +28,9 @@ export const useTicketsStore = defineStore('tickets', () => {
     pendingOverrides: {},
   });
 
+  /** Resolved tickets list — always-visible Resolved column. */
+  const resolvedTickets = ref<Ticket[]>([]);
+
   /** Active search query. Empty string means no filter. */
   const query = ref('');
 
@@ -94,7 +97,12 @@ export const useTicketsStore = defineStore('tickets', () => {
     state.value.loading = true;
     state.value.error = null;
     try {
-      state.value.tickets = await api.listTickets();
+      const [open, resolved] = await Promise.all([
+        api.listTickets({ resolved: false }),
+        api.listTickets({ resolved: true }),
+      ]);
+      state.value.tickets = open;
+      resolvedTickets.value = resolved;
     } catch (e) {
       state.value.error = (e as Error).message;
       throw e;
@@ -110,12 +118,22 @@ export const useTicketsStore = defineStore('tickets', () => {
   async function silentRefresh() {
     state.value.error = null;
     try {
-      state.value.tickets = await api.listTickets();
+      const [open, resolved] = await Promise.all([
+        api.listTickets({ resolved: false }),
+        api.listTickets({ resolved: true }),
+      ]);
+      state.value.tickets = open;
+      resolvedTickets.value = resolved;
     } catch (e) {
       state.value.error = (e as Error).message;
     } finally {
       state.value.lastRefresh = new Date();
     }
+  }
+
+  /** Fetch only the resolved list (lightweight targeted refresh). */
+  async function refreshResolved() {
+    resolvedTickets.value = await api.listTickets({ resolved: true });
   }
 
   /** Set the live search query that filters the board. */
@@ -162,18 +180,104 @@ export const useTicketsStore = defineStore('tickets', () => {
     }
   }
 
-  /** Optimistic category override; rolls back on server failure. */
+  /** Optimistically move ticket to resolvedTickets; rolls back on server failure. */
+  async function markResolved(id: string) {
+    const idx = state.value.tickets.findIndex((t) => t.id === id);
+    if (idx === -1) return;
+    const original = state.value.tickets[idx]!;
+    // Optimistic move
+    state.value.tickets.splice(idx, 1);
+    resolvedTickets.value.unshift({
+      ...original,
+      resolved_at: new Date().toISOString(),
+      resolved_source: 'manual',
+      resolution_chip_state: null,
+    });
+    try {
+      await api.resolveTicket(id);
+    } catch (e) {
+      // Rollback
+      resolvedTickets.value = resolvedTickets.value.filter((t) => t.id !== id);
+      state.value.tickets.splice(idx, 0, original);
+      throw e;
+    }
+  }
+
+  /** Optimistically move ticket from resolvedTickets back to open; rolls back on failure. */
+  async function reopen(id: string) {
+    const idx = resolvedTickets.value.findIndex((t) => t.id === id);
+    if (idx === -1) return;
+    const original = resolvedTickets.value[idx]!;
+    resolvedTickets.value.splice(idx, 1);
+    state.value.tickets.unshift({
+      ...original,
+      resolved_at: null,
+      resolved_source: null,
+      resolution_chip_state: null,
+    });
+    try {
+      await api.reopenTicket(id);
+    } catch (e) {
+      state.value.tickets = state.value.tickets.filter((t) => t.id !== id);
+      resolvedTickets.value.splice(idx, 0, original);
+      throw e;
+    }
+  }
+
+  /** Set (or clear) the per-ticket AI-resolve override; reflects optimistically. */
+  async function setAiResolve(id: string, enabled: boolean | null) {
+    await api.setAiResolve(id, enabled);
+    // Optimistically reflect the raw override in both lists; effective value
+    // recomputes on next refresh.
+    for (const list of [state.value.tickets, resolvedTickets.value]) {
+      const t = list.find((t) => t.id === id);
+      if (t) t.ai_resolve_override = enabled;
+    }
+  }
+
+  /** Suppress the resolution chip until the next update_at advance. */
+  async function dismissChip(id: string) {
+    await api.dismissChip(id);
+    for (const list of [state.value.tickets, resolvedTickets.value]) {
+      const t = list.find((t) => t.id === id);
+      if (t) t.resolution_chip_state = null;
+    }
+  }
+
+  /** Optimistic category override; rolls back on server failure.
+   *  If the ticket is currently resolved, also moves it back to open
+   *  (the backend clears resolution atomically on category override). */
   async function applyOverride(ticketId: string, categoryId: number) {
+    // If the ticket is in resolvedTickets, move it back to open optimistically.
+    const resolvedIdx = resolvedTickets.value.findIndex((t) => t.id === ticketId);
+    let movedFromResolved: Ticket | undefined;
+    if (resolvedIdx !== -1) {
+      movedFromResolved = resolvedTickets.value[resolvedIdx]!;
+      resolvedTickets.value.splice(resolvedIdx, 1);
+      state.value.tickets.unshift({
+        ...movedFromResolved,
+        resolved_at: null,
+        resolved_source: null,
+        category_id: categoryId,
+        user_override: true,
+      });
+    }
+
     const previous = state.value.pendingOverrides[ticketId];
     state.value.pendingOverrides = { ...state.value.pendingOverrides, [ticketId]: categoryId };
     try {
       await api.overrideCategory(ticketId, categoryId);
     } catch (e) {
-      // Roll back.
+      // Roll back pending overrides.
       const next = { ...state.value.pendingOverrides };
       if (previous === undefined) delete next[ticketId];
       else next[ticketId] = previous;
       state.value.pendingOverrides = next;
+      // Roll back resolved→open move if we made one.
+      if (movedFromResolved !== undefined) {
+        state.value.tickets = state.value.tickets.filter((t) => t.id !== ticketId);
+        resolvedTickets.value.splice(resolvedIdx, 0, movedFromResolved);
+      }
       throw e;
     }
   }
@@ -195,5 +299,12 @@ export const useTicketsStore = defineStore('tickets', () => {
     editTicket,
     isEmpty: computed(() => !state.value.loading && state.value.tickets.length === 0),
     pendingOverrides: computed(() => state.value.pendingOverrides),
+    // Resolution
+    resolvedTickets,
+    refreshResolved,
+    markResolved,
+    reopen,
+    setAiResolve,
+    dismissChip,
   };
 });

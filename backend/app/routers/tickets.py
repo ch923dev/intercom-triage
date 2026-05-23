@@ -13,25 +13,38 @@ from app.config import AppConfig
 from app.db import get_session
 from app.deps import get_app_config, get_intercom, get_openrouter
 from app.schemas import (
+    AIResolveSet,
     CategoryUpdate,
     FilterSettings,
     HydratedTicket,
     IngestResponse,
     OkResponse,
     OverrideResponse,
+    ReopenResponse,
+    ResolveResponse,
     TicketEdit,
     TicketSchema,
 )
+from app.services import resolution as resolution_svc
 from app.services import tickets as svc
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
 
 @router.get("", response_model=list[TicketSchema])
-async def list_tickets(session: AsyncSession = Depends(get_session)) -> list[TicketSchema]:
+async def list_tickets(
+    resolved: bool | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[TicketSchema]:
     """Serve the stored board — extension-ingested tickets, no live Intercom
-    call. Honors the saved filter settings."""
-    return await svc.get_tickets(session)
+    call. Honors the saved filter settings.
+
+    Pass ``?resolved=true`` for the Resolved column (shows only resolved
+    tickets, ordered by resolved_at desc, ignores include_category_ids).
+    Default (omitted or ``?resolved=false``) returns open-only tickets.
+    """
+    effective = bool(resolved)
+    return await svc.get_tickets(session, resolved=effective)
 
 
 @router.get("/sync-state", response_model=dict[str, datetime])
@@ -102,4 +115,45 @@ async def edit_ticket(
         title=body.title,
         summary=body.summary,
     )
+    return OkResponse()
+
+
+@router.post("/{ticket_id}/resolve", response_model=ResolveResponse)
+async def resolve_ticket(
+    ticket_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> ResolveResponse:
+    """Manual resolve. 409 if already resolved, 404 if unknown."""
+    out = await resolution_svc.resolve(session, ticket_id)
+    return ResolveResponse(resolved_at=out.resolved_at, resolved_source=out.resolved_source)
+
+
+@router.post("/{ticket_id}/reopen", response_model=ReopenResponse)
+async def reopen_ticket(
+    ticket_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> ReopenResponse:
+    """Reopen a resolved ticket. 409 if already open, 404 if unknown."""
+    await resolution_svc.reopen(session, ticket_id)
+    return ReopenResponse()
+
+
+@router.patch("/{ticket_id}/ai-resolve", response_model=OkResponse)
+async def set_ai_resolve(
+    ticket_id: str,
+    body: AIResolveSet,
+    session: AsyncSession = Depends(get_session),
+) -> OkResponse:
+    """Per-ticket AI-resolve override. `null` inherits settings.ai_resolve_default."""
+    await resolution_svc.set_ai_resolve(session, ticket_id, body.enabled)
+    return OkResponse()
+
+
+@router.post("/{ticket_id}/dismiss-chip", response_model=OkResponse)
+async def dismiss_chip(
+    ticket_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> OkResponse:
+    """Suppress the resolution chip until `tickets.updated_at` advances."""
+    await resolution_svc.dismiss_chip(session, ticket_id)
     return OkResponse()

@@ -44,6 +44,9 @@ async def get_cached(
         proposal_id=row.proposal_id,
         summary=row.summary,
         confidence=row.confidence,
+        ai_resolution_verdict=row.ai_resolution_verdict,  # type: ignore[arg-type]
+        ai_resolution_confidence=row.ai_resolution_confidence,
+        ai_resolution_reason=row.ai_resolution_reason,
     )
 
 
@@ -67,6 +70,9 @@ async def set_cached(
                 confidence=result.confidence,
                 ticket_updated_at=signature,
                 cached_at=now,
+                ai_resolution_verdict=result.ai_resolution_verdict,
+                ai_resolution_confidence=result.ai_resolution_confidence,
+                ai_resolution_reason=result.ai_resolution_reason,
             ),
         )
         return
@@ -76,6 +82,9 @@ async def set_cached(
     row.confidence = result.confidence
     row.ticket_updated_at = signature
     row.cached_at = now
+    row.ai_resolution_verdict = result.ai_resolution_verdict
+    row.ai_resolution_confidence = result.ai_resolution_confidence
+    row.ai_resolution_reason = result.ai_resolution_reason
 
 
 async def sweep_expired(session: AsyncSession, ttl_seconds: int) -> int:

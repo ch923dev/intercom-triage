@@ -28,31 +28,40 @@ see SUBJECT rules below.
 
 A) Assign to an EXISTING active category:
    {
-     "assignment":  "existing",
-     "category_id": <integer id of one of the ACTIVE CATEGORIES below>,
-     "subject":     "<see SUBJECT rules>",
-     "summary":     "<=600 chars, 2-3 sentences (see SUMMARY rules)",
-     "confidence":  <float 0..1>
+     "assignment":            "existing",
+     "category_id":           <integer id of one of the ACTIVE CATEGORIES below>,
+     "subject":               "<see SUBJECT rules>",
+     "summary":               "<=600 chars, 2-3 sentences (see SUMMARY rules)",
+     "confidence":            <float 0..1>,
+     "resolution_verdict":    "resolved" | "not_resolved",
+     "resolution_confidence": <float 0..1>,
+     "resolution_reason":     "<see RESOLUTION rules>"
    }
 
 B) Reuse an already-PENDING proposal:
    {
-     "assignment":  "pending_proposal",
-     "proposal_id": <integer id of one of the PENDING PROPOSALS below>,
-     "subject":     "<see SUBJECT rules>",
-     "summary":     "<=600 chars, 2-3 sentences (see SUMMARY rules)",
-     "confidence":  <float 0..1>
+     "assignment":            "pending_proposal",
+     "proposal_id":           <integer id of one of the PENDING PROPOSALS below>,
+     "subject":               "<see SUBJECT rules>",
+     "summary":               "<=600 chars, 2-3 sentences (see SUMMARY rules)",
+     "confidence":            <float 0..1>,
+     "resolution_verdict":    "resolved" | "not_resolved",
+     "resolution_confidence": <float 0..1>,
+     "resolution_reason":     "<see RESOLUTION rules>"
    }
 
 C) Propose a NEW category (only when no existing category fits with reasonable
    confidence AND no pending proposal fits either):
    {
-     "assignment":           "new_proposal",
-     "proposed_name":        "<short, title case, <=32 chars>",
-     "proposed_description": "<one sentence describing what belongs here>",
-     "subject":              "<see SUBJECT rules>",
-     "summary":              "<=600 chars, 2-3 sentences (see SUMMARY rules)",
-     "confidence":           <float 0..1>
+     "assignment":            "new_proposal",
+     "proposed_name":         "<short, title case, <=32 chars>",
+     "proposed_description":  "<one sentence describing what belongs here>",
+     "subject":               "<see SUBJECT rules>",
+     "summary":               "<=600 chars, 2-3 sentences (see SUMMARY rules)",
+     "confidence":            <float 0..1>,
+     "resolution_verdict":    "resolved" | "not_resolved",
+     "resolution_confidence": <float 0..1>,
+     "resolution_reason":     "<see RESOLUTION rules>"
    }
 
 SUBJECT rules:
@@ -73,6 +82,20 @@ SUMMARY rules (applies to all three options):
   tried, what the admin has replied, what's still unknown).
 - Sentence 3 (optional): the next concrete action the operator should take.
 - Plain prose. No bullets, no markdown, no greetings, no closing phrases.
+
+RESOLUTION rules (applies to every response):
+- Decide whether the conversation appears resolved.
+- A conversation is "resolved" when: the customer's most recent message
+  indicates the issue is fixed, they thanked the agent for a working solution,
+  the agent's last reply closed the loop and the customer has not replied
+  since, or the customer explicitly said no further help is needed.
+- A conversation is "not_resolved" when: the customer is waiting on the
+  agent, has a new question, expressed dissatisfaction, the issue is still
+  reproducing, or the thread ends mid-troubleshooting without confirmation.
+- Add these THREE fields to EVERY response object:
+    "resolution_verdict":    "resolved" | "not_resolved",
+    "resolution_confidence": <float 0..1>,
+    "resolution_reason":     "<one short clause, <=120 chars, plain text>"
 
 Rules:
 - Prefer existing categories. Propose new only when the existing set genuinely

@@ -18,12 +18,37 @@ const categories = useCategoriesStore();
 const followups = useFollowupsStore();
 const notes = useNotesStore();
 
-const ticket = computed(() => tickets.tickets.find((t) => t.id === view.selectedTicketId) ?? null);
+const ticket = computed(
+  () =>
+    tickets.tickets.find((t) => t.id === view.selectedTicketId) ??
+    tickets.resolvedTickets.find((t) => t.id === view.selectedTicketId) ??
+    null,
+);
+
+/** Effective category id — applies any pending override on top of the
+ *  server-assigned value so the flyout matches the Board's column placement. */
+const effectiveCategoryId = computed(() => {
+  const t = ticket.value;
+  if (!t) return null;
+  return tickets.pendingOverrides[t.id] ?? t.category_id;
+});
 
 const category = computed(() => {
-  const id = ticket.value?.category_id;
+  const id = effectiveCategoryId.value;
   return id == null ? null : (categories.categories.find((c) => c.id === id) ?? null);
 });
+
+const categoryBusy = ref(false);
+
+async function onPickCategory(categoryId: number) {
+  if (!ticket.value || effectiveCategoryId.value === categoryId || categoryBusy.value) return;
+  categoryBusy.value = true;
+  try {
+    await tickets.applyOverride(ticket.value.id, categoryId);
+  } finally {
+    categoryBusy.value = false;
+  }
+}
 
 // ── Follow-up ─────────────────────────────────────────────────────────────────
 
@@ -305,6 +330,33 @@ async function resetField(field: 'title' | 'summary') {
     editError.value = (e as Error).message;
   }
 }
+
+// ── Resolution ────────────────────────────────────────────────────────────────
+
+async function onResolveToggle() {
+  const id = ticket.value?.id;
+  if (!id) return;
+  if (ticket.value?.resolved_at) {
+    await tickets.reopen(id);
+  } else {
+    await tickets.markResolved(id);
+  }
+}
+
+async function setAi(v: boolean | null) {
+  const id = ticket.value?.id;
+  if (!id) return;
+  await tickets.setAiResolve(id, v);
+}
+
+function formatResolved(iso: string): string {
+  return new Date(iso).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 </script>
 
 <template>
@@ -454,6 +506,24 @@ async function resetField(field: 'title' | 'summary') {
             </a>
           </div>
 
+          <!-- Category picker -->
+          <section class="block">
+            <div class="mono label">Category</div>
+            <div class="cat-chips">
+              <button
+                v-for="c in categories.categories"
+                :key="c.id"
+                class="cat-chip"
+                :class="{ active: c.id === effectiveCategoryId }"
+                :disabled="categoryBusy"
+                @click="onPickCategory(c.id)"
+              >
+                <CatDot :color="c.color" :size="8" />
+                <span>{{ c.name }}</span>
+              </button>
+            </div>
+          </section>
+
           <!-- Follow-up (T050) -->
           <section class="block">
             <div class="mono label">Follow-up</div>
@@ -510,6 +580,39 @@ async function resetField(field: 'title' | 'summary') {
               <button v-for="p in NOTE_PRESETS" :key="p" class="chip" @click="appendPreset(p)">
                 + {{ p }}
               </button>
+            </div>
+          </section>
+
+          <!-- Resolution (T15) -->
+          <section class="block">
+            <div class="mono label">Resolution</div>
+            <div class="status-row">
+              <span v-if="ticket.resolved_at" class="status-pill mono">
+                Resolved · {{ ticket.resolved_source }} · {{ formatResolved(ticket.resolved_at) }}
+              </span>
+              <span v-else class="status-pill mono">Open</span>
+            </div>
+            <div class="presets">
+              <button class="chip" @click="onResolveToggle">
+                {{ ticket.resolved_at ? 'Reopen' : 'Mark resolved' }}
+              </button>
+            </div>
+            <div class="ai-tristate">
+              <span class="mono tristate-label">AI</span>
+              <div class="seg">
+                <button
+                  :class="{ active: ticket.ai_resolve_override === null }"
+                  @click="setAi(null)"
+                >default</button>
+                <button
+                  :class="{ active: ticket.ai_resolve_override === true }"
+                  @click="setAi(true)"
+                >on</button>
+                <button
+                  :class="{ active: ticket.ai_resolve_override === false }"
+                  @click="setAi(false)"
+                >off</button>
+              </div>
             </div>
           </section>
           </aside>
@@ -828,6 +931,89 @@ header {
 }
 .err {
   color: var(--accent);
+}
+/* ── Resolution section ───────────────────────────────────────────────────── */
+.status-row {
+  display: flex;
+  align-items: center;
+}
+.status-pill {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  padding: 3px 7px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--chip-bg);
+}
+.ai-tristate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tristate-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+.seg {
+  display: inline-flex;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  overflow: hidden;
+}
+.seg button {
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+.seg button.active {
+  background: var(--ink);
+  color: var(--bg);
+}
+.seg button:hover:not(.active) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.cat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-chip);
+  background: transparent;
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cat-chip:hover:not(.active):not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.cat-chip.active {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+.cat-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 /* ── Conversation timeline — modern chat ──────────────────────────────────── */
 .chat {

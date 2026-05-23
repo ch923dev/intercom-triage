@@ -173,3 +173,55 @@ async def test_categorize_no_client_all_fallback(session: AsyncSession) -> None:
         fallback_category_id=fb,
     )
     assert all(r.category_id == fb and r.confidence == 0.0 for r in out.values())
+
+
+@pytest.mark.asyncio
+async def test_resolver_propagates_resolution_fields(session: AsyncSession) -> None:
+    """resolve() carries verdict + confidence + reason through to CategorizationResult."""
+    from app.ai.pipeline import ParsedAssignment, _ResolverState, resolve
+
+    fb = await _fallback_id(session)
+    state = _ResolverState(
+        active_category_ids={fb, 99},
+        pending_proposal_ids=set(),
+        pending_by_signature={},
+        rejected_signatures=set(),
+        fallback_category_id=fb,
+    )
+    parsed = ParsedAssignment(
+        "existing",
+        "summary",
+        0.8,
+        "subj",
+        category_id=99,
+        resolution_verdict="resolved",
+        resolution_confidence=0.82,
+        resolution_reason="customer confirmed working",
+    )
+    result = await resolve(parsed, session=session, state=state)
+    assert result.ai_resolution_verdict == "resolved"
+    assert result.ai_resolution_confidence == 0.82
+    assert result.ai_resolution_reason == "customer confirmed working"
+
+
+def test_fallback_result_has_null_resolution_fields() -> None:
+    from datetime import datetime
+
+    from app.ai.pipeline import _fallback
+    from app.schemas import HydratedTicket, TicketAuthorSchema
+
+    hydrated = HydratedTicket(
+        id="x",
+        title="t",
+        state="open",
+        priority=None,
+        created_at=datetime(2026, 5, 23),
+        updated_at=datetime(2026, 5, 23),
+        author=TicketAuthorSchema(),
+        url=None,
+        parts=[],
+    )
+    result = _fallback(hydrated, fallback_category_id=1)
+    assert result.ai_resolution_verdict is None
+    assert result.ai_resolution_confidence is None
+    assert result.ai_resolution_reason is None

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC
 
 import pytest
+from sqlalchemy import inspect as sqla_inspect
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
@@ -279,3 +280,142 @@ async def test_followup_reason_length_constraint() -> None:
                 await session.commit()
     finally:
         await engine.dispose()
+
+
+# ── Ticket-resolution schema tests (Task 1) ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_ticket_has_resolution_columns() -> None:
+    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    factory = make_session_factory(engine)
+    try:
+        await init_db(engine, factory)
+        async with engine.connect() as conn:
+            cols = {
+                c["name"]
+                for c in await conn.run_sync(
+                    lambda sync_conn: sqla_inspect(sync_conn).get_columns("tickets")
+                )
+            }
+        assert {
+            "resolved_at",
+            "resolved_source",
+            "ai_resolve_enabled",
+            "resolution_chip_dismissed_at",
+        }.issubset(cols)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ticket_resolution_xor_check() -> None:
+    """resolved_at and resolved_source must be both null or both non-null."""
+    from app.models import Ticket
+    from app.util import naive_utcnow
+
+    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    factory = make_session_factory(engine)
+    try:
+        await init_db(engine, factory)
+        async with factory() as session:
+            ticket = Ticket(
+                id="t1",
+                title="x",
+                state="open",
+                author={},
+                parts=[],
+                created_at=naive_utcnow(),
+                updated_at=naive_utcnow(),
+                resolved_at=naive_utcnow(),
+                resolved_source=None,  # one null, other not → must fail
+            )
+            session.add(ticket)
+            with pytest.raises(IntegrityError):
+                await session.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ai_cache_has_resolution_columns() -> None:
+    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    factory = make_session_factory(engine)
+    try:
+        await init_db(engine, factory)
+        async with engine.connect() as conn:
+            cols = {
+                c["name"]
+                for c in await conn.run_sync(
+                    lambda sync_conn: sqla_inspect(sync_conn).get_columns("ai_cache")
+                )
+            }
+        assert {
+            "ai_resolution_verdict",
+            "ai_resolution_confidence",
+            "ai_resolution_reason",
+        }.issubset(cols)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_settings_has_resolution_columns() -> None:
+    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    factory = make_session_factory(engine)
+    try:
+        await init_db(engine, factory)
+        async with engine.connect() as conn:
+            cols = {
+                c["name"]
+                for c in await conn.run_sync(
+                    lambda sync_conn: sqla_inspect(sync_conn).get_columns("settings")
+                )
+            }
+        assert {"ai_resolve_default", "ai_resolve_confidence_threshold"}.issubset(cols)
+    finally:
+        await engine.dispose()
+
+
+def test_ticket_schema_carries_resolution_fields():
+    from datetime import datetime
+
+    from app.schemas import TicketSchema
+
+    payload = {
+        "id": "t1",
+        "title": "x",
+        "state": "open",
+        "priority": None,
+        "created_at": datetime(2026, 5, 23),
+        "updated_at": datetime(2026, 5, 23),
+        "author": {"id": None, "name": None, "email": None, "type": None},
+        "url": None,
+        "parts": [],
+        "category_id": 1,
+        "proposal_id": None,
+        "summary": "",
+        "ai_confidence": 0.0,
+        "user_override": False,
+        "resolved_at": None,
+        "resolved_source": None,
+        "ai_resolve_enabled": False,
+        "ai_resolve_override": None,
+        "ai_resolution_verdict": None,
+        "ai_resolution_confidence": None,
+        "ai_resolution_reason": None,
+        "resolution_chip_state": None,
+    }
+    ticket = TicketSchema.model_validate(payload)
+    assert ticket.resolved_at is None
+    assert ticket.ai_resolve_enabled is False
+    assert ticket.ai_resolve_override is None
+    assert ticket.resolution_chip_state is None
+
+
+def test_resolve_request_body_accepts_empty():
+    from app.schemas import AIResolveSet
+
+    AIResolveSet.model_validate({"enabled": True})
+    AIResolveSet.model_validate({"enabled": False})
+    AIResolveSet.model_validate({"enabled": None})

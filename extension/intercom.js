@@ -19,6 +19,10 @@
 const INTERCOM_BASE = 'https://app.intercom.com';
 const APP_ID_STORAGE_KEY = 'intercomAppId';
 
+/** How far back the closure pass looks when paginating the closed list.
+ *  Default: 7 days. The pass stops early once all candidate ids are found. */
+const LOOKBACK_SECONDS = 7 * 24 * 60 * 60;
+
 // Renderable types we know carry conversation text. Decoded via live
 // inspection — assignment/attribute/translation events fall through and are
 // filtered out implicitly because `blocksToPlainText` yields '' for them.
@@ -332,4 +336,73 @@ export async function fetchHydratedBatch({
   return out.filter((t) => t !== null);
 }
 
+/**
+ * Fetch closed conversations until every id in `wanted` is found or we fall
+ * past `oldestUnixSeconds` (the lookback floor). Returns the subset whose
+ * ids are in `wanted`.
+ *
+ * Used by the sync flow to detect Intercom-closed transitions for tickets
+ * we previously had as open.
+ *
+ * @param {object} opts
+ * @param {string} opts.appId            Workspace `app_id`.
+ * @param {string[]} opts.wanted         Conversation ids to search for.
+ * @param {number} opts.oldestUnixSeconds Stop paginating once we reach this epoch.
+ */
+export async function listClosedConversations({ appId, wanted, oldestUnixSeconds }) {
+  const found = [];
+  let starting_after = null;
+  const wantedSet = new Set(wanted);
+  while (wantedSet.size > 0) {
+    const params = {
+      app_id: appId,
+      inbox_type: 'all',
+      sort_field: 'sorting_updated_at',
+      sort_direction: 'desc',
+      state: 'closed',
+      count: 50,
+      'fields[]': 'attributes',
+    };
+    if (starting_after) params.starting_after = starting_after;
+
+    let body;
+    try {
+      body = await requestJson('/ember/inbox/conversations/list', params);
+    } catch (err) {
+      // Auth errors bubble; network errors end the pass early (best-effort).
+      if (err instanceof IntercomSessionError && (err.status === 401 || err.status === 403)) {
+        throw err;
+      }
+      break;
+    }
+
+    const convos = Array.isArray(body?.conversations) ? body.conversations : [];
+    if (convos.length === 0) break;
+
+    let oldestOnPage = Infinity;
+    for (const c of convos) {
+      // Intercom's list timestamps can be ISO strings or unix seconds.
+      const raw = c.updated_at ?? c.sorting_updated_at ?? c.last_updated;
+      let ts = Infinity;
+      if (typeof raw === 'number' && Number.isFinite(raw)) {
+        ts = raw;
+      } else if (typeof raw === 'string' && raw) {
+        const ms = Date.parse(raw);
+        if (!Number.isNaN(ms)) ts = Math.floor(ms / 1000);
+      }
+      oldestOnPage = Math.min(oldestOnPage, ts);
+      if (wantedSet.has(String(c.id))) {
+        found.push(c);
+        wantedSet.delete(String(c.id));
+      }
+    }
+
+    if (oldestOnPage < oldestUnixSeconds) break;
+    starting_after = body.pages?.next?.starting_after ?? null;
+    if (!starting_after) break;
+  }
+  return found;
+}
+
+export { LOOKBACK_SECONDS };
 export { IntercomSessionError };

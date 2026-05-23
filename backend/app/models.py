@@ -145,6 +145,9 @@ class AICacheEntry(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         nullable=False,
     )
+    ai_resolution_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_resolution_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_resolution_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         # XOR: exactly one of category_id, proposal_id is set.
@@ -166,6 +169,14 @@ class AICacheEntry(Base):
             "category_id",
             sqlite_where=text("category_id IS NOT NULL"),
             postgresql_where=text("category_id IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "ai_resolution_verdict IS NULL OR ai_resolution_verdict IN ('resolved','not_resolved')",
+            name="ai_cache_resolution_verdict_check",
+        ),
+        CheckConstraint(
+            "ai_resolution_reason IS NULL OR length(ai_resolution_reason) <= 120",
+            name="ai_cache_resolution_reason_len_check",
         ),
     )
 
@@ -218,11 +229,33 @@ class Settings(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         nullable=False,
     )
+    ai_resolve_default: Mapped[bool] = mapped_column(
+        default=False,
+        server_default=text("0"),
+        nullable=False,
+    )
+    ai_resolve_confidence_threshold: Mapped[float] = mapped_column(
+        Float,
+        default=0.7,
+        server_default=text("0.7"),
+        nullable=False,
+    )
+    # When True (default), the Board hides category columns that currently have
+    # zero open tickets. Resolved column always shows regardless.
+    hide_empty_categories: Mapped[bool] = mapped_column(
+        default=True,
+        server_default=text("1"),
+        nullable=False,
+    )
 
     __table_args__ = (
         CheckConstraint("id = 1", name="settings_singleton_check"),
         CheckConstraint("lookback_unit IN ('hours', 'days')", name="settings_unit_check"),
         CheckConstraint("lookback_value BETWEEN 1 AND 720", name="settings_value_check"),
+        CheckConstraint(
+            "ai_resolve_confidence_threshold BETWEEN 0.0 AND 1.0",
+            name="settings_ai_resolve_threshold_check",
+        ),
     )
 
 
@@ -337,10 +370,28 @@ class Ticket(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         nullable=False,
     )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_resolve_enabled: Mapped[bool | None] = mapped_column(nullable=True)
+    resolution_chip_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
         Index("ix_tickets_updated_at", "updated_at"),
         Index("ix_tickets_category", "category_id"),
+        Index(
+            "ix_tickets_resolved_at",
+            "resolved_at",
+            sqlite_where=text("resolved_at IS NOT NULL"),
+            postgresql_where=text("resolved_at IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "(resolved_at IS NULL) = (resolved_source IS NULL)",
+            name="tickets_resolved_xor_check",
+        ),
+        CheckConstraint(
+            "resolved_source IS NULL OR resolved_source IN ('manual','intercom_closed')",
+            name="tickets_resolved_source_check",
+        ),
     )
 
 

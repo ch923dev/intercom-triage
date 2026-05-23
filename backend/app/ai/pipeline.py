@@ -36,6 +36,9 @@ class ParsedAssignment:
     proposal_id: int | None = None
     proposed_name: str | None = None
     proposed_description: str | None = None
+    resolution_verdict: Literal["resolved", "not_resolved"] | None = None
+    resolution_confidence: float | None = None
+    resolution_reason: str | None = None
 
 
 @dataclass
@@ -51,6 +54,9 @@ class CategorizationResult:
     # caching it would pin the ticket to the fallback category until a new
     # customer message arrives. A cached result read back is always a genuine
     # categorization, so this stays False on the cache-read path.
+    ai_resolution_verdict: Literal["resolved", "not_resolved"] | None = None
+    ai_resolution_confidence: float | None = None
+    ai_resolution_reason: str | None = None
 
 
 # ── T014 — parser ─────────────────────────────────────────────────────────────
@@ -94,6 +100,28 @@ def _extract_json_object(raw: str) -> dict[str, Any]:
     return parsed
 
 
+def _parse_resolution(
+    obj: dict[str, Any],
+) -> tuple[
+    Literal["resolved", "not_resolved"] | None,
+    float | None,
+    str | None,
+]:
+    verdict = obj.get("resolution_verdict")
+    if verdict not in ("resolved", "not_resolved"):
+        return None, None, None
+    typed_verdict: Literal["resolved", "not_resolved"] = verdict
+    confidence_raw = obj.get("resolution_confidence")
+    confidence_f: float | None
+    try:
+        confidence_f = max(0.0, min(1.0, float(str(confidence_raw))))
+    except (TypeError, ValueError):
+        confidence_f = None
+    reason_raw = obj.get("resolution_reason")
+    reason = str(reason_raw)[:120] if isinstance(reason_raw, str) and reason_raw.strip() else None
+    return typed_verdict, confidence_f, reason
+
+
 def parse_response(raw: str) -> ParsedAssignment:
     """Parse a model response into a typed assignment. Raises `ValueError` on any
     malformed shape — the caller treats that as a fallback trigger (FR-007)."""
@@ -104,6 +132,7 @@ def parse_response(raw: str) -> ParsedAssignment:
     summary = str(obj.get("summary") or "")[:600]
     subject = str(obj.get("subject") or "").strip()[:80]
     confidence = _clamp_confidence(obj.get("confidence"))
+    verdict, res_conf, res_reason = _parse_resolution(obj)
 
     if assignment == "existing":
         category_id = _coerce_int(obj.get("category_id"))
@@ -115,6 +144,9 @@ def parse_response(raw: str) -> ParsedAssignment:
             confidence,
             subject,
             category_id=category_id,
+            resolution_verdict=verdict,
+            resolution_confidence=res_conf,
+            resolution_reason=res_reason,
         )
 
     if assignment == "pending_proposal":
@@ -127,6 +159,9 @@ def parse_response(raw: str) -> ParsedAssignment:
             confidence,
             subject,
             proposal_id=proposal_id,
+            resolution_verdict=verdict,
+            resolution_confidence=res_conf,
+            resolution_reason=res_reason,
         )
 
     if assignment == "new_proposal":
@@ -141,6 +176,9 @@ def parse_response(raw: str) -> ParsedAssignment:
             subject,
             proposed_name=name,
             proposed_description=description,
+            resolution_verdict=verdict,
+            resolution_confidence=res_conf,
+            resolution_reason=res_reason,
         )
 
     raise ValueError(f"unknown assignment kind: {assignment!r}")
@@ -178,6 +216,9 @@ async def resolve(
             parsed.summary,
             parsed.confidence,
             parsed.subject,
+            ai_resolution_verdict=parsed.resolution_verdict,
+            ai_resolution_confidence=parsed.resolution_confidence,
+            ai_resolution_reason=parsed.resolution_reason,
         )
 
     if parsed.kind == "pending_proposal":
@@ -189,6 +230,9 @@ async def resolve(
             parsed.summary,
             parsed.confidence,
             parsed.subject,
+            ai_resolution_verdict=parsed.resolution_verdict,
+            ai_resolution_confidence=parsed.resolution_confidence,
+            ai_resolution_reason=parsed.resolution_reason,
         )
 
     # new_proposal
@@ -206,6 +250,9 @@ async def resolve(
             parsed.summary,
             parsed.confidence,
             parsed.subject,
+            ai_resolution_verdict=parsed.resolution_verdict,
+            ai_resolution_confidence=parsed.resolution_confidence,
+            ai_resolution_reason=parsed.resolution_reason,
         )
 
     proposal = CategoryProposal(
@@ -225,6 +272,9 @@ async def resolve(
         parsed.summary,
         parsed.confidence,
         parsed.subject,
+        ai_resolution_verdict=parsed.resolution_verdict,
+        ai_resolution_confidence=parsed.resolution_confidence,
+        ai_resolution_reason=parsed.resolution_reason,
     )
 
 

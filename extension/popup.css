@@ -391,3 +391,56 @@ body {
   background: var(--accent);
   color: #fff;
 }
+
+/* ── Resolved tab ──────────────────────────────────────────────────────── */
+.tab.resolved-tab {
+  border-style: solid;
+  border-color: var(--ink-3);
+  color: var(--ink-3);
+}
+
+.tab.resolved-tab.active {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.resolved-card {
+  opacity: 0.82;
+}
+
+/* ── Resolve / reopen action buttons ──────────────────────────────────── */
+.action-btn {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 7px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.resolve-btn {
+  color: #2a8a4a;
+  border-color: #b8ddc5;
+}
+
+.resolve-btn:hover {
+  background: #eaf5ee;
+  border-color: #2a8a4a;
+}
+
+.reopen-btn {
+  color: var(--ink-2);
+  border-color: var(--line);
+}
+
+.reopen-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}

@@ -60,6 +60,17 @@ export const overrideCategory = (ticketId, categoryId) =>
     body: JSON.stringify({ category_id: categoryId }),
   });
 
+/** Resolved tickets — `GET /tickets?resolved=true`. */
+export const getResolvedTickets = () => request('/tickets?resolved=true');
+
+/** Manually resolve a ticket. 409 if already resolved, 404 if unknown. */
+export const resolveTicket = (ticketId) =>
+  request(`/tickets/${encodeURIComponent(ticketId)}/resolve`, { method: 'POST' });
+
+/** Reopen a previously-resolved ticket. 409 if already open, 404 if unknown. */
+export const reopenTicket = (ticketId) =>
+  request(`/tickets/${encodeURIComponent(ticketId)}/reopen`, { method: 'POST' });
+
 /** Active follow-up reminders — one row per ticket (T053). */
 export const fetchFollowups = () => request('/followups');
 

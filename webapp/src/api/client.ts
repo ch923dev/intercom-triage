@@ -11,6 +11,7 @@ import type {
   Followup,
   HealthResponse,
   ProposalsResponse,
+  ResolvedSource,
   Ticket,
   TicketNote,
 } from '@/types/api';
@@ -80,8 +81,13 @@ export const api = {
     request<{ ok: true }>(`/proposals/${id}/reject`, { method: 'POST' }),
 
   // ── tickets ───────────────────────────────────────────────────────────────
-  /** The stored board — extension-ingested + categorized tickets. */
-  listTickets: (): Promise<Ticket[]> => request('/tickets'),
+  /** The stored board — extension-ingested + categorized tickets.
+   *  Pass `resolved: true` to fetch the resolved column; `false` for open only
+   *  (default: open only, matching server default). */
+  listTickets: (opts: { resolved?: boolean } = {}): Promise<Ticket[]> => {
+    const qs = opts.resolved === undefined ? '' : `?resolved=${opts.resolved}`;
+    return request(`/tickets${qs}`);
+  },
 
   overrideCategory: (ticketId: string, categoryId: number) =>
     request<{ ok: true; category_id: number }>(`/tickets/${ticketId}/category`, {
@@ -118,6 +124,27 @@ export const api = {
     request<{ ok: true }>(`/followups/${ticketId}/mark-fired`, { method: 'POST' }),
   clearFollowup: (ticketId: string) =>
     request<{ ok: true }>(`/followups/${ticketId}`, { method: 'DELETE' }),
+
+  // ── resolution (T011/T012) ────────────────────────────────────────────────
+  /** Manually resolve a ticket. Returns the stamped resolved_at + source. */
+  resolveTicket: (ticketId: string): Promise<{ resolved_at: string; resolved_source: ResolvedSource }> =>
+    request(`/tickets/${ticketId}/resolve`, { method: 'POST', body: '{}' }),
+
+  /** Reopen a resolved ticket. */
+  reopenTicket: (ticketId: string): Promise<void> =>
+    request(`/tickets/${ticketId}/reopen`, { method: 'POST' }),
+
+  /** Set (or clear) the per-ticket AI-resolve override.
+   *  Pass `null` to inherit `settings.ai_resolve_default`. */
+  setAiResolve: (ticketId: string, enabled: boolean | null): Promise<void> =>
+    request(`/tickets/${ticketId}/ai-resolve`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+
+  /** Suppress the resolution chip until the ticket is updated again. */
+  dismissChip: (ticketId: string): Promise<void> =>
+    request(`/tickets/${ticketId}/dismiss-chip`, { method: 'POST' }),
 
   // ── notes (T047) ──────────────────────────────────────────────────────────
   listNotes: (): Promise<TicketNote[]> => request('/notes'),

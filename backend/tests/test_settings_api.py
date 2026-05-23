@@ -28,6 +28,9 @@ async def test_put_then_get_roundtrips(client: AsyncClient) -> None:
         "include_category_ids": [1, 2, 3],
         "mute_alarms": True,
         "use_ai": False,
+        "ai_resolve_default": False,
+        "ai_resolve_confidence_threshold": 0.7,
+        "hide_empty_categories": True,
     }
     put = await client.put("/settings", json=new_settings)
     assert put.status_code == 200
@@ -78,3 +81,50 @@ async def test_put_rejects_out_of_range_lookback(client: AsyncClient) -> None:
         },
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_settings_returns_ai_resolve_default_and_threshold(
+    client: AsyncClient,
+) -> None:
+    r = await client.get("/settings")
+    body = r.json()
+    assert "ai_resolve_default" in body
+    assert "ai_resolve_confidence_threshold" in body
+    assert body["ai_resolve_default"] is False
+    assert body["ai_resolve_confidence_threshold"] == 0.7
+
+
+@pytest.mark.asyncio
+async def test_put_settings_persists_resolve_fields(client: AsyncClient) -> None:
+    payload = {
+        "lookback_unit": "hours",
+        "lookback_value": 24,
+        "states": ["open"],
+        "include_category_ids": None,
+        "mute_alarms": False,
+        "use_ai": True,
+        "ai_resolve_default": True,
+        "ai_resolve_confidence_threshold": 0.85,
+    }
+    r = await client.put("/settings", json=payload)
+    assert r.status_code == 200
+    r2 = await client.get("/settings")
+    assert r2.json()["ai_resolve_default"] is True
+    assert r2.json()["ai_resolve_confidence_threshold"] == 0.85
+
+
+@pytest.mark.asyncio
+async def test_put_settings_rejects_out_of_range_threshold(client: AsyncClient) -> None:
+    payload = {
+        "lookback_unit": "hours",
+        "lookback_value": 24,
+        "states": ["open"],
+        "include_category_ids": None,
+        "mute_alarms": False,
+        "use_ai": True,
+        "ai_resolve_default": False,
+        "ai_resolve_confidence_threshold": 1.5,  # invalid
+    }
+    r = await client.put("/settings", json=payload)
+    assert r.status_code == 422

@@ -14,24 +14,30 @@ import {
   fetchCategories,
   fetchFollowups,
   fetchSettings,
+  getResolvedTickets,
   getStoredTickets,
   getSyncState,
   ingestTickets,
   markFollowupFired,
   overrideCategory,
+  reopenTicket,
+  resolveTicket,
   FULL_BOARD_URL,
 } from './api.js';
 import { fetchHydratedBatch, getAppId, IntercomSessionError, setAppId } from './intercom.js';
+
+const RESOLVED_TAB_KEY = 'resolved';
 
 const state = {
   categories: [],
   proposals: [],
   tickets: [],
+  resolvedTickets: [], // tickets with resolved_at set
   followups: {}, // ticket_id → follow-up record
   muteAlarms: false,
   now: Date.now(),
   dismissed: new Set(), // ticket ids whose due banner the user dismissed
-  activeTab: null, // 'cat-<id>' | 'prop-<id>'
+  activeTab: null, // 'cat-<id>' | 'prop-<id>' | 'resolved'
   error: null,
   loading: true,
 };
@@ -110,6 +116,7 @@ function renderTabs() {
       name: c.name,
       color: c.color,
       proposal: false,
+      resolved: false,
       count: state.tickets.filter((t) => t.category_id === c.id).length,
     })),
     ...state.proposals.map((p) => ({
@@ -117,13 +124,23 @@ function renderTabs() {
       name: p.name,
       color: null,
       proposal: true,
+      resolved: false,
       count: state.tickets.filter((t) => t.proposal_id === p.id).length,
     })),
+    {
+      key: RESOLVED_TAB_KEY,
+      name: 'Resolved',
+      color: null,
+      proposal: false,
+      resolved: true,
+      count: state.resolvedTickets.length,
+    },
   ];
 
   for (const tab of tabs) {
     const btn = node('button', 'tab');
     if (tab.proposal) btn.classList.add('proposal');
+    if (tab.resolved) btn.classList.add('resolved-tab');
     if (tab.key === state.activeTab) btn.classList.add('active');
 
     if (tab.color) {
@@ -142,9 +159,10 @@ function renderTabs() {
   }
 }
 
-function renderCard(ticket) {
+function renderCard(ticket, { isResolved = false } = {}) {
   const card = node('article', 'card');
   if (ticket.user_override) card.classList.add('overridden');
+  if (isResolved) card.classList.add('resolved-card');
 
   const followup = state.followups[ticket.id];
   if (followup && isDue(followup)) card.classList.add('due');
@@ -160,36 +178,49 @@ function renderCard(ticket) {
   const meta = node('div', 'card-meta');
   meta.append(node('span', 'customer', ticket.author?.name || '—'));
 
-  if (followup) {
+  if (followup && !isResolved) {
     const chip = node('span', 'fu-chip', chipLabel(followup));
     if (isDue(followup)) chip.classList.add('due');
     meta.append(chip);
     chipRefs.set(ticket.id, chip);
   }
 
-  const moveBtn = node('button', 'move-btn', 'Move ▾');
-  meta.append(moveBtn);
-  card.append(meta);
+  if (isResolved) {
+    // Resolved tab: show ↺ Reopen button.
+    const reopenBtn = node('button', 'action-btn reopen-btn', '↺ Reopen');
+    reopenBtn.addEventListener('click', () => void doReopen(ticket));
+    meta.append(reopenBtn);
+  } else {
+    // Open/category tabs: show ✓ Resolve button + Move button.
+    const resolveBtn = node('button', 'action-btn resolve-btn', '✓ Resolve');
+    resolveBtn.addEventListener('click', () => void doResolve(ticket));
+    meta.append(resolveBtn);
 
-  // Tap-to-move: toggle a button list of categories.
-  moveBtn.addEventListener('click', () => {
-    const open = card.querySelector('.move-picker');
-    if (open) {
-      open.remove();
-      return;
-    }
-    const picker = node('div', 'move-picker');
-    for (const cat of sortedCategories()) {
-      if (cat.id === ticket.category_id) continue;
-      const target = node('button', 'move-target');
-      const dot = node('span', 'dot');
-      dot.style.background = cat.color || 'var(--ink-3)';
-      target.append(dot, node('span', null, cat.name));
-      target.addEventListener('click', () => void moveTicket(ticket, cat.id));
-      picker.append(target);
-    }
-    card.append(picker);
-  });
+    const moveBtn = node('button', 'move-btn', 'Move ▾');
+    meta.append(moveBtn);
+
+    // Tap-to-move: toggle a button list of categories.
+    moveBtn.addEventListener('click', () => {
+      const open = card.querySelector('.move-picker');
+      if (open) {
+        open.remove();
+        return;
+      }
+      const picker = node('div', 'move-picker');
+      for (const cat of sortedCategories()) {
+        if (cat.id === ticket.category_id) continue;
+        const target = node('button', 'move-target');
+        const dot = node('span', 'dot');
+        dot.style.background = cat.color || 'var(--ink-3)';
+        target.append(dot, node('span', null, cat.name));
+        target.addEventListener('click', () => void moveTicket(ticket, cat.id));
+        picker.append(target);
+      }
+      card.append(picker);
+    });
+  }
+
+  card.append(meta);
 
   cardRefs.set(ticket.id, card);
   return card;
@@ -208,6 +239,21 @@ function renderList() {
     el.list.append(node('p', 'state error mono', state.error));
     return;
   }
+
+  if (state.activeTab === RESOLVED_TAB_KEY) {
+    const rows = state.resolvedTickets;
+    if (rows.length === 0) {
+      el.list.append(node('p', 'state mono', 'No resolved tickets'));
+      return;
+    }
+    // Most-recently-resolved first.
+    rows
+      .slice()
+      .sort((a, b) => new Date(b.resolved_at ?? b.updated_at) - new Date(a.resolved_at ?? a.updated_at))
+      .forEach((t) => el.list.append(renderCard(t, { isResolved: true })));
+    return;
+  }
+
   const rows = ticketsForTab(state.activeTab);
   if (rows.length === 0) {
     el.list.append(node('p', 'state mono', 'No tickets in this column'));
@@ -330,27 +376,62 @@ async function moveTicket(ticket, categoryId) {
   }
 }
 
+/** Mark a ticket as resolved — removes it from the open board, adds to Resolved tab. */
+async function doResolve(ticket) {
+  try {
+    const result = await resolveTicket(ticket.id);
+    // Move locally from open tickets to resolved tickets.
+    state.tickets = state.tickets.filter((t) => t.id !== ticket.id);
+    ticket.resolved_at = result.resolved_at ?? new Date().toISOString();
+    ticket.resolved_source = result.resolved_source ?? 'manual';
+    state.resolvedTickets = [ticket, ...state.resolvedTickets];
+    renderTabs();
+    renderList();
+  } catch (e) {
+    state.error = e.message;
+    renderList();
+  }
+}
+
+/** Reopen a resolved ticket — removes it from Resolved tab, triggers a reload. */
+async function doReopen(ticket) {
+  try {
+    await reopenTicket(ticket.id);
+    // Remove from resolved list; the ticket will reappear on next load/sync.
+    state.resolvedTickets = state.resolvedTickets.filter((t) => t.id !== ticket.id);
+    renderTabs();
+    renderList();
+  } catch (e) {
+    state.error = e.message;
+    renderList();
+  }
+}
+
 async function load() {
   state.loading = true;
   state.error = null;
   renderCount();
   renderList();
   try {
-    const [settings, catResp, followups] = await Promise.all([
+    const [settings, catResp, followups, tickets, resolvedTickets] = await Promise.all([
       fetchSettings(),
       fetchCategories(),
       fetchFollowups(),
+      getStoredTickets(),
+      getResolvedTickets().catch(() => []), // best-effort; don't break open board
     ]);
     state.categories = catResp.categories;
     state.proposals = catResp.pending_proposals;
     state.muteAlarms = Boolean(settings.mute_alarms);
     state.followups = Object.fromEntries(followups.map((f) => [f.ticket_id, f]));
-    state.tickets = await getStoredTickets();
+    state.tickets = tickets;
+    state.resolvedTickets = resolvedTickets;
 
     // Keep the selected tab if it still exists, else default to the first.
     const keys = [
       ...state.categories.map((c) => `cat-${c.id}`),
       ...state.proposals.map((p) => `prop-${p.id}`),
+      RESOLVED_TAB_KEY,
     ];
     if (!keys.includes(state.activeTab)) state.activeTab = keys[0] ?? null;
   } catch (e) {
