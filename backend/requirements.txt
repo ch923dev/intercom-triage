@@ -14,6 +14,9 @@ sqlalchemy==2.0.36
 aiosqlite==0.20.0
 alembic>=1.13,<2
 
+# Image thumbnailing for note attachments
+Pillow==11.0.0
+
 # Optional Postgres swap (uncomment to enable):
 # asyncpg==0.30.0
 
