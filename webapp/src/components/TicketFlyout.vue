@@ -159,6 +159,7 @@ const entryTimer = ref<number | null>(null);
 const entryReason = ref('');
 const entrySaving = ref(false);
 const entryError = ref<string | null>(null);
+const attachmentError = ref<string | null>(null);
 const legacyOpen = ref(false);
 
 const pendingFiles = ref<File[]>([]);
@@ -235,7 +236,7 @@ async function onTicketFiles(files: File[]) {
       files.map((f) => attachments.upload(f, 'ticket', id, id)),
     );
   } catch (e) {
-    entryError.value = (e as Error).message;
+    attachmentError.value = (e as Error).message;
   }
 }
 
@@ -243,7 +244,7 @@ async function onRemoveAttachment(id: number) {
   try {
     await attachments.remove(id);
   } catch (e) {
-    entryError.value = (e as Error).message;
+    attachmentError.value = (e as Error).message;
   }
 }
 
@@ -298,6 +299,7 @@ watch(
     entryReason.value = '';
     entryTimer.value = null;
     entryError.value = null;
+    attachmentError.value = null;
     legacyOpen.value = false;
     pendingFiles.value = [];
     if (id) {
@@ -734,6 +736,7 @@ function formatResolved(iso: string): string {
                 :items="attachments.byTicket(ticket.id)"
                 @remove="onRemoveAttachment"
               />
+              <div v-if="attachmentError" class="mono err">{{ attachmentError }}</div>
             </div>
 
             <!-- Timeline -->
