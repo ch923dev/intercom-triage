@@ -318,6 +318,49 @@ class TicketNote(Base):
     )
 
 
+class NoteEntry(Base):
+    """A timestamped append-only entry on a ticket's investigation log.
+
+    Replaces the freeform `ticket_notes.body` scratchpad with a log of
+    `(timestamp, body)` items. Each entry may carry an optional timer
+    (`timer_min`) and an optional `reason` that mirrors the wording on the
+    follow-up row. Soft-linked to `followups` by `ticket_id`: when a new
+    entry has `timer_min` set, the service upserts the matching `followups`
+    row inside the same transaction.
+
+    Append-only — corrections are new entries. `deleted_at` is a soft-delete
+    for hard mistakes only.
+    """
+
+    __tablename__ = "note_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    timer_min: Mapped[int | None] = mapped_column(Integer)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint("length(body) > 0", name="note_entries_body_nonempty"),
+        CheckConstraint(
+            "reason IS NULL OR length(reason) <= 80",
+            name="note_entries_reason_len_check",
+        ),
+        CheckConstraint(
+            "timer_min IS NULL OR (timer_min BETWEEN 1 AND 1440)",
+            name="note_entries_timer_range_check",
+        ),
+        Index("ix_note_entries_ticket", "ticket_id"),
+        Index("ix_note_entries_created", "created_at"),
+    )
+
+
 class Ticket(Base):
     """An ingested + categorized conversation — the operator's board data.
 
