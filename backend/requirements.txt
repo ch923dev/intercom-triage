@@ -17,6 +17,9 @@ alembic>=1.13,<2
 # Image thumbnailing for note attachments
 Pillow==11.0.0
 
+# Multipart form parsing for /attachments uploads
+python-multipart==0.0.20
+
 # Optional Postgres swap (uncomment to enable):
 # asyncpg==0.30.0
 

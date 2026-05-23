@@ -23,6 +23,7 @@ from app.db import make_engine, make_session_factory
 from app.metrics import metrics
 from app.models import init_db
 from app.observability import configure_logging, log_event
+from app.routers import attachments as attachments_router
 from app.routers import categories as categories_router
 from app.routers import followups as followups_router
 from app.routers import health as health_router
@@ -68,6 +69,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine = make_engine(config.database_url)
     session_factory = make_session_factory(engine)
     await init_db(engine, session_factory)
+
+    config.attachments_dir.mkdir(parents=True, exist_ok=True)
+    (config.attachments_dir / "thumbs").mkdir(parents=True, exist_ok=True)
 
     # External clients — created only when their secret is present (FR-014).
     openrouter: OpenRouterClient | None = None
@@ -135,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(followups_router.router)
     app.include_router(notes_router.router)
     app.include_router(note_entries_router.router)
+    app.include_router(attachments_router.router)
     app.include_router(metrics_router.router)
 
     return app
