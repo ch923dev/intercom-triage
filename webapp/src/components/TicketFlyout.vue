@@ -25,10 +25,30 @@ const ticket = computed(
     null,
 );
 
+/** Effective category id — applies any pending override on top of the
+ *  server-assigned value so the flyout matches the Board's column placement. */
+const effectiveCategoryId = computed(() => {
+  const t = ticket.value;
+  if (!t) return null;
+  return tickets.pendingOverrides[t.id] ?? t.category_id;
+});
+
 const category = computed(() => {
-  const id = ticket.value?.category_id;
+  const id = effectiveCategoryId.value;
   return id == null ? null : (categories.categories.find((c) => c.id === id) ?? null);
 });
+
+const categoryBusy = ref(false);
+
+async function onPickCategory(categoryId: number) {
+  if (!ticket.value || effectiveCategoryId.value === categoryId || categoryBusy.value) return;
+  categoryBusy.value = true;
+  try {
+    await tickets.applyOverride(ticket.value.id, categoryId);
+  } finally {
+    categoryBusy.value = false;
+  }
+}
 
 // ── Follow-up ─────────────────────────────────────────────────────────────────
 
@@ -485,6 +505,24 @@ function formatResolved(iso: string): string {
               Open in Intercom ↗
             </a>
           </div>
+
+          <!-- Category picker -->
+          <section class="block">
+            <div class="mono label">Category</div>
+            <div class="cat-chips">
+              <button
+                v-for="c in categories.categories"
+                :key="c.id"
+                class="cat-chip"
+                :class="{ active: c.id === effectiveCategoryId }"
+                :disabled="categoryBusy"
+                @click="onPickCategory(c.id)"
+              >
+                <CatDot :color="c.color" :size="8" />
+                <span>{{ c.name }}</span>
+              </button>
+            </div>
+          </section>
 
           <!-- Follow-up (T050) -->
           <section class="block">
@@ -944,6 +982,38 @@ header {
 .seg button:hover:not(.active) {
   background: var(--hover);
   color: var(--ink);
+}
+.cat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-chip);
+  background: transparent;
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cat-chip:hover:not(.active):not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.cat-chip.active {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+.cat-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 /* ── Conversation timeline — modern chat ──────────────────────────────────── */
 .chat {
