@@ -17,7 +17,15 @@ import {
   getSyncState,
   ingestTickets,
 } from './api.js';
-import { fetchHydratedBatch, getAppId, IntercomSessionError } from './intercom.js';
+import {
+  fetchHydratedBatch,
+  getAppId,
+  getConversation,
+  IntercomSessionError,
+  listClosedConversations,
+  LOOKBACK_SECONDS,
+  normalizeConversation,
+} from './intercom.js';
 
 const ALARM = 'triage-poll';
 const BADGE_COLOR = '#ff4d2e';
@@ -41,7 +49,56 @@ async function ingestFromIntercom(settings) {
       }),
     ),
   );
-  const hydrated = batches.flat();
+  const openConvos = batches.flat();
+
+  // ── Closure pass ────────────────────────────────────────────────────────────
+  // Any ticket tracked in the backend but absent from the open list may have
+  // flipped to closed. We search the Intercom closed list for those ids; any
+  // found are hydrated and included in the ingest so _upsert_ticket can stamp
+  // the open→closed transition (resolved_at / resolved_source='intercom_closed').
+  const openIds = new Set(openConvos.map((c) => c.id));
+  const trackedIds = Object.keys(knownState);
+  const candidateClosedIds = trackedIds.filter((id) => !openIds.has(id));
+
+  let closedHydrated = [];
+  if (candidateClosedIds.length > 0) {
+    const oldestUnixSeconds = Math.floor(Date.now() / 1000) - LOOKBACK_SECONDS;
+    const closedSummaries = await listClosedConversations({
+      appId,
+      wanted: candidateClosedIds,
+      oldestUnixSeconds,
+    }).catch((e) => {
+      if (e instanceof IntercomSessionError && (e.status === 401 || e.status === 403)) throw e;
+      return [];
+    });
+
+    // Hydrate each found closed conversation the same way as open ones.
+    const concurrency = 4;
+    const out = new Array(closedSummaries.length).fill(null);
+    let cursor = 0;
+    async function hydrateWorker() {
+      while (true) {
+        const i = cursor++;
+        if (i >= closedSummaries.length) return;
+        const summary = closedSummaries[i];
+        try {
+          const detail = await getConversation(appId, summary.id);
+          out[i] = normalizeConversation(detail, appId, summary);
+        } catch (err) {
+          if (err instanceof IntercomSessionError && (err.status === 401 || err.status === 403)) {
+            throw err;
+          }
+          console.warn(`[intercom] closure pass skipped ${summary.id}:`, err?.message ?? err);
+        }
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, closedSummaries.length) }, hydrateWorker),
+    );
+    closedHydrated = out.filter((t) => t !== null);
+  }
+
+  const hydrated = [...openConvos, ...closedHydrated];
   if (hydrated.length > 0) await ingestTickets(hydrated);
 }
 
