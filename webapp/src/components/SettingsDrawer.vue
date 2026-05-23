@@ -79,6 +79,17 @@ function onToggleUseAi(event: Event) {
   void settings.setUseAi((event.target as HTMLInputElement).checked);
 }
 
+/** Auto-resolve default toggle. */
+function onToggleAiResolveDefault(event: Event) {
+  void settings.setAiResolveDefault((event.target as HTMLInputElement).checked);
+}
+
+/** Confidence threshold slider. */
+function onConfidenceThreshold(event: Event) {
+  const v = parseFloat((event.target as HTMLInputElement).value);
+  if (!isNaN(v)) void settings.setAiResolveConfidenceThreshold(v);
+}
+
 /** Background sync interval selector — saves to the tweaks store (localStorage). */
 function onAutoSyncChange(event: Event) {
   const raw = Number((event.target as HTMLSelectElement).value) as 0 | 30 | 60 | 300;
@@ -280,6 +291,40 @@ async function onToggleNotifications(event: Event) {
           </p>
         </section>
 
+        <!-- Auto-resolve (T16) -->
+        <section>
+          <Mono>Auto-resolve</Mono>
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="settings.aiResolveDefault"
+              :disabled="settings.saving || !settings.useAi"
+              @change="onToggleAiResolveDefault"
+            />
+            <span class="sentence">Let AI suggest resolution</span>
+          </label>
+          <p v-if="!settings.useAi" class="hint">
+            Enable AI categorization (above) to use auto-resolve suggestions.
+          </p>
+          <label class="slider-row">
+            <span class="mono sentence">Confidence threshold</span>
+            <input
+              type="range"
+              min="0.5"
+              max="0.95"
+              step="0.05"
+              :value="settings.aiResolveConfidenceThreshold"
+              :disabled="settings.saving || !settings.useAi"
+              @change="onConfidenceThreshold"
+            />
+            <span class="mono threshold-val">{{ settings.aiResolveConfidenceThreshold.toFixed(2) }}</span>
+          </label>
+          <p class="hint">
+            Suggestions appear as chips on cards. AI never moves tickets
+            automatically — you confirm every change.
+          </p>
+        </section>
+
         <!-- Desktop notifications -->
         <section>
           <Mono>Desktop notifications</Mono>
@@ -457,5 +502,22 @@ section {
 .swatches button.active {
   outline: 2px solid var(--ink);
   outline-offset: 1px;
+}
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.slider-row input[type='range'] {
+  flex: 1;
+  min-width: 80px;
+  accent-color: var(--accent);
+}
+.threshold-val {
+  font-size: 11px;
+  color: var(--ink-2);
+  min-width: 28px;
+  text-align: right;
 }
 </style>

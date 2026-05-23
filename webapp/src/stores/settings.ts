@@ -30,6 +30,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const includedCategoryIds = computed(() => state.value.include_category_ids);
   const muteAlarms = computed(() => state.value.mute_alarms);
   const useAi = computed(() => state.value.use_ai);
+  const aiResolveDefault = computed(() => state.value.ai_resolve_default);
+  const aiResolveConfidenceThreshold = computed(() => state.value.ai_resolve_confidence_threshold);
 
   /** Load the stored filter. Falls back to defaults if the backend is down. */
   async function load() {
@@ -80,6 +82,16 @@ export const useSettingsStore = defineStore('settings', () => {
     return update({ use_ai: v });
   }
 
+  /** Global default for AI-powered resolution suggestions. */
+  function setAiResolveDefault(v: boolean) {
+    return update({ ai_resolve_default: v });
+  }
+
+  /** Confidence threshold (0..1) the AI verdict must meet. */
+  function setAiResolveConfidenceThreshold(v: number) {
+    return update({ ai_resolve_confidence_threshold: v });
+  }
+
   return {
     filter,
     loaded,
@@ -90,6 +102,8 @@ export const useSettingsStore = defineStore('settings', () => {
     includedCategoryIds,
     muteAlarms,
     useAi,
+    aiResolveDefault,
+    aiResolveConfidenceThreshold,
     load,
     update,
     setLookback,
@@ -97,5 +111,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setIncludedCategoryIds,
     setMuteAlarms,
     setUseAi,
+    setAiResolveDefault,
+    setAiResolveConfidenceThreshold,
   };
 });

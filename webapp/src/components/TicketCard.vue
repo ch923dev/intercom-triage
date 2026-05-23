@@ -4,8 +4,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import Mono from './Mono.vue';
+import ResolutionChip from './ResolutionChip.vue';
 import { useFollowupsStore } from '@/stores/followups';
 import { countNoteLines, useNotesStore } from '@/stores/notes';
+import { useTicketsStore } from '@/stores/tickets';
 import { useTweaksStore } from '@/stores/tweaks';
 import { formatAgoFromDate } from '@/utils/time';
 import type { Ticket } from '@/types/api';
@@ -23,6 +25,16 @@ const props = withDefaults(defineProps<Props>(), {
 const tweaks = useTweaksStore();
 const followups = useFollowupsStore();
 const notes = useNotesStore();
+const tickets = useTicketsStore();
+
+async function onResolveClick(e: Event) {
+  e.stopPropagation();
+  if (props.ticket.resolved_at) {
+    await tickets.reopen(props.ticket.id);
+  } else {
+    await tickets.markResolved(props.ticket.id);
+  }
+}
 
 const dense = computed(() => tweaks.density === 'compact');
 const rich = computed(() => tweaks.density === 'comfy');
@@ -67,6 +79,11 @@ const isClosed = computed(() => props.ticket.state === 'closed');
     <header>
       <Mono>{{ props.ticket.id }}</Mono>
       <Mono>{{ updatedAgo }}</Mono>
+      <button
+        class="resolve-icon"
+        :title="props.ticket.resolved_at ? 'Reopen' : 'Mark resolved'"
+        @click="onResolveClick"
+      >{{ props.ticket.resolved_at ? '↺' : '✓' }}</button>
     </header>
 
     <h3 class="title">{{ props.ticket.title }}</h3>
@@ -90,7 +107,8 @@ const isClosed = computed(() => props.ticket.state === 'closed');
         adminReplyCount ||
         teamNoteCount ||
         awaitingCustomer ||
-        isClosed
+        isClosed ||
+        props.ticket.resolution_chip_state
       "
       class="tags"
     >
@@ -106,6 +124,7 @@ const isClosed = computed(() => props.ticket.state === 'closed');
         {{ followupLabel }}
       </span>
       <span v-if="noteLines" class="tag note">Notes ({{ noteLines }})</span>
+      <ResolutionChip :ticket="props.ticket" />
     </div>
   </article>
 </template>
@@ -147,6 +166,22 @@ header {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 6px;
+}
+.resolve-icon {
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+.resolve-icon:hover {
+  color: var(--accent);
+  background: var(--hover);
 }
 .card.dense header {
   margin-bottom: 4px;

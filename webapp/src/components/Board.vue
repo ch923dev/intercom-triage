@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import Column from './Column.vue';
+import ResolvedColumn from './ResolvedColumn.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
 import { useTicketsStore } from '@/stores/tickets';
@@ -41,6 +42,7 @@ function onSelect(t: Ticket) {
       :selected-id="selectedId"
       @select="onSelect"
     />
+    <ResolvedColumn />
     <div class="board-tail" />
   </div>
 </template>
