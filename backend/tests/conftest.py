@@ -20,17 +20,17 @@ from app.models import init_db
 
 
 @pytest.fixture
-def test_config() -> AppConfig:
-    """Config pinned to an in-memory SQLite + dummy secrets.
-
-    SQLAlchemy keeps a single connection alive for `:memory:` (StaticPool), so
-    the schema seeded by `init_db` is visible to every session in the test.
-    """
+def test_config(tmp_path_factory: pytest.TempPathFactory) -> AppConfig:
+    """Config pinned to an in-memory SQLite + dummy secrets + an isolated
+    on-disk attachments dir under a pytest tmp path. Each test session gets
+    its own attachments tree so uploads do not bleed across tests."""
+    attachments_root = tmp_path_factory.mktemp("attachments")
     return AppConfig(
         openrouter_api_key="test-openrouter-key",
         database_url="sqlite+aiosqlite:///:memory:",
         cache_ttl_seconds=300,
         ai_concurrency=4,
+        attachments_dir=attachments_root,
     )
 
 
