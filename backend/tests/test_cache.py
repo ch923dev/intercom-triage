@@ -87,3 +87,49 @@ async def test_sweep_keeps_rows_within_ttl(session: AsyncSession) -> None:
 
     assert deleted == 0
     assert await session.get(AICacheEntry, "T_fresh") is not None
+
+
+@pytest.mark.asyncio
+async def test_cache_round_trip_resolution_fields(session: AsyncSession) -> None:
+    """Cache write + read preserves verdict, confidence, reason."""
+    sig = datetime(2026, 5, 23, 12, 0)
+    result = CategorizationResult(
+        category_id=1,
+        proposal_id=None,
+        summary="s",
+        confidence=0.9,
+        ai_resolution_verdict="resolved",
+        ai_resolution_confidence=0.88,
+        ai_resolution_reason="closed loop",
+    )
+    await set_cached(session, "t1", result, sig)
+    await session.commit()
+
+    cached = await get_cached(session, "t1", sig, ttl_seconds=300)
+    assert cached is not None
+    assert cached.ai_resolution_verdict == "resolved"
+    assert cached.ai_resolution_confidence == 0.88
+    assert cached.ai_resolution_reason == "closed loop"
+
+
+@pytest.mark.asyncio
+async def test_cache_legacy_row_has_null_resolution(session: AsyncSession) -> None:
+    """An older cache row written before this feature has null verdict;
+    get_cached returns None values without crashing."""
+    session.add(
+        AICacheEntry(
+            ticket_id="legacy",
+            category_id=1,
+            proposal_id=None,
+            summary="s",
+            confidence=0.5,
+            ticket_updated_at=datetime(2026, 5, 23),
+        )
+    )
+    await session.commit()
+
+    cached = await get_cached(session, "legacy", datetime(2026, 5, 23), 300)
+    assert cached is not None
+    assert cached.ai_resolution_verdict is None
+    assert cached.ai_resolution_confidence is None
+    assert cached.ai_resolution_reason is None
