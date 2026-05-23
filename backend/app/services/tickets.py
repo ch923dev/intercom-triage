@@ -62,7 +62,7 @@ def _chip_state(
     ai_on = (
         use_ai and effective_ai_resolve and verdict is not None and verdict_confidence is not None
     )
-    high_conf = ai_on and verdict_confidence >= threshold  # type: ignore[operator]
+    high_conf = ai_on and verdict_confidence is not None and verdict_confidence >= threshold
 
     if resolved_at is None and high_conf and verdict == "resolved":
         return "ai_resolved"
