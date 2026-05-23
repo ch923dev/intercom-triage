@@ -234,32 +234,45 @@ async def _upsert_ticket(
 
     Operator edits are sticky: a row with `title_user_edited` / `summary_user_edited`
     keeps its existing values across re-syncs (PATCH /tickets/{id} sets these).
+
+    Intercom-closed auto-resolution: when a previously-open stored ticket
+    arrives with state='closed', stamp resolved_at + resolved_source.
+    Never re-stamp an already-resolved ticket. New rows arriving as closed
+    are stamped on insert.
     """
     author = hydrated.author.model_dump(mode="json")
     parts = [p.model_dump(mode="json") for p in hydrated.parts]
     internal_notes = [n.model_dump(mode="json") for n in hydrated.internal_notes]
     row = await session.get(Ticket, hydrated.id)
+    now = naive_utcnow()
     if row is None:
-        session.add(
-            Ticket(
-                id=hydrated.id,
-                title=_resolve_title(hydrated, result),
-                state=hydrated.state,
-                priority=hydrated.priority,
-                url=hydrated.url,
-                author=author,
-                parts=parts,
-                internal_notes=internal_notes,
-                created_at=hydrated.created_at,
-                updated_at=hydrated.updated_at,
-                category_id=result.category_id,
-                proposal_id=result.proposal_id,
-                summary=result.summary,
-                ai_confidence=result.confidence,
-                ingested_at=naive_utcnow(),
-            ),
+        new_row = Ticket(
+            id=hydrated.id,
+            title=_resolve_title(hydrated, result),
+            state=hydrated.state,
+            priority=hydrated.priority,
+            url=hydrated.url,
+            author=author,
+            parts=parts,
+            internal_notes=internal_notes,
+            created_at=hydrated.created_at,
+            updated_at=hydrated.updated_at,
+            category_id=result.category_id,
+            proposal_id=result.proposal_id,
+            summary=result.summary,
+            ai_confidence=result.confidence,
+            ingested_at=now,
         )
+        if hydrated.state == "closed":
+            new_row.resolved_at = now
+            new_row.resolved_source = "intercom_closed"
+        session.add(new_row)
         return
+    # Closure transition: previously not closed AND now closed AND not already
+    # resolved → auto-stamp resolved_at + resolved_source (intercom_closed).
+    if hydrated.state == "closed" and row.state != "closed" and row.resolved_at is None:
+        row.resolved_at = now
+        row.resolved_source = "intercom_closed"
     if not row.title_user_edited:
         row.title = _resolve_title(hydrated, result)
     row.state = hydrated.state
@@ -275,7 +288,7 @@ async def _upsert_ticket(
     if not row.summary_user_edited:
         row.summary = result.summary
     row.ai_confidence = result.confidence
-    row.ingested_at = naive_utcnow()
+    row.ingested_at = now
 
 
 async def ingest_tickets(
