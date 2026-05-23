@@ -213,6 +213,30 @@ class NoteEntryDeleted(BaseModel):
     id: int
 
 
+# ── Note attachments ─────────────────────────────────────────────────────────
+
+
+class NoteAttachmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    owner_kind: Literal["entry", "ticket"]
+    owner_id: str
+    ticket_id: str
+    filename: str
+    mime: str
+    size_bytes: int
+    created_at: UTCDatetime
+    raw_url: str
+    thumb_url: str | None
+
+
+class NoteAttachmentDeleted(BaseModel):
+    ok: Literal[True] = True
+    deleted: Literal[True] = True
+    id: int
+
+
 # ── Tickets ───────────────────────────────────────────────────────────────────
 
 
