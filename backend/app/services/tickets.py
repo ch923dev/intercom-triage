@@ -19,7 +19,7 @@ from app.clients.intercom import IntercomClient, IntercomError
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig
 from app.metrics import metrics
-from app.models import Category, Followup, Override, Ticket, TicketNote
+from app.models import AICacheEntry, Category, Followup, Override, Ticket, TicketNote
 from app.schemas import (
     FilterSettings,
     FollowupRead,
@@ -39,6 +39,38 @@ def _threshold_unix(filter_settings: FilterSettings, *, now: float | None = None
     now = now if now is not None else time.time()
     per_unit = 3600 if filter_settings.lookback_unit == "hours" else 86400
     return int(now - filter_settings.lookback_value * per_unit)
+
+
+def _chip_state(
+    *,
+    use_ai: bool,
+    effective_ai_resolve: bool,
+    threshold: float,
+    resolved_at: datetime | None,
+    updated_at: datetime,
+    dismissed_at: datetime | None,
+    verdict: str | None,
+    verdict_confidence: float | None,
+) -> str | None:
+    """Compute resolution_chip_state for the front-end.
+
+    Returns one of 'ai_resolved' | 'ai_reopened' | 'new_reply' | None.
+    """
+    if dismissed_at is not None and dismissed_at >= updated_at:
+        return None
+    new_activity = resolved_at is None or updated_at > resolved_at
+    ai_on = (
+        use_ai and effective_ai_resolve and verdict is not None and verdict_confidence is not None
+    )
+    high_conf = ai_on and verdict_confidence >= threshold  # type: ignore[operator]
+
+    if resolved_at is None and high_conf and verdict == "resolved":
+        return "ai_resolved"
+    if resolved_at is not None and new_activity and high_conf and verdict == "not_resolved":
+        return "ai_reopened"
+    if resolved_at is not None and new_activity and not ai_on:
+        return "new_reply"
+    return None
 
 
 def _content_signature(ticket: HydratedTicket) -> datetime:
@@ -178,10 +210,21 @@ async def set_override(
     ticket_id: str,
     category_id: int,
 ) -> int:
-    """Upsert an override row with `set_at = now`. Returns the category id."""
+    """Upsert an override row with `set_at = now`. Returns the category id.
+
+    Drag-out reopen: if the ticket was resolved, atomically clears
+    `resolved_at` / `resolved_source` in the same transaction so a drag from
+    the Resolved column to any category immediately reopens the ticket.
+    """
     category = await session.get(Category, category_id)
     if category is None or not category.is_active:
         raise HTTPException(status_code=404, detail=f"category {category_id} not found")
+
+    # Drag-out reopen — must run before commit so it's atomic with the override.
+    ticket = await session.get(Ticket, ticket_id)
+    if ticket is not None and ticket.resolved_at is not None:
+        ticket.resolved_at = None
+        ticket.resolved_source = None
 
     override = await session.get(Override, ticket_id)
     if override is None:
@@ -425,9 +468,15 @@ async def get_sync_state(session: AsyncSession) -> dict[str, datetime]:
     return {row.id: row.updated_at.replace(tzinfo=UTC) for row in rows}
 
 
-async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
+async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[TicketSchema]:
     """Serve the board from stored tickets — no live Intercom call. Honors the
-    stored filter settings (lookback / states / included categories)."""
+    stored filter settings (lookback / states / included categories).
+
+    Args:
+        resolved: When False (default), returns only open (unresolved) tickets.
+            When True, returns only resolved tickets (Resolved column) and skips
+            the include_category_ids filter.
+    """
     filter_settings = await get_settings(session)
     threshold = _threshold_datetime(filter_settings)
 
@@ -439,6 +488,13 @@ async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
         # Mirror the Python rule: rows with state IS NULL are kept regardless;
         # rows with a non-NULL state must be in the allowed set.
         ticket_q = ticket_q.where(or_(Ticket.state.is_(None), Ticket.state.in_(states)))
+
+    # Resolution filter — open-only by default; Resolved column passes resolved=True.
+    if resolved:
+        ticket_q = ticket_q.where(Ticket.resolved_at.is_not(None))
+    else:
+        ticket_q = ticket_q.where(Ticket.resolved_at.is_(None))
+
     rows = (await session.scalars(ticket_q)).all()
 
     # Scope side-table reads to the result set — avoids full-table scans for
@@ -465,10 +521,19 @@ async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
                 )
             ).all()
         }
+        ai_cache = {
+            c.ticket_id: c
+            for c in (
+                await session.scalars(
+                    select(AICacheEntry).where(AICacheEntry.ticket_id.in_(ticket_ids))
+                )
+            ).all()
+        }
     else:
         overrides = {}
         followups = {}
         notes = {}
+        ai_cache = {}
 
     composed: list[TicketSchema] = []
     for row in rows:
@@ -480,6 +545,31 @@ async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
             category_id = override.category_id
             proposal_id = None
             user_override = True
+
+        # Effective ai_resolve: per-ticket override wins over settings default.
+        effective_ai_resolve = (
+            row.ai_resolve_enabled
+            if row.ai_resolve_enabled is not None
+            else filter_settings.ai_resolve_default
+        )
+
+        cache_entry = ai_cache.get(row.id)
+        verdict = cache_entry.ai_resolution_verdict if cache_entry is not None else None
+        verdict_confidence = (
+            cache_entry.ai_resolution_confidence if cache_entry is not None else None
+        )
+        verdict_reason = cache_entry.ai_resolution_reason if cache_entry is not None else None
+
+        chip = _chip_state(
+            use_ai=filter_settings.use_ai,
+            effective_ai_resolve=effective_ai_resolve,
+            threshold=filter_settings.ai_resolve_confidence_threshold,
+            resolved_at=row.resolved_at,
+            updated_at=row.updated_at,
+            dismissed_at=row.resolution_chip_dismissed_at,
+            verdict=verdict,
+            verdict_confidence=verdict_confidence,
+        )
 
         followup = followups.get(row.id)
         note = notes.get(row.id)
@@ -504,14 +594,28 @@ async def get_tickets(session: AsyncSession) -> list[TicketSchema]:
                 summary_user_edited=row.summary_user_edited,
                 followup=FollowupRead.model_validate(followup) if followup is not None else None,
                 note=TicketNoteRead.model_validate(note) if note is not None else None,
+                resolved_at=row.resolved_at,
+                resolved_source=row.resolved_source,  # type: ignore[arg-type]
+                ai_resolve_enabled=effective_ai_resolve,
+                ai_resolve_override=row.ai_resolve_enabled,
+                ai_resolution_verdict=verdict,  # type: ignore[arg-type]
+                ai_resolution_confidence=verdict_confidence,
+                ai_resolution_reason=verdict_reason,
+                resolution_chip_state=chip,  # type: ignore[arg-type]
             ),
         )
 
     # Included-category filter (FR-011) — proposal-assigned tickets always show.
-    if filter_settings.include_category_ids is not None:
+    # Skipped when resolved=True: the Resolved column shows everything.
+    if not resolved and filter_settings.include_category_ids is not None:
         allowed = set(filter_settings.include_category_ids)
         composed = [t for t in composed if t.proposal_id is not None or t.category_id in allowed]
 
-    composed.sort(key=lambda t: t.updated_at, reverse=True)  # FR-013
+    # Sort: resolved column → most recently resolved first; open → most recently updated.
+    if resolved:
+        composed.sort(key=lambda t: t.resolved_at or t.updated_at, reverse=True)
+    else:
+        composed.sort(key=lambda t: t.updated_at, reverse=True)  # FR-013
+
     metrics.incr("tickets_served_total", len(composed))
     return composed

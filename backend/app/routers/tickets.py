@@ -32,10 +32,19 @@ router = APIRouter(prefix="/tickets", tags=["tickets"])
 
 
 @router.get("", response_model=list[TicketSchema])
-async def list_tickets(session: AsyncSession = Depends(get_session)) -> list[TicketSchema]:
+async def list_tickets(
+    resolved: bool | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[TicketSchema]:
     """Serve the stored board — extension-ingested tickets, no live Intercom
-    call. Honors the saved filter settings."""
-    return await svc.get_tickets(session)
+    call. Honors the saved filter settings.
+
+    Pass ``?resolved=true`` for the Resolved column (shows only resolved
+    tickets, ordered by resolved_at desc, ignores include_category_ids).
+    Default (omitted or ``?resolved=false``) returns open-only tickets.
+    """
+    effective = bool(resolved)
+    return await svc.get_tickets(session, resolved=effective)
 
 
 @router.get("/sync-state", response_model=dict[str, datetime])
