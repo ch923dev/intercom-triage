@@ -100,6 +100,8 @@ per-row countdown chips, and an audio cue (shared mute via `GET /settings`).
 | `GET /followups` | All active follow-up reminders |
 | `PUT /followups/{id}` · `/snooze` · `/mark-fired` · `DELETE` | Set / snooze / fire / clear a follow-up |
 | `GET /notes` · `PUT /notes/{id}` | Per-ticket next-step notes (empty body deletes) |
+| `GET /notes/entries` · `GET /notes/entries/{ticket_id}` | Time-tabled note entries — list all / list by ticket |
+| `POST /notes/entries` · `DELETE /notes/entries/{id}` | Append an entry (optional `timer_min` upserts follow-up); soft-delete by id |
 
 Interactive docs at <http://localhost:8000/docs> while the backend runs.
 
