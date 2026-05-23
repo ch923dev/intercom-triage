@@ -1,8 +1,10 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 1.3 · **Implements:** `spec.md` v1.3 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 1.4 · **Implements:** `spec.md` v1.4 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
+
+**Changes from v1.3:** added §8c (ticket resolution): orthogonal resolved flag on `tickets`, four new endpoints, server-computed chip state, AI verdict bundled into the existing categorization call, extension closure pass. Schema additions documented in §5.
 
 **Changes from v1.2:** added two persistence tables (`followups`, `ticket_notes`), the matching endpoints, the front-end alarm loop spec, and the design-system tokens lifted from `Intercom Triage.html`. Category seed colors converted to **oklch** to match the design palette.
 
@@ -145,6 +147,11 @@ No auth header. Backend listens on `127.0.0.1` only.
 | DELETE | `/followups/{ticket_id}` | — | `{ok}` | US-012 |
 | GET | `/notes` | — | all non-empty `TicketNote[]` | FR-023 |
 | PUT | `/notes/{ticket_id}` | `TicketNoteSet` | stored `TicketNote` or `{ok, deleted:true}` | FR-023 |
+| GET | `/tickets` | `?resolved=true\|false` | `Ticket[]` (default excludes resolved) | FR-028 |
+| POST | `/tickets/{id}/resolve` | — | `{ok, resolved_at, resolved_source}` | FR-025, FR-026, FR-028 |
+| POST | `/tickets/{id}/reopen` | — | `{ok}` | FR-025, FR-028 |
+| PATCH | `/tickets/{id}/ai-resolve` | `{enabled: bool\|null}` | `{ok}` | FR-029, FR-028 |
+| POST | `/tickets/{id}/dismiss-chip` | — | `{ok}` | FR-027, FR-028 |
 
 Error contract: `502` on upstream Intercom failure, `422` on schema violation, `404` on unknown id, `409` on archive of fallback or other invalid state transition.
 
@@ -186,6 +193,9 @@ ai_cache
   confidence          real not null
   ticket_updated_at   datetime not null
   cached_at           datetime default now
+  ai_resolution_verdict     text                              -- 'resolved' | 'not_resolved' | null
+  ai_resolution_confidence  real                              -- [0,1] | null
+  ai_resolution_reason      text                              -- ≤ 120 chars | null
   -- check: exactly one of category_id, proposal_id is set
 
 overrides
@@ -194,12 +204,14 @@ overrides
   set_at       datetime default now
 
 settings
-  id                    integer pk check (id = 1)        -- singleton row
-  lookback_unit         text default 'hours' check in ('hours','days')
-  lookback_value        int default 24 check between 1 and 720
-  states                json default '["open"]'
-  include_category_ids  json                              -- null = all
-  updated_at            datetime default now
+  id                              integer pk check (id = 1)        -- singleton row
+  lookback_unit                   text default 'hours' check in ('hours','days')
+  lookback_value                  int default 24 check between 1 and 720
+  states                          json default '["open"]'
+  include_category_ids            json                              -- null = all
+  updated_at                      datetime default now
+  ai_resolve_default              boolean default false
+  ai_resolve_confidence_threshold real default 0.7 check between 0.0 and 1.0
 
 rejected_proposal_signatures
   signature      text pk
@@ -224,6 +236,28 @@ Settings additions for FR-024:
 
 ```text
 settings.mute_alarms  boolean default false       -- column added to the existing singleton
+```
+
+Schema additions for §8c (FR-025..FR-031):
+
+```text
+tickets (resolution columns — added via Alembic 0006):
+  resolved_at                   datetime                          -- null = open
+  resolved_source               text                              -- 'manual' | 'intercom_closed' | null
+  ai_resolve_enabled            boolean nullable                  -- null = inherit settings default
+  resolution_chip_dismissed_at  datetime                          -- null = chip not dismissed
+  -- check: (resolved_at IS NULL) = (resolved_source IS NULL)
+  -- check: resolved_source IN ('manual','intercom_closed') or null
+  -- index: ix_tickets_resolved_at (partial, where resolved_at IS NOT NULL)
+
+ai_cache (resolution columns — same migration):
+  ai_resolution_verdict     text    -- 'resolved' | 'not_resolved' | null
+  ai_resolution_confidence  real    -- [0,1] | null
+  ai_resolution_reason      text    -- ≤ 120 chars | null
+
+settings (resolution columns — same migration):
+  ai_resolve_default              boolean default false
+  ai_resolve_confidence_threshold real default 0.7 check between 0.0 and 1.0
 ```
 
 Behavioral notes. `ai_cache` enforces "exactly one of `category_id`, `proposal_id`" via a check constraint — this matches the AI output resolver (§7). Foreign keys cascade so that when a category or proposal is hard-deleted, dependent cache rows go with it. `overrides` cascades from category too. The `settings` table is a singleton via `CHECK (id = 1)`; the app inserts the row at first startup. Partial unique indexes prevent two active categories or two pending proposals from sharing a name, while letting archived/resolved rows reuse names. `followups` and `ticket_notes` are keyed by `ticket_id` only — no FK because the ticket id is owned by Intercom, not this DB; rows are deleted when the operator clears the follow-up or empties the notes; `/tickets/fetch` joins both in by ticket id when composing the response.
@@ -351,6 +385,31 @@ other      oklch(0.65 0.00 0)
 **Density variants.** `compact` (12.5 px title, 2-line clamp, 8/10 px padding), `balanced` (13.5 px title, 3-line clamp, 11/12 px padding, **default**), `comfy` (same title, 4-line summary clamp).
 
 **Tweaks panel** (operator-toggleable, persisted in `settings`): dark mode, accent swatch, density, show summary, show confidence. Mute alarms is the sixth toggle.
+
+## 8c. Ticket resolution
+
+Operator marks tickets resolved; resolved tickets leave the category columns
+into a dedicated always-visible Resolved column. Resolution is an orthogonal
+flag on `tickets`, not a state value or a category.
+
+**Sources:** `manual` (operator drag/icon/flyout), `intercom_closed` (silent
+auto-resolve when Intercom state flips open → closed during sync), AI-suggested
+(advisory chip; operator confirms; never auto-moves).
+
+**Schema additions:**
+- `tickets`: `resolved_at`, `resolved_source`, `ai_resolve_enabled` (raw nullable per-ticket override), `resolution_chip_dismissed_at`.
+- `ai_cache`: `ai_resolution_verdict`, `ai_resolution_confidence`, `ai_resolution_reason`.
+- `settings`: `ai_resolve_default`, `ai_resolve_confidence_threshold`.
+
+**Endpoints:** `POST /tickets/{id}/resolve`, `POST /tickets/{id}/reopen`,
+`PATCH /tickets/{id}/ai-resolve`, `POST /tickets/{id}/dismiss-chip`.
+`GET /tickets?resolved=true|false` filters; default excludes resolved.
+
+**Chip state** computed server-side per row from settings + ticket + AI cache;
+never auto-moves a ticket.
+
+See `docs/superpowers/specs/2026-05-23-ticket-resolution-design.md` for the full
+design.
 
 ## 9. Settings
 

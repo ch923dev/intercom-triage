@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 1.3 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 1.4 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v1.3:** added the **ticket resolution** capability. US-015 lets the operator mark a ticket resolved; US-016 surfaces an AI advisory chip when the AI thinks a ticket's resolution state has changed; US-017 auto-resolves tickets that flip to `state=closed` in Intercom. Added FR-025..FR-031 covering the orthogonal resolution flag, resolution sources, server-computed chip state, four new endpoints, the per-ticket AI-resolve tri-state, settings persistence, and the extension closure pass.
 
 **Changes from v1.2:** added the **follow-up / alarm / notes** capability surfaced by the design (`Intercom Triage.html`). US-012 lets the operator pin a follow-up reminder on a ticket; US-013 fires a visible + audible alarm when the reminder comes due; US-014 lets the operator capture how-to-proceed notes per ticket. Surfaces a status pill in both the webapp and the popup. No removals.
 
@@ -155,6 +157,46 @@ Acceptance:
 - The card displays a `Notes (N)` chip where N is the number of non-empty bullet lines.
 - Clearing the textarea removes the notes record server-side.
 
+### US-015 — Manual ticket resolution
+I can mark a ticket as resolved; resolved tickets leave the category columns and
+live in a dedicated Resolved column that is always shown.
+
+Acceptance:
+- A "Mark resolved" action is available on every open ticket from three surfaces:
+  drag into the Resolved column, the card-level ✓ icon, and the flyout button.
+- Resolved tickets disappear from category columns and appear in the Resolved
+  column, sorted most-recently-resolved first.
+- The Resolved column is always visible regardless of `include_category_ids`.
+- I can reopen a resolved ticket via drag, icon, or flyout; reopening returns
+  it to its category column.
+
+### US-016 — AI suggests resolution
+When the AI thinks a ticket appears resolved (or that a resolved ticket is no
+longer resolved), I see an advisory chip on the card. The AI never moves a
+ticket automatically.
+
+Acceptance:
+- The same AI categorization call returns `resolution_verdict`,
+  `resolution_confidence`, and `resolution_reason`.
+- A chip appears on a card only when the effective AI-resolve flag is on for
+  that ticket, the verdict is opposite to current state, confidence ≥
+  the configured threshold, and the chip has not been dismissed since the
+  ticket's last update.
+- Clicking the chip applies the suggestion.
+- Dismissing the chip hides it until the ticket has new activity.
+
+### US-017 — Intercom-closed tickets auto-resolve
+A ticket I previously had as open that flips to `state=closed` in Intercom is
+silently resolved with `source='intercom_closed'`.
+
+Acceptance:
+- The extension's sync flow includes a closure pass: it diffs tracked ids
+  against the open list and pulls just the missing ids from Intercom's closed
+  list.
+- The backend `_upsert_ticket` stamps `resolved_at` + `resolved_source` only
+  on the open→closed transition (not on every closed-state sync).
+- No AI call is made for the closure event.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -183,6 +225,13 @@ Acceptance:
 | FR-022 | Snoozing an alarm sets `due_at = now + snooze_minutes` and clears `fired`. Dismissing the alarm does not reschedule the follow-up. | US-013 |
 | FR-023 | Each ticket may carry one notes record with a free-text body. Empty body deletes the record. | US-014 |
 | FR-024 | Settings include a `mute_alarms` boolean; both surfaces read and write through the existing settings endpoint. | US-013 |
+| FR-025 | Tickets carry `resolved_at` and `resolved_source` as an orthogonal resolution flag, independent of category assignment and Intercom state. | US-015, US-016, US-017 |
+| FR-026 | Resolution source is one of three values: `manual` (operator action), `intercom_closed` (sync auto-resolve), or implied by an AI-suggested chip the operator confirms. | US-015, US-016, US-017 |
+| FR-027 | The backend computes `resolution_chip_state` (`ai_resolved` \| `ai_reopened` \| `new_reply` \| `null`) server-side from settings + ticket + AI cache, and includes it in every ticket response. | US-016 |
+| FR-028 | The system exposes `POST /tickets/{id}/resolve`, `POST /tickets/{id}/reopen`, `PATCH /tickets/{id}/ai-resolve`, and `POST /tickets/{id}/dismiss-chip`. `GET /tickets` accepts `?resolved=true\|false`; default excludes resolved tickets. | US-015, US-016 |
+| FR-029 | Each ticket carries a per-ticket AI-resolve tri-state override (`true` / `false` / `null`); `null` means inherit `settings.ai_resolve_default`. | US-016 |
+| FR-030 | Settings persist `ai_resolve_default` (bool) and `ai_resolve_confidence_threshold` (float 0..1); both are read and written through the existing settings endpoint. | US-016 |
+| FR-031 | On each sync the extension performs a closure pass: it compares tracked ticket ids against the open list returned by Intercom and fetches the closed-conversation list for any ids that have gone missing, then ingests them so the backend auto-resolves via the open→closed transition. | US-017 |
 
 ## 6. Non-functional requirements
 
