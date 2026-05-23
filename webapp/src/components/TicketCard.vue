@@ -6,6 +6,7 @@ import { computed } from 'vue';
 import Mono from './Mono.vue';
 import ResolutionChip from './ResolutionChip.vue';
 import { useFollowupsStore } from '@/stores/followups';
+import { useNoteEntriesStore } from '@/stores/noteEntries';
 import { countNoteLines, useNotesStore } from '@/stores/notes';
 import { useTicketsStore } from '@/stores/tickets';
 import { useTweaksStore } from '@/stores/tweaks';
@@ -30,6 +31,7 @@ const props = withDefaults(defineProps<Props>(), {
 const tweaks = useTweaksStore();
 const followups = useFollowupsStore();
 const notes = useNotesStore();
+const noteEntries = useNoteEntriesStore();
 const tickets = useTicketsStore();
 
 async function onResolveClick(e: Event) {
@@ -57,8 +59,11 @@ const followupLabel = computed(() => {
   return mins < 60 ? `F/U in ${mins}m` : `F/U in ${Math.round(mins / 60)}h`;
 });
 
-// Notes chip (T052): count of non-empty bullet lines.
-const noteLines = computed(() => countNoteLines(notes.bodyOf(props.ticket.id)));
+// Notes chip: legacy line count + time-tabled entries count.
+const noteLines = computed(
+  () =>
+    countNoteLines(notes.bodyOf(props.ticket.id)) + noteEntries.countOf(props.ticket.id),
+);
 
 // Reply state — derived from the Intercom-visible thread.
 const adminReplyCount = computed(() => props.ticket.parts.filter((p) => p.is_admin).length);

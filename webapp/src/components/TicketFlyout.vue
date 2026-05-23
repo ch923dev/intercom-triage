@@ -7,9 +7,13 @@ import CatDot from './CatDot.vue';
 import Mono from './Mono.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
+import { useNoteEntriesStore } from '@/stores/noteEntries';
 import { useNotesStore } from '@/stores/notes';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
+import { useAttachmentsStore } from '@/stores/attachments';
+import AttachmentList from './AttachmentList.vue';
+import AttachmentDropzone from './AttachmentDropzone.vue';
 import { formatAgoFromDate } from '@/utils/time';
 
 const view = useViewStore();
@@ -17,6 +21,8 @@ const tickets = useTicketsStore();
 const categories = useCategoriesStore();
 const followups = useFollowupsStore();
 const notes = useNotesStore();
+const noteEntries = useNoteEntriesStore();
+const attachments = useAttachmentsStore();
 
 const ticket = computed(
   () =>
@@ -140,6 +146,125 @@ const draft = ref('');
 const noteSaving = ref(false);
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
+const TIMER_PRESETS: { label: string; minutes: number | null }[] = [
+  { label: 'off', minutes: null },
+  { label: '5m', minutes: 5 },
+  { label: '15m', minutes: 15 },
+  { label: '30m', minutes: 30 },
+  { label: '1h', minutes: 60 },
+];
+
+const entryDraft = ref('');
+const entryTimer = ref<number | null>(null);
+const entryReason = ref('');
+const entrySaving = ref(false);
+const entryError = ref<string | null>(null);
+const attachmentError = ref<string | null>(null);
+const legacyOpen = ref(false);
+
+const pendingFiles = ref<File[]>([]);
+
+function removePending(idx: number) {
+  pendingFiles.value = pendingFiles.value.filter((_, i) => i !== idx);
+}
+
+function onTextareaPaste(e: ClipboardEvent) {
+  const files = e.clipboardData?.files;
+  if (!files || files.length === 0) return;
+  pendingFiles.value = [...pendingFiles.value, ...Array.from(files)];
+}
+
+function onTextareaDrop(e: DragEvent) {
+  e.preventDefault();
+  const files = e.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+  pendingFiles.value = [...pendingFiles.value, ...Array.from(files)];
+}
+
+function pendingSizeLabel(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+const entries = computed(() =>
+  ticket.value ? noteEntries.entriesOf(ticket.value.id) : [],
+);
+const hasLegacyNote = computed(() => notes.bodyOf(ticket.value?.id ?? '').length > 0);
+
+async function addEntry() {
+  const id = ticket.value?.id;
+  const body = entryDraft.value.trim();
+  if (!id || body.length === 0) return;
+  entrySaving.value = true;
+  entryError.value = null;
+  const armedTimer = entryTimer.value !== null;
+  const filesToUpload = pendingFiles.value;
+  try {
+    const saved = await noteEntries.addEntry(
+      id,
+      body,
+      entryTimer.value,
+      entryReason.value.trim() || null,
+    );
+    if (filesToUpload.length > 0) {
+      await Promise.all(
+        filesToUpload.map((f) =>
+          attachments.upload(f, 'entry', String(saved.id), id),
+        ),
+      );
+    }
+    entryDraft.value = '';
+    entryReason.value = '';
+    entryTimer.value = null;
+    pendingFiles.value = [];
+    if (armedTimer) {
+      await followups.load();
+    }
+  } catch (e) {
+    entryError.value = (e as Error).message;
+  } finally {
+    entrySaving.value = false;
+  }
+}
+
+async function onTicketFiles(files: File[]) {
+  const id = ticket.value?.id;
+  if (!id) return;
+  try {
+    await Promise.all(
+      files.map((f) => attachments.upload(f, 'ticket', id, id)),
+    );
+  } catch (e) {
+    attachmentError.value = (e as Error).message;
+  }
+}
+
+async function onRemoveAttachment(id: number) {
+  try {
+    await attachments.remove(id);
+  } catch (e) {
+    attachmentError.value = (e as Error).message;
+  }
+}
+
+async function removeEntry(entryId: number) {
+  try {
+    await noteEntries.deleteEntry(entryId);
+  } catch (e) {
+    entryError.value = (e as Error).message;
+  }
+}
+
+function entryTimeLabel(iso: string): string {
+  return new Date(iso).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 /** Debounced write — persists 400 ms after the last keystroke (T052). */
 function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer);
@@ -170,6 +295,16 @@ watch(
     reason.value = id ? (followups.get(id)?.reason ?? '') : '';
     draft.value = id ? notes.bodyOf(id) : '';
     fuError.value = null;
+    entryDraft.value = '';
+    entryReason.value = '';
+    entryTimer.value = null;
+    entryError.value = null;
+    attachmentError.value = null;
+    legacyOpen.value = false;
+    pendingFiles.value = [];
+    if (id) {
+      void attachments.load(id);
+    }
   },
   { immediate: true },
 );
@@ -562,24 +697,122 @@ function formatResolved(iso: string): string {
             <div v-if="fuError" class="mono err">{{ fuError }}</div>
           </section>
 
-          <!-- Notes (T052) -->
+          <!-- Next-step notes — time-tabled entries (spec: time-tabled notes) -->
           <section class="block">
             <div class="mono label">
               Next-step notes
-              <span v-if="noteSaving" class="dim">· saving…</span>
+              <span v-if="entrySaving || noteSaving" class="dim">· saving…</span>
             </div>
-            <textarea
-              v-model="draft"
-              class="notes"
-              rows="5"
-              placeholder="How to proceed on this ticket…"
-              @input="scheduleSave"
-              @blur="flushNote"
-            />
-            <div class="presets">
-              <button v-for="p in NOTE_PRESETS" :key="p" class="chip" @click="appendPreset(p)">
-                + {{ p }}
-              </button>
+
+            <!-- Legacy scratchpad disclosure — only when non-empty -->
+            <details v-if="hasLegacyNote" :open="legacyOpen" class="legacy-note">
+              <summary class="mono dim" @click.prevent="legacyOpen = !legacyOpen">
+                Legacy note {{ legacyOpen ? '▾' : '▸' }}
+              </summary>
+              <textarea
+                v-model="draft"
+                class="notes"
+                rows="3"
+                @input="scheduleSave"
+                @blur="flushNote"
+              />
+              <div class="presets">
+                <button
+                  v-for="p in NOTE_PRESETS"
+                  :key="p"
+                  class="chip"
+                  @click="appendPreset(p)"
+                >
+                  + {{ p }}
+                </button>
+              </div>
+            </details>
+
+            <!-- Ticket files (per-ticket attachment bin) -->
+            <div v-if="ticket" class="ticket-bin">
+              <div class="mono dim ticket-bin-label">Ticket files</div>
+              <AttachmentDropzone @files="onTicketFiles" />
+              <AttachmentList
+                :items="attachments.byTicket(ticket.id)"
+                @remove="onRemoveAttachment"
+              />
+              <div v-if="attachmentError" class="mono err">{{ attachmentError }}</div>
+            </div>
+
+            <!-- Timeline -->
+            <ul v-if="entries.length" class="entry-timeline">
+              <li v-for="e in entries" :key="e.id" class="entry-row">
+                <div class="entry-head">
+                  <span class="mono dim">{{ entryTimeLabel(e.created_at) }}</span>
+                  <button
+                    class="entry-x"
+                    title="Delete entry"
+                    @click="removeEntry(e.id)"
+                  >×</button>
+                </div>
+                <p class="entry-body">{{ e.body }}</p>
+                <div v-if="e.timer_min !== null" class="entry-timer mono dim">
+                  ⏱ {{ e.timer_min }}m<span v-if="e.reason"> · "{{ e.reason }}"</span>
+                </div>
+                <AttachmentList
+                  :items="attachments.byEntry(e.id)"
+                  @remove="onRemoveAttachment"
+                />
+              </li>
+            </ul>
+            <p v-else class="dim entry-empty">No entries yet — add the first one below.</p>
+
+            <!-- New entry form -->
+            <div class="entry-form">
+              <textarea
+                v-model="entryDraft"
+                class="notes"
+                rows="3"
+                placeholder="What's the next step? (paste or drop files to attach to this entry)"
+                @paste="onTextareaPaste"
+                @drop="onTextareaDrop"
+                @dragover.prevent
+              />
+              <div v-if="pendingFiles.length" class="pending-files">
+                <span
+                  v-for="(f, i) in pendingFiles"
+                  :key="i"
+                  class="att-pill pending-pill"
+                  :title="f.name"
+                >
+                  <span>📎 {{ f.name }} · {{ pendingSizeLabel(f.size) }}</span>
+                  <button class="att-x att-x-inline" title="Remove" @click="removePending(i)">×</button>
+                </span>
+              </div>
+              <div class="presets timer-row">
+                <span class="mono dim timer-label">Timer:</span>
+                <button
+                  v-for="p in TIMER_PRESETS"
+                  :key="p.label"
+                  class="chip"
+                  :class="{ active: entryTimer === p.minutes }"
+                  @click="entryTimer = p.minutes"
+                >
+                  {{ p.label }}
+                </button>
+              </div>
+              <input
+                v-model="entryReason"
+                class="reason"
+                type="text"
+                maxlength="80"
+                placeholder="Reason (optional, ≤ 80 chars)"
+              />
+              <div class="presets">
+                <button
+                  class="chip primary"
+                  :disabled="entrySaving || entryDraft.trim().length === 0"
+                  @click="addEntry"
+                >
+                  Add entry
+                </button>
+              </div>
+              <div v-if="entryError" class="mono err">{{ entryError }}</div>
             </div>
           </section>
 
@@ -928,6 +1161,121 @@ header {
   background: var(--panel);
   color: var(--ink);
   resize: vertical;
+}
+.legacy-note {
+  margin-bottom: 10px;
+}
+.legacy-note summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+.entry-timeline {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.entry-row {
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 6px 8px;
+  background: var(--panel);
+}
+.entry-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2px;
+}
+.entry-x {
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.entry-x:hover {
+  color: var(--accent);
+}
+.entry-body {
+  margin: 2px 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+.entry-timer {
+  margin-top: 2px;
+  font-size: 11px;
+}
+.entry-empty {
+  margin: 0 0 12px;
+  font-size: 12px;
+}
+.entry-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ticket-bin {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.ticket-bin-label {
+  margin-top: 4px;
+}
+.pending-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pending-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--panel);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.att-x {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: var(--hairline) solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.att-x:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.att-x-inline {
+  margin-left: 4px;
+}
+.timer-row {
+  align-items: center;
+}
+.timer-label {
+  margin-right: 4px;
+}
+.chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.chip.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 .err {
   color: var(--accent);

@@ -180,6 +180,63 @@ class NoteDeletedResponse(BaseModel):
     deleted: Literal[True] = True
 
 
+# ── Note entries (time-tabled notes) ─────────────────────────────────────────
+
+
+class NoteEntryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    ticket_id: str
+    body: str
+    timer_min: int | None
+    reason: str | None
+    created_at: UTCDatetime
+
+
+class NoteEntryCreate(BaseModel):
+    """POST /notes/entries body. `body` required, timer + reason optional.
+
+    `timer_min` set → service upserts the ticket's `followups` row in the
+    same transaction. `reason` mirrors to `followups.reason` when timer set.
+    """
+
+    ticket_id: str = Field(min_length=1)
+    body: str = Field(min_length=1)
+    timer_min: int | None = Field(default=None, ge=1, le=1440)
+    reason: str | None = Field(default=None, max_length=80)
+
+
+class NoteEntryDeleted(BaseModel):
+    ok: Literal[True] = True
+    deleted: Literal[True] = True
+    id: int
+
+
+# ── Note attachments ─────────────────────────────────────────────────────────
+
+
+class NoteAttachmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    owner_kind: Literal["entry", "ticket"]
+    owner_id: str
+    ticket_id: str
+    filename: str
+    mime: str
+    size_bytes: int
+    created_at: UTCDatetime
+    raw_url: str
+    thumb_url: str | None
+
+
+class NoteAttachmentDeleted(BaseModel):
+    ok: Literal[True] = True
+    deleted: Literal[True] = True
+    id: int
+
+
 # ── Tickets ───────────────────────────────────────────────────────────────────
 
 

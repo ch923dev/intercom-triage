@@ -17,6 +17,7 @@ import TicketFlyout from '@/components/TicketFlyout.vue';
 import Topbar from '@/components/Topbar.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
+import { useNoteEntriesStore } from '@/stores/noteEntries';
 import { useNotesStore } from '@/stores/notes';
 import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
@@ -30,6 +31,7 @@ const settings = useSettingsStore();
 const tickets = useTicketsStore();
 const followups = useFollowupsStore();
 const notes = useNotesStore();
+const noteEntries = useNoteEntriesStore();
 const view = useViewStore();
 const tweaks = useTweaksStore();
 const selection = useSelectionStore();
@@ -39,7 +41,7 @@ const COLUMN_STEP = 296; // column width (280) + gutter
 onMounted(async () => {
   await settings.load();
   await categories.load();
-  await Promise.all([followups.load(), notes.load()]);
+  await Promise.all([followups.load(), notes.load(), noteEntries.load()]);
   // An unreachable backend leaves the board empty + raises an inline error;
   // the empty-state callout points the operator at the extension to sync.
   await tickets.refresh().catch(() => undefined);

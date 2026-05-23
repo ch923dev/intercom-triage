@@ -318,6 +318,88 @@ class TicketNote(Base):
     )
 
 
+class NoteEntry(Base):
+    """A timestamped append-only entry on a ticket's investigation log.
+
+    Replaces the freeform `ticket_notes.body` scratchpad with a log of
+    `(timestamp, body)` items. Each entry may carry an optional timer
+    (`timer_min`) and an optional `reason` that mirrors the wording on the
+    follow-up row. Soft-linked to `followups` by `ticket_id`: when a new
+    entry has `timer_min` set, the service upserts the matching `followups`
+    row inside the same transaction.
+
+    Append-only — corrections are new entries. `deleted_at` is a soft-delete
+    for hard mistakes only.
+    """
+
+    __tablename__ = "note_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    timer_min: Mapped[int | None] = mapped_column(Integer)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint("length(body) > 0", name="note_entries_body_nonempty"),
+        CheckConstraint(
+            "reason IS NULL OR length(reason) <= 80",
+            name="note_entries_reason_len_check",
+        ),
+        CheckConstraint(
+            "timer_min IS NULL OR (timer_min BETWEEN 1 AND 1440)",
+            name="note_entries_timer_range_check",
+        ),
+        Index("ix_note_entries_ticket", "ticket_id"),
+        Index("ix_note_entries_created", "created_at"),
+    )
+
+
+class NoteAttachment(Base):
+    """A file attachment owned by either a note entry or a ticket (spec:
+    note attachments). Content-addressed by sha256 on disk so identical
+    uploads dedupe automatically. Polymorphic owner — `owner_kind` is
+    'entry' (owner_id = str of NoteEntry.id) or 'ticket' (owner_id =
+    ticket_id). `ticket_id` is always populated so list-by-ticket is one
+    index lookup regardless of owner kind."""
+
+    __tablename__ = "note_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    owner_id: Mapped[str] = mapped_column(Text, nullable=False)
+    ticket_id: Mapped[str] = mapped_column(Text, nullable=False)
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    mime: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    stored_path: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint(
+            "owner_kind IN ('entry','ticket')",
+            name="note_attachments_owner_kind_check",
+        ),
+        CheckConstraint("length(sha256) = 64", name="note_attachments_sha256_len_check"),
+        CheckConstraint("size_bytes >= 0", name="note_attachments_size_nonneg_check"),
+        Index("ix_note_attachments_owner", "owner_kind", "owner_id"),
+        Index("ix_note_attachments_ticket", "ticket_id"),
+        Index("ix_note_attachments_sha256", "sha256"),
+    )
+
+
 class Ticket(Base):
     """An ingested + categorized conversation — the operator's board data.
 

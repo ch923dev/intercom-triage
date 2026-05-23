@@ -100,6 +100,11 @@ per-row countdown chips, and an audio cue (shared mute via `GET /settings`).
 | `GET /followups` | All active follow-up reminders |
 | `PUT /followups/{id}` · `/snooze` · `/mark-fired` · `DELETE` | Set / snooze / fire / clear a follow-up |
 | `GET /notes` · `PUT /notes/{id}` | Per-ticket next-step notes (empty body deletes) |
+| `GET /notes/entries` · `GET /notes/entries/{ticket_id}` | Time-tabled note entries — list all / list by ticket |
+| `POST /notes/entries` · `DELETE /notes/entries/{id}` | Append an entry (optional `timer_min` upserts follow-up); soft-delete by id |
+| `POST /attachments` · `GET /attachments?ticket_id=...` | Multipart upload / list by ticket. `owner_kind` = `entry`\|`ticket` |
+| `GET /attachments/{id}/raw` · `GET /attachments/{id}/thumb` | Stream bytes inline / 256px WebP thumbnail for images |
+| `DELETE /attachments/{id}` | Soft-delete; nightly sweep removes orphaned bytes after `ATTACHMENT_GC_DAYS` (default 7) |
 
 Interactive docs at <http://localhost:8000/docs> while the backend runs.
 
@@ -153,6 +158,9 @@ concurrency, cache TTL, and the SQLite → Postgres swap.
 
 Copy `backend/data/triage.db` somewhere — single file. The Postgres swap is
 documented in [`plan.md`](./plan.md#10-deployment).
+
+Attachment files live under `backend/data/attachments/` (content-addressed
+by sha256). To back up notes + their files, copy `backend/data/` as a whole.
 
 ## License
 
