@@ -77,6 +77,15 @@ export interface TicketNote {
   updated_at: string;
 }
 
+export interface NoteEntry {
+  id: number;
+  ticket_id: string;
+  body: string;
+  timer_min: number | null;
+  reason: string | null;
+  created_at: string;
+}
+
 export interface Ticket {
   id: string;
   title: string | null;

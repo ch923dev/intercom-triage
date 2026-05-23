@@ -10,6 +10,7 @@ import type {
   Category,
   FilterSettings,
   Followup,
+  NoteEntry,
   ProposalsResponse,
   ResolvedSource,
   Ticket,
@@ -150,6 +151,23 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ body }),
     }),
+
+  // ── note entries (time-tabled notes) ──────────────────────────────────────
+  listNoteEntries: (): Promise<NoteEntry[]> => request('/notes/entries'),
+
+  listNoteEntriesForTicket: (ticketId: string): Promise<NoteEntry[]> =>
+    request(`/notes/entries/${ticketId}`),
+
+  addNoteEntry: (body: {
+    ticket_id: string;
+    body: string;
+    timer_min?: number | null;
+    reason?: string | null;
+  }): Promise<NoteEntry> =>
+    request('/notes/entries', { method: 'POST', body: JSON.stringify(body) }),
+
+  deleteNoteEntry: (entryId: number): Promise<{ ok: true; deleted: true; id: number }> =>
+    request(`/notes/entries/${entryId}`, { method: 'DELETE' }),
 
   // ── bulk actions (Phase 12 — plan §8d) ────────────────────────────────────
   /** Mark N tickets manually resolved. Per-id ok/failed in the response. */
