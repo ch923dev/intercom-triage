@@ -142,4 +142,7 @@ export interface FilterSettings {
   ai_resolve_default: boolean;
   /** Confidence threshold (0..1) the AI verdict must meet before auto-resolving. */
   ai_resolve_confidence_threshold: number;
+  /** When true (default), Board hides category columns with zero open tickets.
+   *  Resolved column always shows regardless. */
+  hide_empty_categories: boolean;
 }

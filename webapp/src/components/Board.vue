@@ -5,6 +5,7 @@ import Column from './Column.vue';
 import ResolvedColumn from './ResolvedColumn.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
+import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
 import type { Ticket } from '@/types/api';
@@ -12,6 +13,7 @@ import type { Ticket } from '@/types/api';
 const categories = useCategoriesStore();
 const tickets = useTicketsStore();
 const followups = useFollowupsStore();
+const settings = useSettingsStore();
 const view = useViewStore();
 
 const selectedId = computed(() => view.selectedTicketId);
@@ -30,12 +32,23 @@ function ticketsForColumn(col: { kind: 'category' | 'proposal'; id: number }) {
 function onSelect(t: Ticket) {
   view.selectTicket(t.id);
 }
+
+/** When hide_empty_categories is on, drop columns whose ticket list is empty.
+ *  Proposal columns are pending operator review — keep them visible so the
+ *  operator can curate them. */
+const visibleColumns = computed(() => {
+  if (!settings.hideEmptyCategories) return categories.columns;
+  return categories.columns.filter((col) => {
+    if (col.kind === 'proposal') return true;
+    return ticketsForColumn(col).length > 0;
+  });
+});
 </script>
 
 <template>
   <div class="board">
     <Column
-      v-for="col in categories.columns"
+      v-for="col in visibleColumns"
       :key="col.key"
       :column="col"
       :tickets="ticketsForColumn(col)"

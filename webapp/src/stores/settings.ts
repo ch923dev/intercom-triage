@@ -16,6 +16,7 @@ const DEFAULTS: FilterSettings = {
   use_ai: true,
   ai_resolve_default: false,
   ai_resolve_confidence_threshold: 0.7,
+  hide_empty_categories: true,
 };
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -32,6 +33,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const useAi = computed(() => state.value.use_ai);
   const aiResolveDefault = computed(() => state.value.ai_resolve_default);
   const aiResolveConfidenceThreshold = computed(() => state.value.ai_resolve_confidence_threshold);
+  const hideEmptyCategories = computed(() => state.value.hide_empty_categories);
 
   /** Load the stored filter. Falls back to defaults if the backend is down. */
   async function load() {
@@ -92,6 +94,11 @@ export const useSettingsStore = defineStore('settings', () => {
     return update({ ai_resolve_confidence_threshold: v });
   }
 
+  /** Toggle hiding of empty category columns on the Board. */
+  function setHideEmptyCategories(v: boolean) {
+    return update({ hide_empty_categories: v });
+  }
+
   return {
     filter,
     loaded,
@@ -104,6 +111,7 @@ export const useSettingsStore = defineStore('settings', () => {
     useAi,
     aiResolveDefault,
     aiResolveConfidenceThreshold,
+    hideEmptyCategories,
     load,
     update,
     setLookback,
@@ -113,5 +121,6 @@ export const useSettingsStore = defineStore('settings', () => {
     setUseAi,
     setAiResolveDefault,
     setAiResolveConfidenceThreshold,
+    setHideEmptyCategories,
   };
 });

@@ -90,6 +90,11 @@ function onConfidenceThreshold(event: Event) {
   if (!isNaN(v)) void settings.setAiResolveConfidenceThreshold(v);
 }
 
+/** Hide-empty-categories toggle. */
+function onToggleHideEmptyCategories(event: Event) {
+  void settings.setHideEmptyCategories((event.target as HTMLInputElement).checked);
+}
+
 /** Background sync interval selector — saves to the tweaks store (localStorage). */
 function onAutoSyncChange(event: Event) {
   const raw = Number((event.target as HTMLSelectElement).value) as 0 | 30 | 60 | 300;
@@ -271,6 +276,18 @@ async function onToggleNotifications(event: Event) {
           <button v-else class="link" :disabled="settings.saving" @click="pickSpecific">
             Pick specific categories…
           </button>
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="settings.hideEmptyCategories"
+              :disabled="settings.saving"
+              @change="onToggleHideEmptyCategories"
+            />
+            <span class="sentence">Hide empty columns</span>
+          </label>
+          <p class="hint">
+            Category columns with zero open tickets disappear. Resolved column always shows.
+          </p>
         </section>
 
         <!-- AI categorization toggle -->
