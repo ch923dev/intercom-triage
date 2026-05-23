@@ -23,6 +23,8 @@ async def get_settings(session: AsyncSession) -> FilterSettings:
         ),
         mute_alarms=row.mute_alarms,
         use_ai=row.use_ai,
+        ai_resolve_default=row.ai_resolve_default,
+        ai_resolve_confidence_threshold=row.ai_resolve_confidence_threshold,
     )
 
 
@@ -43,6 +45,8 @@ async def update_settings(
     )
     row.mute_alarms = data.mute_alarms
     row.use_ai = data.use_ai
+    row.ai_resolve_default = data.ai_resolve_default
+    row.ai_resolve_confidence_threshold = data.ai_resolve_confidence_threshold
     row.updated_at = naive_utcnow()
     await session.commit()
     return await get_settings(session)
