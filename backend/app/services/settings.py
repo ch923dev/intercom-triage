@@ -25,6 +25,7 @@ async def get_settings(session: AsyncSession) -> FilterSettings:
         use_ai=row.use_ai,
         ai_resolve_default=row.ai_resolve_default,
         ai_resolve_confidence_threshold=row.ai_resolve_confidence_threshold,
+        hide_empty_categories=row.hide_empty_categories,
     )
 
 
@@ -47,6 +48,7 @@ async def update_settings(
     row.use_ai = data.use_ai
     row.ai_resolve_default = data.ai_resolve_default
     row.ai_resolve_confidence_threshold = data.ai_resolve_confidence_threshold
+    row.hide_empty_categories = data.hide_empty_categories
     row.updated_at = naive_utcnow()
     await session.commit()
     return await get_settings(session)

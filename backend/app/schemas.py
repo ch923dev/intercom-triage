@@ -313,6 +313,9 @@ class FilterSettings(BaseModel):
     use_ai: bool = True
     ai_resolve_default: bool = False
     ai_resolve_confidence_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    # When True (default), the Board hides category columns with zero open
+    # tickets. Resolved column always shows regardless.
+    hide_empty_categories: bool = True
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────────

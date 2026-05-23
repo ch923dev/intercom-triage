@@ -240,6 +240,13 @@ class Settings(Base):
         server_default=text("0.7"),
         nullable=False,
     )
+    # When True (default), the Board hides category columns that currently have
+    # zero open tickets. Resolved column always shows regardless.
+    hide_empty_categories: Mapped[bool] = mapped_column(
+        default=True,
+        server_default=text("1"),
+        nullable=False,
+    )
 
     __table_args__ = (
         CheckConstraint("id = 1", name="settings_singleton_check"),
