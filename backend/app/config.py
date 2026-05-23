@@ -9,6 +9,7 @@ SQLAlchemy `Settings` table defined in `models.py`.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,6 +49,11 @@ class AppConfig(BaseSettings):
     max_tickets_per_fetch: int = Field(default=100, ge=1, le=1000)
     ai_concurrency: int = Field(default=4, ge=1, le=64)
     cache_ttl_seconds: int = Field(default=300, ge=0)
+
+    # ── Attachments (note attachments spec) ──────────────────────────────────
+    attachments_dir: Path = Path("./data/attachments")
+    attachment_gc_days: int = Field(default=7, ge=0)
+    attachment_sweep_interval_seconds: int = Field(default=86_400, ge=60)
 
     # ── Server ────────────────────────────────────────────────────────────────
     log_level: str = "INFO"
