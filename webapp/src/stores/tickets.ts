@@ -191,6 +191,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       ...original,
       resolved_at: new Date().toISOString(),
       resolved_source: 'manual',
+      resolution_chip_state: null,
     });
     try {
       await api.resolveTicket(id);
@@ -208,7 +209,12 @@ export const useTicketsStore = defineStore('tickets', () => {
     if (idx === -1) return;
     const original = resolvedTickets.value[idx]!;
     resolvedTickets.value.splice(idx, 1);
-    state.value.tickets.unshift({ ...original, resolved_at: null, resolved_source: null });
+    state.value.tickets.unshift({
+      ...original,
+      resolved_at: null,
+      resolved_source: null,
+      resolution_chip_state: null,
+    });
     try {
       await api.reopenTicket(id);
     } catch (e) {
