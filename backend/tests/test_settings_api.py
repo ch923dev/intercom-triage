@@ -28,6 +28,8 @@ async def test_put_then_get_roundtrips(client: AsyncClient) -> None:
         "include_category_ids": [1, 2, 3],
         "mute_alarms": True,
         "use_ai": False,
+        "ai_resolve_default": False,
+        "ai_resolve_confidence_threshold": 0.7,
     }
     put = await client.put("/settings", json=new_settings)
     assert put.status_code == 200

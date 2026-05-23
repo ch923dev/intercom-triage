@@ -51,6 +51,9 @@ TicketState = Literal["open", "snoozed", "closed"]
 LookbackUnit = Literal["hours", "days"]
 CategorySource = Literal["seed", "ai_proposed", "user_created"]
 ProposalStatus = Literal["pending", "approved", "merged", "rejected"]
+ResolvedSource = Literal["manual", "intercom_closed"]
+ResolutionVerdict = Literal["resolved", "not_resolved"]
+ResolutionChipState = Literal["ai_resolved", "ai_reopened", "new_reply"]
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -238,12 +241,37 @@ class TicketSchema(HydratedTicket):
     summary_user_edited: bool = False
     followup: FollowupRead | None = None
     note: TicketNoteRead | None = None
+    resolved_at: UTCDatetime | None = None
+    resolved_source: ResolvedSource | None = None
+    ai_resolve_enabled: bool = False  # effective value after merging with settings default
+    ai_resolve_override: bool | None = None  # raw per-ticket override (None = inherit)
+    ai_resolution_verdict: ResolutionVerdict | None = None
+    ai_resolution_confidence: float | None = None
+    ai_resolution_reason: str | None = None
+    resolution_chip_state: ResolutionChipState | None = None
 
 
 class CategoryUpdate(BaseModel):
     """PATCH /tickets/{id}/category body."""
 
     category_id: int
+
+
+class AIResolveSet(BaseModel):
+    """PATCH /tickets/{id}/ai-resolve body. `null` clears the per-ticket
+    override and lets the ticket inherit settings.ai_resolve_default."""
+
+    enabled: bool | None = None
+
+
+class ResolveResponse(BaseModel):
+    ok: Literal[True] = True
+    resolved_at: UTCDatetime
+    resolved_source: ResolvedSource
+
+
+class ReopenResponse(BaseModel):
+    ok: Literal[True] = True
 
 
 class TicketEdit(BaseModel):
@@ -283,6 +311,8 @@ class FilterSettings(BaseModel):
     # When False, ingest skips AI categorization — tickets land in the fallback
     # category and the operator writes subject/summary by hand.
     use_ai: bool = True
+    ai_resolve_default: bool = False
+    ai_resolve_confidence_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────────

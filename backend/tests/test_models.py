@@ -375,3 +375,47 @@ async def test_settings_has_resolution_columns() -> None:
         assert {"ai_resolve_default", "ai_resolve_confidence_threshold"}.issubset(cols)
     finally:
         await engine.dispose()
+
+
+def test_ticket_schema_carries_resolution_fields():
+    from datetime import datetime
+
+    from app.schemas import TicketSchema
+
+    payload = {
+        "id": "t1",
+        "title": "x",
+        "state": "open",
+        "priority": None,
+        "created_at": datetime(2026, 5, 23),
+        "updated_at": datetime(2026, 5, 23),
+        "author": {"id": None, "name": None, "email": None, "type": None},
+        "url": None,
+        "parts": [],
+        "category_id": 1,
+        "proposal_id": None,
+        "summary": "",
+        "ai_confidence": 0.0,
+        "user_override": False,
+        "resolved_at": None,
+        "resolved_source": None,
+        "ai_resolve_enabled": False,
+        "ai_resolve_override": None,
+        "ai_resolution_verdict": None,
+        "ai_resolution_confidence": None,
+        "ai_resolution_reason": None,
+        "resolution_chip_state": None,
+    }
+    ticket = TicketSchema.model_validate(payload)
+    assert ticket.resolved_at is None
+    assert ticket.ai_resolve_enabled is False
+    assert ticket.ai_resolve_override is None
+    assert ticket.resolution_chip_state is None
+
+
+def test_resolve_request_body_accepts_empty():
+    from app.schemas import AIResolveSet
+
+    AIResolveSet.model_validate({"enabled": True})
+    AIResolveSet.model_validate({"enabled": False})
+    AIResolveSet.model_validate({"enabled": None})
