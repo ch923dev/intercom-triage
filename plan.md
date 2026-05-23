@@ -1,8 +1,10 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 1.4 · **Implements:** `spec.md` v1.4 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 1.5 · **Implements:** `spec.md` v1.5 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
+
+**Changes from v1.4:** added §8d (bulk actions): a transient client-side selection store, five `bulk` endpoints that loop per-id over the existing services and return per-id success/failure, an `<BulkActionBar>` surface in the webapp, range-select within column, bulk drag through `vuedraggable`'s multi-drag mode, and a `MAX_BULK_IDS` cap. No schema additions.
 
 **Changes from v1.3:** added §8c (ticket resolution): orthogonal resolved flag on `tickets`, four new endpoints, server-computed chip state, AI verdict bundled into the existing categorization call, extension closure pass. Schema additions documented in §5.
 
@@ -23,13 +25,15 @@ This document defines **how** the system is built. Each section maps back to one
 | Schema management | SQLAlchemy `metadata.create_all` + seeding on startup | Alembic is overkill at this scope; add later if/when schema needs versioned migrations |
 | Webapp | Vue 3 + Vite + TypeScript | Matches OnlySales frontend |
 | Client state | Pinia | Standard Vue 3 |
-| Drag-and-drop | `vuedraggable@next` | Vue 3 compatible |
+| Drag-and-drop | `vuedraggable@next` (multi-drag for bulk) | Vue 3 compatible |
+| Webapp tests | Vitest + Vue Test Utils + happy-dom | Lands with Phase 12 bulk-actions |
 | Extension | Manifest V3 + vanilla TypeScript | Keeps popup bundle small |
 | AI gateway | OpenRouter | Single contract for Anthropic models |
 | AI model (default) | `anthropic/claude-sonnet-4.5` | Quality default |
 | AI model (cost mode) | `anthropic/claude-haiku-4.5` | Configurable via `.env` |
 | Deploy | `uvicorn main:app` on localhost; webapp via `npm run dev` or static build; extension side-loaded | No cloud, no Docker required |
 | Secrets | `.env` file (gitignored) | NFR-005 |
+| Bulk request cap | `MAX_BULK_IDS` (default 200) | Caps memory + transaction size per bulk call (FR-036) |
 
 ## 2. Architecture
 
@@ -118,6 +122,14 @@ TicketNote {                               # server ↔ client (US-014)
 }
 
 TicketNoteSet { body: string }             # PUT body; empty string deletes the row
+
+BulkTicketIds       { ticket_ids: string[] }                    # universal bulk request envelope
+BulkCategoryUpdate  { ticket_ids: string[], category_id: int }
+BulkFollowupSet     { ticket_ids: string[], due_at: ISO8601, reason: string | null }
+BulkResult {                                # universal bulk response envelope
+  ok_ids:  string[]
+  failed:  { id: string, reason: string }[]
+}
 ```
 
 ## 4. API contract
@@ -154,8 +166,14 @@ No auth header. Backend listens on `127.0.0.1` only.
 | POST | `/tickets/{id}/reopen` | — | `{ok}` | FR-025, FR-028 |
 | PATCH | `/tickets/{id}/ai-resolve` | `{enabled: bool\|null}` | `{ok}` | FR-029, FR-028 |
 | POST | `/tickets/{id}/dismiss-chip` | — | `{ok}` | FR-027, FR-028 |
+| POST | `/tickets/bulk/resolve` | `BulkTicketIds` | `BulkResult` | FR-033, US-018 |
+| POST | `/tickets/bulk/reopen` | `BulkTicketIds` | `BulkResult` | FR-033, US-018 |
+| PATCH | `/tickets/bulk/category` | `BulkCategoryUpdate` | `BulkResult` | FR-033, US-018 |
+| POST | `/tickets/bulk/dismiss-chip` | `BulkTicketIds` | `BulkResult` | FR-033, US-018 |
+| PUT | `/followups/bulk` | `BulkFollowupSet` | `BulkResult` | FR-033, US-018 |
+| DELETE | `/followups/bulk` | `BulkTicketIds` | `BulkResult` | FR-033, US-018 |
 
-Error contract: `502` on upstream AI failure, `422` on schema violation, `404` on unknown id, `409` on archive of fallback or other invalid state transition.
+Error contract: `502` on upstream AI failure, `422` on schema violation (including bulk requests over `MAX_BULK_IDS`), `404` on unknown id, `409` on archive of fallback or other invalid state transition. Bulk endpoints never abort the batch on a per-id failure — they record `{id, reason}` in `failed[]` and return 200.
 
 ## 5. Data model
 
@@ -419,6 +437,76 @@ never auto-moves a ticket.
 
 See `docs/superpowers/specs/2026-05-23-ticket-resolution-design.md` for the full
 design.
+
+## 8d. Bulk actions
+
+Operator selects N tickets and applies one action. Cuts per-ticket click cost.
+Webapp-only in v1 — popup ergonomics too cramped for multi-select.
+
+**Selection store (client).** New Pinia `selectionStore` exposes
+`Set<string>` of selected ticket ids, plus `toggle(id)`, `addRange(columnId, fromId, toId)`,
+`addAll(ids)`, `clear()`, getters `count`, `has(id)`, `asArray()`. The store is
+transient — cleared on view change, on Escape, on empty-background click, and
+after every successful bulk action. Range-select consults the column's
+displayed-sort order, which lives on `Column.vue` and is exposed via a small
+helper.
+
+**Card interaction (`TicketCard.vue`).**
+- Plain click → existing flyout behavior (unchanged).
+- Cmd/Ctrl+click → `selection.toggle(id)`, no flyout.
+- Shift+click → if a card in the same column is already selected, extend the
+  range from the last-selected anchor to the clicked card (sorted order);
+  otherwise behave as Cmd/Ctrl+click. Selected cards get a 2 px accent ring
+  via `data-selected="true"`.
+
+**Column header.** `Column.vue` shows a `Select all (N)` mono chip when at
+least one card in that column is selected or when the header is hovered.
+Clicks call `selection.addAll(columnTicketIds)`.
+
+**Bulk action bar (`BulkActionBar.vue`).** Sticky bottom-center, slides in
+when `selection.count > 0`. Layout:
+
+```
+[N selected] [Clear]   ·   [Resolve] [Reopen]   ·   [Move to ▾]   ·
+[Follow-up ▾] [Clear F/U]   ·   [More ▾]
+```
+
+Buttons that don't apply to the current selection are disabled with a tooltip
+explaining why (e.g. `Reopen` is disabled unless every selected card is
+resolved). Move-to and Follow-up chips reuse the existing category picker +
+preset chip components.
+
+**Bulk drag.** `vuedraggable` runs in multi-drag mode. When the operator
+starts dragging a card that is in the selection set, the drag payload becomes
+the entire selection. Dropping into a category column issues a bulk
+`PATCH /tickets/bulk/category`; dropping into the Resolved column issues
+`POST /tickets/bulk/resolve`. Dropping a non-selected card behaves as today
+(single-item override).
+
+**Optimistic updates with per-id rollback.** Each bulk store action
+(`bulkResolve`, `bulkReopen`, `bulkRecategorize`, `bulkSetFollowup`,
+`bulkClearFollowup`, `bulkDismissChip`) snapshots the affected ticket rows,
+mutates them locally, then issues the bulk request. On response, any id in
+`failed[]` is rolled back from the snapshot; a single toast summarizes:
+`"12 resolved, 1 failed (T123 — already resolved)"`.
+
+**Server.** Each bulk endpoint loops the existing per-id service function
+(`resolution_svc.resolve`, `set_override`, etc.) inside one session. The loop
+catches `HTTPException` per id and records `{id, reason}` to `failed[]`. The
+loop commits once at the end — service functions that flush mid-loop are
+re-implemented with `session.no_autoflush` blocks if necessary. A new
+`MAX_BULK_IDS` config (default 200) is enforced on the request body via a
+Pydantic `Field(max_length=...)`; over-cap requests return 422 before any DB
+work.
+
+**Metrics (`/metrics`).** New counter `bulk_actions_total{op, result}` —
+labels: `resolve | reopen | recategorize | followup_set | followup_clear | dismiss_chip`
+× `ok | partial | fail`. Plus `bulk_action_ids_total{op}` to track volume.
+
+**Vitest harness.** Webapp gains a vitest setup (Vue Test Utils +
+`happy-dom`) as part of this phase. The selection store and the bulk store
+actions are the first units under test; existing stores get coverage as
+opportunistic follow-up but are not in scope for the phase.
 
 ## 9. Settings
 

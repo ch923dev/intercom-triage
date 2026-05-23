@@ -6,23 +6,52 @@ import { computed } from 'vue';
 import draggable from 'vuedraggable';
 import Mono from './Mono.vue';
 import TicketCard from './TicketCard.vue';
+import { useSelectionStore } from '@/stores/selection';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
 import type { Ticket } from '@/types/api';
 
 const tickets = useTicketsStore();
 const view = useViewStore();
+const selection = useSelectionStore();
 
 const items = computed(() => tickets.resolvedTickets);
 const selectedId = computed(() => view.selectedTicketId);
 
-function onChange(event: { added?: { element: Ticket } }) {
-  if (event.added) {
-    void tickets.markResolved(event.added.element.id);
+/** Stable column key — shared by every card here so selection range-checks
+ *  against `lastAnchor.columnId` work. */
+const COLUMN_KEY = '__resolved__';
+
+async function onChange(event: { added?: { element: Ticket } }) {
+  if (!event.added) return;
+  const id = event.added.element.id;
+  // Bulk drag (plan §8d, FR-035): drop a selected card into Resolved →
+  // resolve every selected ticket.
+  if (selection.has(id) && selection.count > 1) {
+    const ids = selection.asArray();
+    const result = await tickets.bulkResolve(ids);
+    if (result.failed.length === 0) selection.clear();
+    return;
   }
+  void tickets.markResolved(id);
 }
 
-function onSelect(t: Ticket) {
+/** Modifier-aware click — mirrors Column.vue. */
+function onCardClick(t: Ticket, e: MouseEvent) {
+  if (e.metaKey || e.ctrlKey) {
+    selection.toggle(t.id, COLUMN_KEY);
+    return;
+  }
+  if (e.shiftKey) {
+    const anchor = selection.lastAnchor;
+    if (anchor && anchor.columnId === COLUMN_KEY) {
+      const ordered = items.value.map((x) => x.id);
+      selection.addRange(COLUMN_KEY, anchor.id, t.id, ordered);
+    } else {
+      selection.toggle(t.id, COLUMN_KEY);
+    }
+    return;
+  }
   view.selectTicket(t.id);
 }
 </script>
@@ -48,7 +77,8 @@ function onSelect(t: Ticket) {
         <TicketCard
           :ticket="element"
           :selected="selectedId === element.id"
-          @click="onSelect(element)"
+          :multi-selected="selection.has(element.id)"
+          @click="(e: MouseEvent) => onCardClick(element, e)"
         />
       </template>
       <template #footer>

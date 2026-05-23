@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 1.4 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 1.5 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v1.4:** added the **bulk actions** capability. US-018 lets the operator select multiple tickets at once and apply resolve / reopen / recategorize / set-follow-up / clear-follow-up / dismiss-chip as one action. FR-032..FR-036 cover the transient selection set, bulk endpoints with per-id result reporting, in-column range-select, bulk drag (dragging one selected card moves all selected), and the per-request id cap.
 
 **Changes from v1.3:** added the **ticket resolution** capability. US-015 lets the operator mark a ticket resolved; US-016 surfaces an AI advisory chip when the AI thinks a ticket's resolution state has changed; US-017 auto-resolves tickets that flip to `state=closed` in Intercom. Added FR-025..FR-031 covering the orthogonal resolution flag, resolution sources, server-computed chip state, four new endpoints, the per-ticket AI-resolve tri-state, settings persistence, and the extension closure pass.
 
@@ -197,6 +199,31 @@ Acceptance:
   on the open→closed transition (not on every closed-state sync).
 - No AI call is made for the closure event.
 
+### US-018 — Bulk actions on selected tickets
+I can select multiple tickets at once and apply a single action to all of them
+— resolve, reopen, recategorize, set or clear a follow-up, dismiss a resolution
+chip — without clicking through each card.
+
+Acceptance:
+- I can toggle a ticket in or out of the selection with Cmd/Ctrl+click.
+- I can extend the selection with Shift+click across a contiguous range
+  **within the same column** (sorted card order). Shift+click in a different
+  column toggles that one ticket only.
+- A column header exposes a "Select all (N)" affordance that adds every card
+  in that column to the selection.
+- Clicking the empty background, pressing Escape, or switching surfaces
+  clears the selection.
+- When the selection is non-empty, an action bar appears showing the count
+  and the available bulk actions; actions that don't apply to the current
+  selection (e.g. Reopen when not all selected are resolved) are disabled.
+- Dragging one selected card into a different column or the Resolved column
+  moves every selected ticket along with it.
+- A bulk action reports per-id success and failure; partial failure does not
+  block the rest of the batch.
+- A single bulk request is bounded by a configurable maximum (default 200).
+  Selecting more than the cap surfaces a warning and asks me to split the
+  action.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -232,6 +259,11 @@ Acceptance:
 | FR-029 | Each ticket carries a per-ticket AI-resolve tri-state override (`true` / `false` / `null`); `null` means inherit `settings.ai_resolve_default`. | US-016 |
 | FR-030 | Settings persist `ai_resolve_default` (bool) and `ai_resolve_confidence_threshold` (float 0..1); both are read and written through the existing settings endpoint. | US-016 |
 | FR-031 | On each sync the extension performs a closure pass: it compares tracked ticket ids against the open list returned by Intercom and fetches the closed-conversation list for any ids that have gone missing, then ingests them so the backend auto-resolves via the open→closed transition. | US-017 |
+| FR-032 | The webapp maintains a transient client-side selection set of ticket ids. The set is cleared on view change, on Escape, on an empty-background click, and after every successful bulk action. | US-018 |
+| FR-033 | The backend exposes bulk endpoints that accept `{ticket_ids: string[]}` arrays and return `{ok_ids: string[], failed: [{id, reason}]}`. A per-id failure does not abort the rest of the batch. | US-018 |
+| FR-034 | Shift+click extends the selection across the contiguous range of cards in the same column (in displayed sort order). Shift+click in a different column toggles only the clicked card. | US-018 |
+| FR-035 | Dragging any selected card propagates the drop to every card in the selection set. Dropping into a category column reassigns all of them; dropping into the Resolved column resolves all of them. | US-018 |
+| FR-036 | A single bulk request is bounded by `MAX_BULK_IDS` (configurable, default 200). The webapp warns and refuses to submit a bulk action over the cap; the backend rejects oversize requests with 422. | US-018 |
 
 ## 6. Non-functional requirements
 

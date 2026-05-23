@@ -13,6 +13,9 @@ from app.db import get_session
 from app.deps import get_app_config, get_openrouter
 from app.schemas import (
     AIResolveSet,
+    BulkCategoryUpdate,
+    BulkResult,
+    BulkTicketIds,
     CategoryUpdate,
     HydratedTicket,
     IngestResponse,
@@ -23,6 +26,7 @@ from app.schemas import (
     TicketEdit,
     TicketSchema,
 )
+from app.services import bulk as bulk_svc
 from app.services import resolution as resolution_svc
 from app.services import tickets as svc
 
@@ -67,6 +71,49 @@ async def ingest_tickets(
         config=config,
         hydrated=body,
     )
+
+
+# ── Bulk actions (plan §8d, T075-T078) ────────────────────────────────────────
+#
+# Registered ahead of the `/{ticket_id}/...` routes so that "bulk" wins the
+# match against the path parameter — FastAPI dispatches on registration order.
+
+
+@router.post("/bulk/resolve", response_model=BulkResult)
+async def bulk_resolve(
+    body: BulkTicketIds,
+    session: AsyncSession = Depends(get_session),
+) -> BulkResult:
+    """Mark N tickets manually resolved. Returns per-id ok/failed."""
+    return await bulk_svc.bulk_resolve(session, body.ticket_ids)
+
+
+@router.post("/bulk/reopen", response_model=BulkResult)
+async def bulk_reopen(
+    body: BulkTicketIds,
+    session: AsyncSession = Depends(get_session),
+) -> BulkResult:
+    """Reopen N resolved tickets. Returns per-id ok/failed."""
+    return await bulk_svc.bulk_reopen(session, body.ticket_ids)
+
+
+@router.patch("/bulk/category", response_model=BulkResult)
+async def bulk_recategorize(
+    body: BulkCategoryUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> BulkResult:
+    """Assign one category to N tickets via override rows. 422 if the category
+    is unknown or archived; per-id 404s land in `failed[]`."""
+    return await bulk_svc.bulk_recategorize(session, body.ticket_ids, body.category_id)
+
+
+@router.post("/bulk/dismiss-chip", response_model=BulkResult)
+async def bulk_dismiss_chip(
+    body: BulkTicketIds,
+    session: AsyncSession = Depends(get_session),
+) -> BulkResult:
+    """Suppress the resolution chip on N tickets."""
+    return await bulk_svc.bulk_dismiss_chip(session, body.ticket_ids)
 
 
 @router.patch("/{ticket_id}/category", response_model=OverrideResponse)

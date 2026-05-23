@@ -5,7 +5,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
-import type { Followup } from '@/types/api';
+import type { BulkResult, Followup } from '@/types/api';
 
 /** A banner raised when a follow-up transitions pending → due. */
 export interface AlarmBanner {
@@ -242,6 +242,87 @@ export const useFollowupsStore = defineStore('followups', () => {
     else map.value = { ...map.value, [ticketId]: previous };
   }
 
+  /** Apply the same follow-up to N tickets. Optimistic; rolls back per-id
+   *  failures from the server response. */
+  async function bulkSet(
+    ticketIds: string[],
+    dueAt: Date,
+    reason: string | null,
+  ): Promise<BulkResult> {
+    const iso = dueAt.toISOString();
+    const nowIso = new Date().toISOString();
+    const snapshot: Record<string, Followup | undefined> = {};
+    const next = { ...map.value };
+    for (const id of ticketIds) {
+      snapshot[id] = map.value[id];
+      next[id] = {
+        ticket_id: id,
+        due_at: iso,
+        reason,
+        fired: false,
+        created_at: map.value[id]?.created_at ?? nowIso,
+        updated_at: nowIso,
+      };
+    }
+    map.value = next;
+    try {
+      const result = await api.bulkSetFollowup(ticketIds, { due_at: iso, reason });
+      // Roll back per-id failures.
+      if (result.failed.length > 0) {
+        const reverted = { ...map.value };
+        for (const { id } of result.failed) {
+          const prev = snapshot[id];
+          if (prev === undefined) delete reverted[id];
+          else reverted[id] = prev;
+        }
+        map.value = reverted;
+      }
+      return result;
+    } catch (e) {
+      // Whole-batch failure — restore every snapshot.
+      const reverted = { ...map.value };
+      for (const id of ticketIds) {
+        const prev = snapshot[id];
+        if (prev === undefined) delete reverted[id];
+        else reverted[id] = prev;
+      }
+      map.value = reverted;
+      throw e;
+    }
+  }
+
+  /** Clear N follow-ups. Idempotent — ids without a row report ok server-side. */
+  async function bulkClear(ticketIds: string[]): Promise<BulkResult> {
+    const snapshot: Record<string, Followup | undefined> = {};
+    const next = { ...map.value };
+    for (const id of ticketIds) {
+      snapshot[id] = map.value[id];
+      delete next[id];
+      banners.value = banners.value.filter((b) => b.ticketId !== id);
+    }
+    map.value = next;
+    try {
+      const result = await api.bulkClearFollowup(ticketIds);
+      if (result.failed.length > 0) {
+        const reverted = { ...map.value };
+        for (const { id } of result.failed) {
+          const prev = snapshot[id];
+          if (prev !== undefined) reverted[id] = prev;
+        }
+        map.value = reverted;
+      }
+      return result;
+    } catch (e) {
+      const reverted = { ...map.value };
+      for (const id of ticketIds) {
+        const prev = snapshot[id];
+        if (prev !== undefined) reverted[id] = prev;
+      }
+      map.value = reverted;
+      throw e;
+    }
+  }
+
   return {
     banners,
     now,
@@ -258,5 +339,8 @@ export const useFollowupsStore = defineStore('followups', () => {
     dismissBanner,
     rescheduleToBucket,
     tick,
+    // Bulk (Phase 12)
+    bulkSet,
+    bulkClear,
   };
 });

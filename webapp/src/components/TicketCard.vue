@@ -15,11 +15,16 @@ import type { Ticket } from '@/types/api';
 interface Props {
   ticket: Ticket;
   overridden?: boolean;
+  /** Flyout-focused card (single-click open). */
   selected?: boolean;
+  /** Member of the bulk-selection set (Cmd/Ctrl/Shift+click). Renders the
+   *  accent ring used by Phase 12 bulk actions; distinct from `selected`. */
+  multiSelected?: boolean;
 }
 const props = withDefaults(defineProps<Props>(), {
   overridden: false,
   selected: false,
+  multiSelected: false,
 });
 
 const tweaks = useTweaksStore();
@@ -71,7 +76,14 @@ const isClosed = computed(() => props.ticket.state === 'closed');
 <template>
   <article
     class="card"
-    :class="{ dense, rich, selected: props.selected, overridden: props.overridden }"
+    :class="{
+      dense,
+      rich,
+      selected: props.selected,
+      'multi-selected': props.multiSelected,
+      overridden: props.overridden,
+    }"
+    :data-selected="props.multiSelected ? 'true' : undefined"
     draggable="true"
   >
     <div v-if="props.overridden" class="override-marker" title="Manually moved" />
@@ -151,6 +163,12 @@ const isClosed = computed(() => props.ticket.state === 'closed');
 .card.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
+}
+/* Bulk-selection ring (plan §8d). Outer 2 px ring + accent border so it reads
+ * distinct from the flyout-focus ring without clashing with .selected. */
+.card.multi-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 .override-marker {
   position: absolute;

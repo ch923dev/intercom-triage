@@ -16,6 +16,10 @@ const followups = useFollowupsStore();
 const settings = useSettingsStore();
 const view = useViewStore();
 
+const emit = defineEmits<{
+  (e: 'board-click', ev: MouseEvent): void;
+}>();
+
 const selectedId = computed(() => view.selectedTicketId);
 
 /** Tickets for a column, with due follow-ups pinned to the top (T050). The
@@ -46,7 +50,7 @@ const visibleColumns = computed(() => {
 </script>
 
 <template>
-  <div class="board">
+  <div class="board" @click="(e: MouseEvent) => emit('board-click', e)">
     <Column
       v-for="col in visibleColumns"
       :key="col.key"

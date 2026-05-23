@@ -3,7 +3,9 @@ import vue from '@vitejs/plugin-vue';
 import path from 'node:path';
 
 // Reference: tasks.md T029. Dev server proxies /api/* to the backend on 8000
-// so the SPA can stay on the same origin during local dev.
+// so the SPA can stay on the same origin during local dev. Vitest config
+// lives in `vitest.config.ts` (T080) so the dev/build path doesn't drag in
+// vitest's nested Vite copy at typecheck time.
 export default defineConfig({
   plugins: [vue()],
   resolve: {

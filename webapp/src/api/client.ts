@@ -5,6 +5,7 @@
 // the backend or behind a localhost reverse proxy.
 
 import type {
+  BulkResult,
   CategoriesResponse,
   Category,
   FilterSettings,
@@ -148,5 +149,51 @@ export const api = {
     request<TicketNote | { ok: true; deleted: true }>(`/notes/${ticketId}`, {
       method: 'PUT',
       body: JSON.stringify({ body }),
+    }),
+
+  // ── bulk actions (Phase 12 — plan §8d) ────────────────────────────────────
+  /** Mark N tickets manually resolved. Per-id ok/failed in the response. */
+  bulkResolve: (ticketIds: string[]): Promise<BulkResult> =>
+    request('/tickets/bulk/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ ticket_ids: ticketIds }),
+    }),
+
+  /** Reopen N resolved tickets. */
+  bulkReopen: (ticketIds: string[]): Promise<BulkResult> =>
+    request('/tickets/bulk/reopen', {
+      method: 'POST',
+      body: JSON.stringify({ ticket_ids: ticketIds }),
+    }),
+
+  /** Assign one category to N tickets via override rows. */
+  bulkRecategorize: (ticketIds: string[], categoryId: number): Promise<BulkResult> =>
+    request('/tickets/bulk/category', {
+      method: 'PATCH',
+      body: JSON.stringify({ ticket_ids: ticketIds, category_id: categoryId }),
+    }),
+
+  /** Suppress the resolution chip on N tickets. */
+  bulkDismissChip: (ticketIds: string[]): Promise<BulkResult> =>
+    request('/tickets/bulk/dismiss-chip', {
+      method: 'POST',
+      body: JSON.stringify({ ticket_ids: ticketIds }),
+    }),
+
+  /** Set the same follow-up `due_at` + reason on N tickets. */
+  bulkSetFollowup: (
+    ticketIds: string[],
+    body: { due_at: string; reason?: string | null },
+  ): Promise<BulkResult> =>
+    request('/followups/bulk', {
+      method: 'PUT',
+      body: JSON.stringify({ ticket_ids: ticketIds, ...body }),
+    }),
+
+  /** Clear follow-ups on N tickets. Idempotent. */
+  bulkClearFollowup: (ticketIds: string[]): Promise<BulkResult> =>
+    request('/followups/bulk', {
+      method: 'DELETE',
+      body: JSON.stringify({ ticket_ids: ticketIds }),
     }),
 };

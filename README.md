@@ -94,12 +94,35 @@ per-row countdown chips, and an audio cue (shared mute via `GET /settings`).
 | `POST /tickets/{id}/resolve` · `/reopen` · `/dismiss-chip` · `PATCH /ai-resolve` | Manual + AI resolution |
 | `PATCH /tickets/{id}/category` | Manually override a ticket's category |
 | `PATCH /tickets/{id}` | Edit AI-supplied title + summary (sticky across re-syncs) |
+| `POST /tickets/bulk/resolve` · `/reopen` · `/dismiss-chip` · `PATCH /tickets/bulk/category` | Multi-select bulk ops, per-id ok/failed result |
+| `PUT /followups/bulk` · `DELETE /followups/bulk` | Multi-select follow-up set / clear |
 | `GET /settings` · `PUT /settings` | The stored filter settings + `mute_alarms` |
 | `GET /followups` | All active follow-up reminders |
 | `PUT /followups/{id}` · `/snooze` · `/mark-fired` · `DELETE` | Set / snooze / fire / clear a follow-up |
 | `GET /notes` · `PUT /notes/{id}` | Per-ticket next-step notes (empty body deletes) |
 
 Interactive docs at <http://localhost:8000/docs> while the backend runs.
+
+## Bulk actions
+
+Cmd/Ctrl+click a card to add it to a multi-select set; Shift+click extends
+within the same column. Hover a column header for a `Select N` chip.
+Selection clears on Escape, an empty-background click, or after a successful
+bulk action.
+
+When at least one card is selected, a sticky bar appears: **Resolve**,
+**Reopen**, **Move to →** (category picker), **Follow-up →** (preset chips
+`15m / 1h / 4h / 24h`), **Clear F/U**, **Dismiss chip**. Disabled buttons
+explain why on hover (e.g. *Reopen* requires every selected card to be
+resolved).
+
+Dragging a card that's in the selection set moves the whole set: drop into a
+category column to bulk-recategorize, or into the Resolved column to
+bulk-resolve. A single bulk request is capped at 200 ids
+(`MAX_BULK_IDS` in `backend/app/config.py`); the webapp warns before
+submitting a larger selection. Each bulk endpoint returns
+`{ok_ids, failed: [{id, reason}]}` — per-id failures never abort the rest
+of the batch.
 
 ## Development
 

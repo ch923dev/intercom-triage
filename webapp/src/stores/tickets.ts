@@ -8,7 +8,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
-import type { Ticket } from '@/types/api';
+import type { BulkResult, Ticket } from '@/types/api';
 
 interface TicketsState {
   tickets: Ticket[];
@@ -276,6 +276,188 @@ export const useTicketsStore = defineStore('tickets', () => {
     }
   }
 
+  // ── Bulk actions (Phase 12, plan §8d) ──────────────────────────────────────
+  //
+  // Pattern: snapshot affected rows → optimistic mutate → API call →
+  // roll back any id reported in `failed[]` from the snapshot. Each helper
+  // returns the BulkResult so the caller (BulkActionBar) can render a toast
+  // with ok / failed counts.
+
+  /** Bulk resolve — moves matching open rows into resolvedTickets. */
+  async function bulkResolve(ids: string[]): Promise<BulkResult> {
+    const idSet = new Set(ids);
+    const snapshot: Array<{ idx: number; row: Ticket }> = [];
+    const moved: Ticket[] = [];
+    // Walk in reverse so splices don't invalidate indexes ahead of us.
+    for (let i = state.value.tickets.length - 1; i >= 0; i--) {
+      const t = state.value.tickets[i]!;
+      if (!idSet.has(t.id)) continue;
+      snapshot.push({ idx: i, row: t });
+      state.value.tickets.splice(i, 1);
+      moved.push({
+        ...t,
+        resolved_at: new Date().toISOString(),
+        resolved_source: 'manual',
+        resolution_chip_state: null,
+      });
+    }
+    // Most-recent first — same order as `markResolved`.
+    resolvedTickets.value = [...moved, ...resolvedTickets.value];
+
+    try {
+      const result = await api.bulkResolve(ids);
+      _rollbackFromSnapshot(result.failed, snapshot);
+      return result;
+    } catch (e) {
+      // Whole-batch failure — roll back every optimistic move.
+      _rollbackAll(snapshot);
+      throw e;
+    }
+  }
+
+  /** Bulk reopen — moves matching resolved rows back to the open list. */
+  async function bulkReopen(ids: string[]): Promise<BulkResult> {
+    const idSet = new Set(ids);
+    const snapshot: Array<{ idx: number; row: Ticket }> = [];
+    const moved: Ticket[] = [];
+    for (let i = resolvedTickets.value.length - 1; i >= 0; i--) {
+      const t = resolvedTickets.value[i]!;
+      if (!idSet.has(t.id)) continue;
+      snapshot.push({ idx: i, row: t });
+      resolvedTickets.value.splice(i, 1);
+      moved.push({
+        ...t,
+        resolved_at: null,
+        resolved_source: null,
+        resolution_chip_state: null,
+      });
+    }
+    state.value.tickets = [...moved, ...state.value.tickets];
+
+    try {
+      const result = await api.bulkReopen(ids);
+      // Reopen rollback is the inverse direction: a failed id needs to go
+      // back into resolvedTickets and out of state.value.tickets.
+      for (const failure of result.failed) {
+        const original = snapshot.find((s) => s.row.id === failure.id);
+        if (!original) continue;
+        state.value.tickets = state.value.tickets.filter((t) => t.id !== failure.id);
+        resolvedTickets.value.splice(original.idx, 0, original.row);
+      }
+      return result;
+    } catch (e) {
+      // Roll every optimistic move back.
+      state.value.tickets = state.value.tickets.filter((t) => !idSet.has(t.id));
+      for (const { idx, row } of [...snapshot].reverse()) {
+        resolvedTickets.value.splice(idx, 0, row);
+      }
+      throw e;
+    }
+  }
+
+  /** Bulk recategorize — applies pending overrides; reopens resolved rows. */
+  async function bulkRecategorize(ids: string[], categoryId: number): Promise<BulkResult> {
+    const idSet = new Set(ids);
+
+    // Snapshot prior overrides + any resolved→open moves so we can roll back.
+    const overrideSnap: Record<string, number | undefined> = {};
+    const resolvedMoves: Array<{ idx: number; row: Ticket }> = [];
+
+    // Move any selected resolved tickets back to the open list optimistically.
+    for (let i = resolvedTickets.value.length - 1; i >= 0; i--) {
+      const t = resolvedTickets.value[i]!;
+      if (!idSet.has(t.id)) continue;
+      resolvedMoves.push({ idx: i, row: t });
+      resolvedTickets.value.splice(i, 1);
+      state.value.tickets.unshift({
+        ...t,
+        resolved_at: null,
+        resolved_source: null,
+        category_id: categoryId,
+        user_override: true,
+      });
+    }
+
+    const nextOverrides = { ...state.value.pendingOverrides };
+    for (const id of ids) {
+      overrideSnap[id] = nextOverrides[id];
+      nextOverrides[id] = categoryId;
+    }
+    state.value.pendingOverrides = nextOverrides;
+
+    try {
+      const result = await api.bulkRecategorize(ids, categoryId);
+      // Roll back per-id failures.
+      if (result.failed.length > 0) {
+        const failedSet = new Set(result.failed.map((f) => f.id));
+        const reverted = { ...state.value.pendingOverrides };
+        for (const id of failedSet) {
+          const prev = overrideSnap[id];
+          if (prev === undefined) delete reverted[id];
+          else reverted[id] = prev;
+        }
+        state.value.pendingOverrides = reverted;
+        // Restore any resolved-row moves whose ids failed.
+        for (const { idx, row } of resolvedMoves) {
+          if (!failedSet.has(row.id)) continue;
+          state.value.tickets = state.value.tickets.filter((t) => t.id !== row.id);
+          resolvedTickets.value.splice(idx, 0, row);
+        }
+      }
+      return result;
+    } catch (e) {
+      // Whole-batch failure — restore every snapshot.
+      const reverted = { ...state.value.pendingOverrides };
+      for (const id of ids) {
+        const prev = overrideSnap[id];
+        if (prev === undefined) delete reverted[id];
+        else reverted[id] = prev;
+      }
+      state.value.pendingOverrides = reverted;
+      state.value.tickets = state.value.tickets.filter((t) => !idSet.has(t.id));
+      for (const { idx, row } of [...resolvedMoves].reverse()) {
+        resolvedTickets.value.splice(idx, 0, row);
+      }
+      throw e;
+    }
+  }
+
+  /** Bulk dismiss chip — clears `resolution_chip_state` locally for ok ids. */
+  async function bulkDismissChip(ids: string[]): Promise<BulkResult> {
+    const result = await api.bulkDismissChip(ids);
+    const okSet = new Set(result.ok_ids);
+    for (const list of [state.value.tickets, resolvedTickets.value]) {
+      for (const t of list) {
+        if (okSet.has(t.id)) t.resolution_chip_state = null;
+      }
+    }
+    return result;
+  }
+
+  /** Roll back from a snapshot — reinsert each row into state.value.tickets
+   *  at its original index and prune it from resolvedTickets. Used by
+   *  bulkResolve when per-id `failed[]` is non-empty. */
+  function _rollbackFromSnapshot(
+    failures: { id: string; reason: string }[],
+    snapshot: Array<{ idx: number; row: Ticket }>,
+  ): void {
+    const failedSet = new Set(failures.map((f) => f.id));
+    // Reverse so smaller indexes go in last and don't shift later ones.
+    for (const { idx, row } of [...snapshot].reverse()) {
+      if (!failedSet.has(row.id)) continue;
+      resolvedTickets.value = resolvedTickets.value.filter((t) => t.id !== row.id);
+      state.value.tickets.splice(idx, 0, row);
+    }
+  }
+
+  function _rollbackAll(snapshot: Array<{ idx: number; row: Ticket }>): void {
+    const allIds = new Set(snapshot.map((s) => s.row.id));
+    resolvedTickets.value = resolvedTickets.value.filter((t) => !allIds.has(t.id));
+    for (const { idx, row } of [...snapshot].reverse()) {
+      state.value.tickets.splice(idx, 0, row);
+    }
+  }
+
   return {
     tickets,
     loading,
@@ -298,5 +480,10 @@ export const useTicketsStore = defineStore('tickets', () => {
     reopen,
     setAiResolve,
     dismissChip,
+    // Bulk (Phase 12)
+    bulkResolve,
+    bulkReopen,
+    bulkRecategorize,
+    bulkDismissChip,
   };
 });

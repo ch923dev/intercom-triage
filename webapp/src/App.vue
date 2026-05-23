@@ -7,6 +7,7 @@
 import { onBeforeUnmount, onMounted, watch } from 'vue';
 import AlarmBanners from '@/components/AlarmBanners.vue';
 import Board from '@/components/Board.vue';
+import BulkActionBar from '@/components/BulkActionBar.vue';
 import CategoriesPage from '@/components/CategoriesPage.vue';
 import ExtensionCallout from '@/components/ExtensionCallout.vue';
 import FollowupBoard from '@/components/FollowupBoard.vue';
@@ -17,6 +18,7 @@ import Topbar from '@/components/Topbar.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
 import { useNotesStore } from '@/stores/notes';
+import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
@@ -30,6 +32,7 @@ const followups = useFollowupsStore();
 const notes = useNotesStore();
 const view = useViewStore();
 const tweaks = useTweaksStore();
+const selection = useSelectionStore();
 
 const COLUMN_STEP = 296; // column width (280) + gutter
 
@@ -142,6 +145,12 @@ function onKeydown(e: KeyboardEvent) {
       document.querySelector<HTMLInputElement>('.search-input')?.blur();
       return;
     }
+    // Bulk-selection wins over flyout-close — operators clearing a multi-
+    // select shouldn't accidentally dismiss an open flyout (plan §8d).
+    if (!selection.isEmpty) {
+      selection.clear();
+      return;
+    }
     if (view.selectedTicketId !== null) {
       view.closeFlyout();
       return;
@@ -170,6 +179,22 @@ function onKeydown(e: KeyboardEvent) {
       left: e.key === 'ArrowRight' ? COLUMN_STEP : -COLUMN_STEP,
       behavior: 'smooth',
     });
+  }
+}
+
+/** Empty-background click clears the bulk selection (plan §8d / FR-032).
+ *  Triggered only when the pointer lands on the board chrome itself, not on
+ *  a card or a column header — those have their own click handlers and won't
+ *  bubble through with the `.board` element as `event.target`. */
+function onBoardBackgroundClick(e: MouseEvent) {
+  if (selection.isEmpty) return;
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+  // The only acceptable targets are the .board container itself or the
+  // .board-tail spacer — anything inside a column/card means the click was
+  // intentional and the existing handlers already ran.
+  if (target.classList.contains('board') || target.classList.contains('board-tail')) {
+    selection.clear();
   }
 }
 
@@ -207,7 +232,7 @@ watch(
     <template v-else>
       <template v-if="view.view === 'board'">
         <ExtensionCallout v-if="tickets.isEmpty" mode="empty" />
-        <Board v-else />
+        <Board v-else @board-click="onBoardBackgroundClick" />
       </template>
       <FollowupBoard v-else-if="view.view === 'followups'" />
       <CategoriesPage v-else-if="view.view === 'categories'" />
@@ -225,6 +250,7 @@ watch(
     <SettingsDrawer />
     <TicketFlyout />
     <AlarmBanners />
+    <BulkActionBar />
   </div>
 </template>
 

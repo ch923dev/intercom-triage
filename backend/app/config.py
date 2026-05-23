@@ -13,6 +13,13 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Cap on the number of ticket ids in a single bulk request (FR-036, plan §8d).
+# Module constant so `app.schemas` and the bulk endpoints share one source of
+# truth. Bumping this requires a code change rather than an env override — the
+# value bounds memory + transaction size per request and shouldn't drift per
+# environment.
+MAX_BULK_IDS: int = 200
+
 
 class AppConfig(BaseSettings):
     """All configuration is loaded from `.env` at the backend working directory.

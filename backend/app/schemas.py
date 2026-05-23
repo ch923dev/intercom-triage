@@ -10,6 +10,8 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer
 
+from app.config import MAX_BULK_IDS
+
 
 def _naive_utc(value: datetime) -> datetime:
     """Coerce a datetime to naive UTC — the schema used by every DB column.
@@ -324,3 +326,44 @@ class MetricsResponse(BaseModel):
     e.g. `ai_calls_total.ok`, `proposals_resolved_total.rejected`."""
 
     counters: dict[str, int]
+
+
+# ── Bulk actions ──────────────────────────────────────────────────────────────
+#
+# Plan §8d. Each bulk endpoint accepts an envelope of ticket ids and returns a
+# per-id result. Cap (`MAX_BULK_IDS`) lives in `config.py`.
+
+
+class BulkTicketIds(BaseModel):
+    """Universal bulk request body — ids of tickets to operate on."""
+
+    ticket_ids: list[str] = Field(min_length=1, max_length=MAX_BULK_IDS)
+
+
+class BulkCategoryUpdate(BulkTicketIds):
+    """`PATCH /tickets/bulk/category` body — assigns one category to N tickets."""
+
+    category_id: int
+
+
+class BulkFollowupSet(BulkTicketIds):
+    """`PUT /followups/bulk` body — applies one `due_at` + reason to N tickets."""
+
+    due_at: datetime
+    reason: str | None = Field(default=None, max_length=80)
+
+
+class BulkFailure(BaseModel):
+    """One per-id failure in a bulk response. `reason` is human-readable."""
+
+    id: str
+    reason: str
+
+
+class BulkResult(BaseModel):
+    """Universal bulk response. A bulk request returns 200 with mixed
+    `ok_ids` / `failed[]` even when every per-id call failed — the response
+    code reflects request validity, not per-id outcomes."""
+
+    ok_ids: list[str] = Field(default_factory=list)
+    failed: list[BulkFailure] = Field(default_factory=list)

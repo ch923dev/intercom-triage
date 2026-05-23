@@ -115,6 +115,18 @@ export interface Ticket {
   resolution_chip_state: ResolutionChipState | null;
 }
 
+// ── Bulk actions (plan §8d) ──────────────────────────────────────────────────
+
+export interface BulkFailure {
+  id: string;
+  reason: string;
+}
+
+export interface BulkResult {
+  ok_ids: string[];
+  failed: BulkFailure[];
+}
+
 // ── Filter + settings ────────────────────────────────────────────────────────
 
 export type LookbackUnit = 'hours' | 'days';

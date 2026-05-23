@@ -23,33 +23,54 @@ class ResolveOutcome:
     resolved_source: ResolvedSource
 
 
-async def _get_or_404(session: AsyncSession, ticket_id: str) -> Ticket:
+async def get_or_404(session: AsyncSession, ticket_id: str) -> Ticket:
     row = await session.get(Ticket, ticket_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"ticket {ticket_id!r} not found")
     return row
 
 
-async def resolve(session: AsyncSession, ticket_id: str) -> ResolveOutcome:
-    """Mark a ticket as manually resolved. 409 if already resolved."""
-    row = await _get_or_404(session, ticket_id)
+# Backwards-compat alias for callers that imported the underscore name.
+_get_or_404 = get_or_404
+
+
+def apply_resolve(row: Ticket) -> ResolveOutcome:
+    """Mutate a Ticket row to mark it manually resolved. Does NOT commit.
+
+    Shared by the single-id endpoint and the bulk endpoint — the bulk caller
+    issues one commit at the end of the loop instead of N. 409 if the row is
+    already resolved.
+    """
     if row.resolved_at is not None:
         raise HTTPException(status_code=409, detail="ticket is already resolved")
     now = naive_utcnow()
     row.resolved_at = now
     row.resolved_source = "manual"
-    await session.commit()
-    metrics.incr("tickets_resolved_total.manual")
     return ResolveOutcome(resolved_at=now, resolved_source="manual")
 
 
-async def reopen(session: AsyncSession, ticket_id: str) -> None:
-    """Clear resolution. 409 if not currently resolved."""
-    row = await _get_or_404(session, ticket_id)
+def apply_reopen(row: Ticket) -> None:
+    """Mutate a Ticket row to clear its resolution. Does NOT commit. 409 if
+    the row is not currently resolved."""
     if row.resolved_at is None:
         raise HTTPException(status_code=409, detail="ticket is not resolved")
     row.resolved_at = None
     row.resolved_source = None
+
+
+async def resolve(session: AsyncSession, ticket_id: str) -> ResolveOutcome:
+    """Mark a ticket as manually resolved. 409 if already resolved."""
+    row = await get_or_404(session, ticket_id)
+    outcome = apply_resolve(row)
+    await session.commit()
+    metrics.incr("tickets_resolved_total.manual")
+    return outcome
+
+
+async def reopen(session: AsyncSession, ticket_id: str) -> None:
+    """Clear resolution. 409 if not currently resolved."""
+    row = await get_or_404(session, ticket_id)
+    apply_reopen(row)
     await session.commit()
     metrics.incr("tickets_reopened_total")
 
@@ -60,13 +81,19 @@ async def set_ai_resolve(
     enabled: bool | None,
 ) -> None:
     """Tri-state per-ticket override. `None` clears the override."""
-    row = await _get_or_404(session, ticket_id)
+    row = await get_or_404(session, ticket_id)
     row.ai_resolve_enabled = enabled
     await session.commit()
 
 
+def apply_dismiss_chip(row: Ticket) -> None:
+    """Mutate a Ticket row to suppress its resolution chip until
+    `tickets.updated_at` advances. Does NOT commit."""
+    row.resolution_chip_dismissed_at = row.updated_at
+
+
 async def dismiss_chip(session: AsyncSession, ticket_id: str) -> None:
     """Suppress the resolution chip until `tickets.updated_at` advances."""
-    row = await _get_or_404(session, ticket_id)
-    row.resolution_chip_dismissed_at = row.updated_at
+    row = await get_or_404(session, ticket_id)
+    apply_dismiss_chip(row)
     await session.commit()
