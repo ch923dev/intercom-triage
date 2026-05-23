@@ -11,6 +11,9 @@ import { useNoteEntriesStore } from '@/stores/noteEntries';
 import { useNotesStore } from '@/stores/notes';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
+import { useAttachmentsStore } from '@/stores/attachments';
+import AttachmentList from './AttachmentList.vue';
+import AttachmentDropzone from './AttachmentDropzone.vue';
 import { formatAgoFromDate } from '@/utils/time';
 
 const view = useViewStore();
@@ -19,6 +22,7 @@ const categories = useCategoriesStore();
 const followups = useFollowupsStore();
 const notes = useNotesStore();
 const noteEntries = useNoteEntriesStore();
+const attachments = useAttachmentsStore();
 
 const ticket = computed(
   () =>
@@ -157,6 +161,31 @@ const entrySaving = ref(false);
 const entryError = ref<string | null>(null);
 const legacyOpen = ref(false);
 
+const pendingFiles = ref<File[]>([]);
+
+function removePending(idx: number) {
+  pendingFiles.value = pendingFiles.value.filter((_, i) => i !== idx);
+}
+
+function onTextareaPaste(e: ClipboardEvent) {
+  const files = e.clipboardData?.files;
+  if (!files || files.length === 0) return;
+  pendingFiles.value = [...pendingFiles.value, ...Array.from(files)];
+}
+
+function onTextareaDrop(e: DragEvent) {
+  e.preventDefault();
+  const files = e.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+  pendingFiles.value = [...pendingFiles.value, ...Array.from(files)];
+}
+
+function pendingSizeLabel(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 const entries = computed(() =>
   ticket.value ? noteEntries.entriesOf(ticket.value.id) : [],
 );
@@ -169,16 +198,25 @@ async function addEntry() {
   entrySaving.value = true;
   entryError.value = null;
   const armedTimer = entryTimer.value !== null;
+  const filesToUpload = pendingFiles.value;
   try {
-    await noteEntries.addEntry(
+    const saved = await noteEntries.addEntry(
       id,
       body,
       entryTimer.value,
       entryReason.value.trim() || null,
     );
+    if (filesToUpload.length > 0) {
+      await Promise.all(
+        filesToUpload.map((f) =>
+          attachments.upload(f, 'entry', String(saved.id), id),
+        ),
+      );
+    }
     entryDraft.value = '';
     entryReason.value = '';
     entryTimer.value = null;
+    pendingFiles.value = [];
     if (armedTimer) {
       await followups.load();
     }
@@ -186,6 +224,26 @@ async function addEntry() {
     entryError.value = (e as Error).message;
   } finally {
     entrySaving.value = false;
+  }
+}
+
+async function onTicketFiles(files: File[]) {
+  const id = ticket.value?.id;
+  if (!id) return;
+  try {
+    await Promise.all(
+      files.map((f) => attachments.upload(f, 'ticket', id, id)),
+    );
+  } catch (e) {
+    entryError.value = (e as Error).message;
+  }
+}
+
+async function onRemoveAttachment(id: number) {
+  try {
+    await attachments.remove(id);
+  } catch (e) {
+    entryError.value = (e as Error).message;
   }
 }
 
@@ -241,6 +299,10 @@ watch(
     entryTimer.value = null;
     entryError.value = null;
     legacyOpen.value = false;
+    pendingFiles.value = [];
+    if (id) {
+      void attachments.load(id);
+    }
   },
   { immediate: true },
 );
@@ -664,6 +726,16 @@ function formatResolved(iso: string): string {
               </div>
             </details>
 
+            <!-- Ticket files (per-ticket attachment bin) -->
+            <div v-if="ticket" class="ticket-bin">
+              <div class="mono dim ticket-bin-label">Ticket files</div>
+              <AttachmentDropzone @files="onTicketFiles" />
+              <AttachmentList
+                :items="attachments.byTicket(ticket.id)"
+                @remove="onRemoveAttachment"
+              />
+            </div>
+
             <!-- Timeline -->
             <ul v-if="entries.length" class="entry-timeline">
               <li v-for="e in entries" :key="e.id" class="entry-row">
@@ -679,6 +751,10 @@ function formatResolved(iso: string): string {
                 <div v-if="e.timer_min !== null" class="entry-timer mono dim">
                   ⏱ {{ e.timer_min }}m<span v-if="e.reason"> · "{{ e.reason }}"</span>
                 </div>
+                <AttachmentList
+                  :items="attachments.byEntry(e.id)"
+                  @remove="onRemoveAttachment"
+                />
               </li>
             </ul>
             <p v-else class="dim entry-empty">No entries yet — add the first one below.</p>
@@ -689,8 +765,22 @@ function formatResolved(iso: string): string {
                 v-model="entryDraft"
                 class="notes"
                 rows="3"
-                placeholder="What's the next step?"
+                placeholder="What's the next step? (paste or drop files to attach to this entry)"
+                @paste="onTextareaPaste"
+                @drop="onTextareaDrop"
+                @dragover.prevent
               />
+              <div v-if="pendingFiles.length" class="pending-files">
+                <span
+                  v-for="(f, i) in pendingFiles"
+                  :key="i"
+                  class="att-pill pending-pill"
+                  :title="f.name"
+                >
+                  <span>📎 {{ f.name }} · {{ pendingSizeLabel(f.size) }}</span>
+                  <button class="att-x att-x-inline" title="Remove" @click="removePending(i)">×</button>
+                </span>
+              </div>
               <div class="presets timer-row">
                 <span class="mono dim timer-label">Timer:</span>
                 <button
@@ -1124,6 +1214,49 @@ header {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.ticket-bin {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.ticket-bin-label {
+  margin-top: 4px;
+}
+.pending-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pending-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--panel);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.att-x {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: var(--hairline) solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.att-x:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.att-x-inline {
+  margin-left: 4px;
 }
 .timer-row {
   align-items: center;
