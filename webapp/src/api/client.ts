@@ -20,7 +20,7 @@ import type {
 
 const BASE = '/api';
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(
     public status: number,
     public body: unknown,
@@ -187,11 +187,11 @@ export const api = {
     fd.append('ticket_id', ticketId);
     // Cannot use `request()` directly — multipart needs no `content-type` header
     // (browser sets the boundary). Replicate the error envelope manually.
-    return fetch(`${'/api'}/attachments`, { method: 'POST', body: fd }).then(
+    return fetch(`${BASE}/attachments`, { method: 'POST', body: fd }).then(
       async (resp) => {
         if (!resp.ok) {
           const body = await resp.json().catch(() => ({}));
-          throw new Error(`POST /attachments → ${resp.status}: ${JSON.stringify(body)}`);
+          throw new ApiError(resp.status, body, `POST /attachments → ${resp.status}`);
         }
         return resp.json();
       },
