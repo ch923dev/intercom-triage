@@ -10,6 +10,7 @@ import type {
   Category,
   FilterSettings,
   Followup,
+  NoteAttachment,
   NoteEntry,
   ProposalsResponse,
   ResolvedSource,
@@ -168,6 +169,37 @@ export const api = {
 
   deleteNoteEntry: (entryId: number): Promise<{ ok: true; deleted: true; id: number }> =>
     request(`/notes/entries/${entryId}`, { method: 'DELETE' }),
+
+  // ── attachments (note attachments) ────────────────────────────────────────
+  listAttachments: (ticketId: string): Promise<NoteAttachment[]> =>
+    request(`/attachments?ticket_id=${encodeURIComponent(ticketId)}`),
+
+  uploadAttachment: (
+    file: File,
+    ownerKind: 'entry' | 'ticket',
+    ownerId: string,
+    ticketId: string,
+  ): Promise<NoteAttachment> => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('owner_kind', ownerKind);
+    fd.append('owner_id', ownerId);
+    fd.append('ticket_id', ticketId);
+    // Cannot use `request()` directly — multipart needs no `content-type` header
+    // (browser sets the boundary). Replicate the error envelope manually.
+    return fetch(`${'/api'}/attachments`, { method: 'POST', body: fd }).then(
+      async (resp) => {
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          throw new Error(`POST /attachments → ${resp.status}: ${JSON.stringify(body)}`);
+        }
+        return resp.json();
+      },
+    );
+  },
+
+  deleteAttachment: (id: number): Promise<{ ok: true; deleted: true; id: number }> =>
+    request(`/attachments/${id}`, { method: 'DELETE' }),
 
   // ── bulk actions (Phase 12 — plan §8d) ────────────────────────────────────
   /** Mark N tickets manually resolved. Per-id ok/failed in the response. */

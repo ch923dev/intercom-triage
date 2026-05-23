@@ -86,6 +86,19 @@ export interface NoteEntry {
   created_at: string;
 }
 
+export interface NoteAttachment {
+  id: number;
+  owner_kind: 'entry' | 'ticket';
+  owner_id: string;
+  ticket_id: string;
+  filename: string;
+  mime: string;
+  size_bytes: number;
+  created_at: string;
+  raw_url: string;
+  thumb_url: string | null;
+}
+
 export interface Ticket {
   id: string;
   title: string | null;
