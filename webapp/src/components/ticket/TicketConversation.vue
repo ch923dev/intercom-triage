@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Ticket } from '@/types/api';
 import { computed } from 'vue';
+import { formatShortDateTime } from '@/utils/time';
 
 
 // ── Conversation timeline ────────────────────────────────────────────────────
@@ -48,17 +49,6 @@ const timeline = computed<TimelineItem[]>(() => {
   return items.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
 });
 
-/** Render a single timestamp the way it's read on a card. */
-function partTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 /** Up-to-two-letter initials for an avatar; `?` when the name is missing. */
 function initials(name: string | null): string {
   if (!name) return '?';
@@ -89,7 +79,7 @@ function initials(name: string | null): string {
           <div class="note-head">
             <span class="note-tag">Internal note</span>
             <span class="note-author">{{ m.author.name ?? 'Teammate' }}</span>
-            <span class="note-time">{{ partTime(m.created_at) }}</span>
+            <span class="note-time">{{ formatShortDateTime(m.created_at) }}</span>
           </div>
           <p class="note-body">{{ m.body }}</p>
         </div>
@@ -102,7 +92,7 @@ function initials(name: string | null): string {
               <span class="bubble-author">
                 {{ m.author.name ?? (m.kind === 'admin' ? 'Teammate' : 'Customer') }}
               </span>
-              <span class="bubble-time">{{ partTime(m.created_at) }}</span>
+              <span class="bubble-time">{{ formatShortDateTime(m.created_at) }}</span>
             </div>
             <div class="bubble" :class="m.kind">{{ m.body }}</div>
           </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useFollowupsStore } from '@/stores/followups';
+import { formatShortDateTime } from '@/utils/time';
 
 const { ticketId } = defineProps<{ ticketId: string }>();
 const followups = useFollowupsStore();
@@ -20,16 +21,9 @@ const error = ref<string | null>(null);
 const followup = computed(() => followups.get(ticketId) ?? null);
 const due = computed(() => followups.isDue(ticketId));
 
-const dueLabel = computed(() => {
-  const f = followup.value;
-  if (!f) return null;
-  return new Date(f.due_at).toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-});
+const dueLabel = computed(() =>
+  followup.value ? formatShortDateTime(followup.value.due_at) : null,
+);
 
 watch(
   () => ticketId,

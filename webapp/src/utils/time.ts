@@ -16,6 +16,16 @@ export function formatAgoFromDate(d: string | Date): string {
   return formatAgo(Date.now() - t.getTime());
 }
 
+/** Short "MMM d, HH:MM" timestamp shared by flyout sections + chat bubbles. */
+export function formatShortDateTime(iso: string): string {
+  return new Date(iso).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export function formatCountdown(msUntil: number): string {
   if (msUntil <= 0) {
     const over = Math.floor(-msUntil / 1000);

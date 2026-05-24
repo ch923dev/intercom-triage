@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Ticket } from '@/types/api';
 import { useTicketsStore } from '@/stores/tickets';
+import { formatShortDateTime } from '@/utils/time';
 
 const { ticket } = defineProps<{ ticket: Ticket }>();
 const tickets = useTicketsStore();
@@ -16,15 +17,6 @@ async function onResolveToggle() {
 async function setAi(v: boolean | null) {
   await tickets.setAiResolve(ticket.id, v);
 }
-
-function formatResolved(iso: string): string {
-  return new Date(iso).toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 </script>
 
 <template>
@@ -32,7 +24,7 @@ function formatResolved(iso: string): string {
     <div class="mono label">Resolution</div>
     <div class="status-row">
       <span v-if="ticket.resolved_at" class="status-pill mono">
-        Resolved · {{ ticket.resolved_source }} · {{ formatResolved(ticket.resolved_at) }}
+        Resolved · {{ ticket.resolved_source }} · {{ formatShortDateTime(ticket.resolved_at) }}
       </span>
       <span v-else class="status-pill mono">Open</span>
     </div>

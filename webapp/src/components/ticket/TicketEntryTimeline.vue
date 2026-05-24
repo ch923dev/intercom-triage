@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import AttachmentList from '../AttachmentList.vue';
 import { useAttachmentsStore } from '@/stores/attachments';
 import { useNoteEntriesStore } from '@/stores/noteEntries';
+import { formatShortDateTime } from '@/utils/time';
 
 const { ticketId } = defineProps<{ ticketId: string }>();
 const noteEntries = useNoteEntriesStore();
@@ -27,14 +28,6 @@ async function onRemoveAttachment(id: number) {
   }
 }
 
-function entryTimeLabel(iso: string): string {
-  return new Date(iso).toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 </script>
 
 <template>
@@ -42,7 +35,7 @@ function entryTimeLabel(iso: string): string {
     <ul v-if="entries.length" class="entry-timeline">
       <li v-for="e in entries" :key="e.id" class="entry-row">
         <div class="entry-head">
-          <span class="mono dim">{{ entryTimeLabel(e.created_at) }}</span>
+          <span class="mono dim">{{ formatShortDateTime(e.created_at) }}</span>
           <button class="entry-x" title="Delete entry" @click="removeEntry(e.id)">×</button>
         </div>
         <p class="entry-body">{{ e.body }}</p>
