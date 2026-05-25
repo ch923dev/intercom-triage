@@ -36,7 +36,7 @@ class ParsedAssignment:
     proposal_id: int | None = None
     proposed_name: str | None = None
     proposed_description: str | None = None
-    resolution_verdict: Literal["resolved", "not_resolved"] | None = None
+    resolution_verdict: Literal["resolved", "non_actionable", "not_resolved"] | None = None
     resolution_confidence: float | None = None
     resolution_reason: str | None = None
 
@@ -54,7 +54,7 @@ class CategorizationResult:
     # caching it would pin the ticket to the fallback category until a new
     # customer message arrives. A cached result read back is always a genuine
     # categorization, so this stays False on the cache-read path.
-    ai_resolution_verdict: Literal["resolved", "not_resolved"] | None = None
+    ai_resolution_verdict: Literal["resolved", "non_actionable", "not_resolved"] | None = None
     ai_resolution_confidence: float | None = None
     ai_resolution_reason: str | None = None
 
@@ -103,14 +103,14 @@ def _extract_json_object(raw: str) -> dict[str, Any]:
 def _parse_resolution(
     obj: dict[str, Any],
 ) -> tuple[
-    Literal["resolved", "not_resolved"] | None,
+    Literal["resolved", "non_actionable", "not_resolved"] | None,
     float | None,
     str | None,
 ]:
     verdict = obj.get("resolution_verdict")
-    if verdict not in ("resolved", "not_resolved"):
+    if verdict not in ("resolved", "non_actionable", "not_resolved"):
         return None, None, None
-    typed_verdict: Literal["resolved", "not_resolved"] = verdict
+    typed_verdict: Literal["resolved", "non_actionable", "not_resolved"] = verdict
     confidence_raw = obj.get("resolution_confidence")
     confidence_f: float | None
     try:

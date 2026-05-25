@@ -71,3 +71,25 @@ def test_system_prompt_documents_non_actionable_examples():
     body = SYSTEM_PROMPT.lower()
     for kind in ("auto-reply", "spam", "thanks"):
         assert kind in body
+
+
+def test_parser_accepts_non_actionable_verdict():
+    raw = (
+        '{"assignment":"existing","category_id":1,"subject":"x","summary":"y",'
+        '"confidence":0.5,"resolution_verdict":"non_actionable",'
+        '"resolution_confidence":0.9,'
+        '"resolution_reason":"auto-reply: vacation responder"}'
+    )
+    parsed = parse_response(raw)
+    assert parsed.resolution_verdict == "non_actionable"
+    assert parsed.resolution_confidence == 0.9
+    assert parsed.resolution_reason == "auto-reply: vacation responder"
+
+
+def test_parser_rejects_out_of_set_verdict():
+    raw = (
+        '{"assignment":"existing","category_id":1,"subject":"x","summary":"y",'
+        '"confidence":0.5,"resolution_verdict":"maybe_actionable","resolution_confidence":0.7}'
+    )
+    parsed = parse_response(raw)
+    assert parsed.resolution_verdict is None
