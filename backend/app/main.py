@@ -3,7 +3,7 @@
 Reference: plan.md §2 (architecture), §4 (API), tasks.md T005, T008, T012, T028.
 
 Run:
-    uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+    uvicorn app.main:app --reload --host 127.0.0.1 --port 4000
 """
 
 from __future__ import annotations

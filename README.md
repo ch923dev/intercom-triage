@@ -38,7 +38,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1          # PowerShell  (bash: source .venv/bin/activate)
 pip install -r requirements.txt
 copy .env.example .env                # then fill in OPENROUTER_API_KEY
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 4000
 ```
 
 First boot creates `backend/data/triage.db` and seeds seven categories
@@ -47,7 +47,7 @@ default filter settings. Missing secrets do **not** block startup — the backen
 runs in a degraded mode and `/health` reports what is missing.
 
 ```powershell
-curl http://localhost:8000/health
+curl http://localhost:4000/health
 ```
 
 ### 2. Webapp
@@ -58,7 +58,7 @@ npm install
 npm run dev                           # serves http://localhost:5173
 ```
 
-The dev server proxies `/api/*` to the backend on `:8000`. Open
+The dev server proxies `/api/*` to the backend on `:4000`. Open
 <http://localhost:5173> — the board fetches tickets, and the top bar gives you
 the category-management and proposal-review pages plus the filter drawer.
 
@@ -71,7 +71,7 @@ the category-management and proposal-review pages plus the filter drawer.
 The extension is the only Intercom integration — it scrapes conversations from
 your logged-in `app.intercom.com` session and pushes them to the backend via
 `POST /tickets/ingest`. The toolbar popup is a mini-board with the same taxonomy;
-it talks directly to the backend on `:8000`. Background polling is **off by
+it talks directly to the backend on `:4000`. Background polling is **off by
 default** — pick an interval in the popup footer to have it badge the Urgent
 count. The popup also mirrors the webapp's follow-up alarms: a due banner,
 per-row countdown chips, and an audio cue (shared mute via `GET /settings`).
@@ -106,7 +106,7 @@ per-row countdown chips, and an audio cue (shared mute via `GET /settings`).
 | `GET /attachments/{id}/raw` · `GET /attachments/{id}/thumb` | Stream bytes inline / 256px WebP thumbnail for images |
 | `DELETE /attachments/{id}` | Soft-delete; nightly sweep removes orphaned bytes after `ATTACHMENT_GC_DAYS` (default 7) |
 
-Interactive docs at <http://localhost:8000/docs> while the backend runs.
+Interactive docs at <http://localhost:4000/docs> while the backend runs.
 
 ## Bulk actions
 
@@ -145,8 +145,16 @@ npm run typecheck
 npm run build
 ```
 
-Dev scripts (PowerShell + bash) live in `scripts/` — see
-[`tasks.md`](./tasks.md) T002.
+### One-command dev launcher
+
+```powershell
+.\scripts\dev.ps1
+```
+
+Installs pip + npm deps (idempotent if cached), then opens a Windows Terminal
+window with backend (`:4000`) and webapp (`:5173`) in a split-pane. Requires
+`wt.exe` (Windows Terminal — default on Win 11). Extension is loaded
+manually once via `chrome://extensions`.
 
 ## Configuration
 

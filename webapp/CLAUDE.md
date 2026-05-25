@@ -103,7 +103,7 @@ npx vitest run src/stores/selection.spec.ts     # single test file
 npx vitest run -t "addRange"                    # single test by name
 ```
 
-Dev server requires backend on `127.0.0.1:8000` — Vite proxies `/api/*` with the `/api` prefix stripped. Start backend via `../scripts/dev-backend.ps1`.
+Dev server requires backend on `127.0.0.1:4000` — Vite proxies `/api/*` with the `/api` prefix stripped. Start backend + webapp together via `../scripts/dev.ps1` (Windows Terminal split-pane launcher).
 
 ## Architecture
 

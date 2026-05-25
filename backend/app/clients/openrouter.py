@@ -65,7 +65,7 @@ class OpenRouterClient:
         self,
         api_key: str,
         *,
-        referer: str = "http://localhost:8000",
+        referer: str = "http://localhost:4000",
         title: str = "Intercom Triage",
         http: httpx.AsyncClient | None = None,
     ) -> None:

@@ -83,7 +83,7 @@ Repo-specific verification commands (from `backend/`, venv active):
 | Change                            | Verify with                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------|
 | Service / pure logic              | Add or update `tests/test_*.py`; `pytest -q` green                          |
-| Router / new endpoint             | `pytest -q tests/test_*_api.py`; hit `http://localhost:8000/docs`           |
+| Router / new endpoint             | `pytest -q tests/test_*_api.py`; hit `http://localhost:4000/docs`           |
 | Schema column / index             | New `alembic revision --autogenerate -m "..."`; `alembic upgrade head` clean; `pytest -q` green |
 | AI prompt / pipeline change       | `pytest -q tests/test_ai.py tests/test_resolution_*.py`                     |
 | Any merge-ready change            | `ruff check app tests && ruff format --check app tests && mypy app && pytest -q` |
@@ -103,7 +103,7 @@ python -m venv .venv
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 4000
 
 ruff check app tests
 ruff format --check app tests

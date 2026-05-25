@@ -1,6 +1,6 @@
 # Backend — Intercom Triage
 
-FastAPI service on `localhost:8000`. Owns Intercom integration, AI categorization,
+FastAPI service on `localhost:4000`. Owns Intercom integration, AI categorization,
 SQLite store, and the public API surface.
 
 See [`../spec.md`](../spec.md), [`../plan.md`](../plan.md), and
@@ -42,14 +42,14 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env       # then fill in tokens
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 4000
 ```
 
 ## API
 
 Full API contract in [`../plan.md`](../plan.md#4-api-contract); table summary in
 [`../README.md`](../README.md#api-surface). Interactive docs at
-<http://localhost:8000/docs> while the server is running.
+<http://localhost:4000/docs> while the server is running.
 
 ## Lint + type check
 

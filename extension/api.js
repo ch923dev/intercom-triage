@@ -1,9 +1,9 @@
 // Shared backend client for the popup and the background service worker.
 // Reference: plan.md §2 — the extension calls the same localhost backend as
-// the webapp. The backend binds 127.0.0.1:8000 and allows the
+// the webapp. The backend binds 127.0.0.1:4000 and allows the
 // chrome-extension:// origin via CORS.
 
-export const API_BASE = 'http://127.0.0.1:8000';
+export const API_BASE = 'http://127.0.0.1:4000';
 export const FULL_BOARD_URL = 'http://localhost:5173/';
 
 class ApiError extends Error {
@@ -22,7 +22,7 @@ async function request(path, init = {}) {
       ...init,
     });
   } catch {
-    throw new ApiError(0, 'Backend unreachable — is it running on :8000?');
+    throw new ApiError(0, 'Backend unreachable — is it running on :4000?');
   }
   if (!resp.ok) {
     throw new ApiError(resp.status, `${init.method ?? 'GET'} ${path} → ${resp.status}`);

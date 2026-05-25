@@ -1,6 +1,6 @@
 // Typed API client. Reference: tasks.md T030.
 //
-// Dev: requests hit `/api/*` and Vite proxies to `http://127.0.0.1:8000`.
+// Dev: requests hit `/api/*` and Vite proxies to `http://127.0.0.1:4000`.
 // Prod: same-origin works because the operator opens the static build from
 // the backend or behind a localhost reverse proxy.
 

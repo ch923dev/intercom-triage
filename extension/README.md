@@ -2,7 +2,7 @@
 
 Manifest V3 popup mini-board + background sync. Scrapes Intercom conversations
 via the operator's logged-in browser session (no Access Token) and ships
-them to the backend at `http://localhost:8000` via `POST /tickets/ingest`.
+them to the backend at `http://localhost:4000` via `POST /tickets/ingest`.
 
 ## Layout
 

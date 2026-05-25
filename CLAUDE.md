@@ -37,7 +37,7 @@ Minimum code that solves the problem. Nothing speculative.
 
 Across this repo:
 - Three packages, three stacks, intentionally. **Don't merge them**. The extension is plain ES modules (no bundler) because it must load in MV3; the webapp is Vue 3 + Vite because it's a SPA; the backend is FastAPI because it's an HTTP service. Don't introduce a monorepo tool, shared package, or codegen step.
-- `localhost:8000` (backend) + `localhost:5173` (webapp dev) + `chrome-extension://…` (popup). No reverse proxy, no Docker, no nginx. The Vite dev server proxies `/api/*` to `127.0.0.1:8000`. Don't change the topology.
+- `localhost:4000` (backend) + `localhost:5173` (webapp dev) + `chrome-extension://…` (popup). No reverse proxy, no Docker, no nginx. The Vite dev server proxies `/api/*` to `127.0.0.1:4000`. Don't change the topology.
 - Default to no comments. Module-level `Reference: plan.md §X, tasks.md TXXX` markers point at external specs — they're the canonical convention. Don't echo what the code already says.
 - One backend, one DB (SQLite by default, Postgres via `DATABASE_URL` swap). Don't add a second store, a cache server (the AI cache lives in the same SQLite DB), or a message broker.
 
@@ -130,21 +130,22 @@ The `HydratedTicket` shape is defined in `backend/app/schemas.py` and consumed v
 
 ## Run the stack locally
 
-Each in its own terminal:
+One command boots backend + webapp in a Windows Terminal split-pane:
 
 ```powershell
-# Terminal 1 — backend (FastAPI on 127.0.0.1:8000)
-.\scripts\dev-backend.ps1
-
-# Terminal 2 — webapp (Vite on 127.0.0.1:5173, proxies /api → :8000)
-cd webapp
-npm install
-npm run dev
-
-# Terminal 3 — extension
-#   chrome://extensions → Developer mode → Load unpacked → select extension/
-#   Reload the unpacked extension after every code change.
+# Backend on 127.0.0.1:4000, webapp on 127.0.0.1:5173 (proxies /api → :4000).
+# Runs pip install + npm install first (idempotent if cached), then launches
+# wt.exe split-pane. Requires Windows Terminal (default on Win 11).
+.\scripts\dev.ps1
 ```
+
+Extension is loaded manually once:
+
+```
+chrome://extensions → Developer mode → Load unpacked → select extension/
+```
+
+Reload the unpacked extension after every code change.
 
 First boot: backend creates `backend/data/triage.db`, seeds 7 default categories, inserts the singleton settings row. Missing `OPENROUTER_API_KEY` does not block startup — `/health` reports it; ingest writes every ticket to the fallback category until the key is provided.
 

@@ -35,7 +35,7 @@ In this repo:
 - **No frameworks.** Popup DOM is built with `node(tag, className, text)` + `element.append(...)`. Don't introduce Vue / React / Preact / lit. The webapp is the place for a framework; this popup is intentionally minimal.
 - One `api.js` (backend client). One `intercom.js` (Intercom session scraper). One `background.js` (service worker). One `popup.js` (mini-board controller). Don't carve a fifth module unless a new surface justifies it.
 - The popup polls in-memory state at 1Hz via `alarmTick`. Don't replace it with reactive state, observables, or a store layer. A `state` object + targeted `render*` functions is the pattern.
-- Permissions in `manifest.json` are deliberately narrow: `storage`, `alarms`, and host permissions for `127.0.0.1:8000` / `localhost:8000` / `app.intercom.com`. Don't add `tabs`, `cookies`, `webRequest`, or broader hosts unless a feature *requires* them.
+- Permissions in `manifest.json` are deliberately narrow: `storage`, `alarms`, and host permissions for `127.0.0.1:4000` / `localhost:4000` / `app.intercom.com`. Don't add `tabs`, `cookies`, `webRequest`, or broader hosts unless a feature *requires* them.
 
 ## 3. Surgical Changes
 
@@ -106,7 +106,7 @@ Operator must enter the workspace `app_id` (e.g. `j3dxf22l`) in the popup setup 
 ## Architecture
 
 Manifest V3 extension. One popup window, one service worker. Talks to:
-- Backend on `http://127.0.0.1:8000` (CORS-allowed via `chrome-extension://[a-z]{32}` regex in `backend/app/main.py`).
+- Backend on `http://127.0.0.1:4000` (CORS-allowed via `chrome-extension://[a-z]{32}` regex in `backend/app/main.py`).
 - `https://app.intercom.com/ember/inbox/…` via the operator's session cookies (`credentials: 'include'`, host permission granted in `manifest.json`).
 
 ### Files

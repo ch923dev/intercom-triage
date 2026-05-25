@@ -1,6 +1,6 @@
 # Webapp — Intercom Triage
 
-Vue 3 + Vite + TypeScript SPA. Calls the backend at `http://127.0.0.1:8000`
+Vue 3 + Vite + TypeScript SPA. Calls the backend at `http://127.0.0.1:4000`
 via Vite's dev proxy on `/api/*`.
 
 ## Layout
@@ -10,7 +10,7 @@ webapp/
 ├── index.html               Loads Geist + JetBrains Mono
 ├── package.json             Pinned deps
 ├── tsconfig.json            Strict mode + path alias `@/*`
-├── vite.config.ts           Dev proxy → 127.0.0.1:8000
+├── vite.config.ts           Dev proxy → 127.0.0.1:4000
 └── src/
     ├── main.ts              Pinia + App mount
     ├── App.vue              Top bar + board + footer shell + alarm loop
@@ -55,7 +55,7 @@ npm install
 npm run dev               # → http://127.0.0.1:5173
 ```
 
-Backend must be running on `127.0.0.1:8000` (see `../scripts/dev-backend.ps1`).
+Backend must be running on `127.0.0.1:4000` (see `../scripts/dev.ps1` — single-command launcher that boots backend + webapp in a Windows Terminal split-pane).
 
 ## Data flow
 

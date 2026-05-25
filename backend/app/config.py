@@ -39,7 +39,7 @@ class AppConfig(BaseSettings):
     # ── OpenRouter ────────────────────────────────────────────────────────────
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-sonnet-4.5"
-    openrouter_referer: str = "http://localhost:8000"
+    openrouter_referer: str = "http://localhost:4000"
     openrouter_title: str = "Intercom Triage"
 
     # ── Database ──────────────────────────────────────────────────────────────

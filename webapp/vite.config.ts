@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import path from 'node:path';
 
-// Reference: tasks.md T029. Dev server proxies /api/* to the backend on 8000
+// Reference: tasks.md T029. Dev server proxies /api/* to the backend on 4000
 // so the SPA can stay on the same origin during local dev. Vitest config
 // lives in `vitest.config.ts` (T080) so the dev/build path doesn't drag in
 // vitest's nested Vite copy at typecheck time.
@@ -19,7 +19,7 @@ export default defineConfig({
     host: '127.0.0.1',
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:4000',
         changeOrigin: false,
         rewrite: (p) => p.replace(/^\/api/, ''),
       },
