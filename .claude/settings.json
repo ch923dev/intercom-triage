@@ -1,0 +1,48 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf*)",
+      "Bash(rm -rf /*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push --force-with-lease*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -fd*)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore --staged*)",
+      "Bash(git commit --amend*)",
+      "Bash(git rebase*)",
+      "Bash(git branch -D*)",
+      "Write(backend/data/**)",
+      "Write(**/*.db)",
+      "Write(**/*.db-journal)",
+      "Write(**/*.db-wal)",
+      "Write(**/*.db-shm)",
+      "Write(**/.env)",
+      "Write(**/.env.*)",
+      "Write(.claude/settings.local.json)",
+      "Edit(.claude/settings.local.json)"
+    ],
+    "allow": [
+      "Bash(ruff check*)",
+      "Bash(ruff format*)",
+      "Bash(mypy*)",
+      "Bash(pytest*)",
+      "Bash(python -m pytest*)",
+      "Bash(npm run lint*)",
+      "Bash(npm run format*)",
+      "Bash(npm run typecheck*)",
+      "Bash(npm test*)",
+      "Bash(npm run test*)",
+      "Bash(npm run build*)",
+      "Bash(npm --prefix webapp run *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git branch)",
+      "Bash(git branch --list*)",
+      "Bash(git stash list*)"
+    ]
+  }
+}
