@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import inspect as sqla_inspect
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
@@ -419,3 +420,50 @@ def test_resolve_request_body_accepts_empty():
     AIResolveSet.model_validate({"enabled": True})
     AIResolveSet.model_validate({"enabled": False})
     AIResolveSet.model_validate({"enabled": None})
+
+
+@pytest.mark.asyncio
+async def test_ticket_accepts_non_actionable_source(session: AsyncSession) -> None:
+    from app.models import Ticket
+    from app.util import naive_utcnow
+
+    now = naive_utcnow()
+    session.add(
+        Ticket(
+            id="t-na-1",
+            title="x",
+            state="open",
+            author={},
+            parts=[],
+            internal_notes=[],
+            created_at=now,
+            updated_at=now,
+            category_id=1,
+            summary="",
+            ai_confidence=0.0,
+            resolved_at=now,
+            resolved_source="non_actionable",
+        )
+    )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_ai_cache_accepts_non_actionable_verdict(session: AsyncSession) -> None:
+    from app.models import AICacheEntry
+    from app.util import naive_utcnow
+
+    now = naive_utcnow()
+    session.add(
+        AICacheEntry(
+            ticket_id="t-na-1",
+            category_id=1,
+            summary="x",
+            confidence=0.5,
+            ticket_updated_at=now,
+            ai_resolution_verdict="non_actionable",
+            ai_resolution_confidence=0.9,
+            ai_resolution_reason="auto-reply: vacation responder",
+        )
+    )
+    await session.commit()

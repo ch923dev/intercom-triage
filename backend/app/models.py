@@ -171,7 +171,8 @@ class AICacheEntry(Base):
             postgresql_where=text("category_id IS NOT NULL"),
         ),
         CheckConstraint(
-            "ai_resolution_verdict IS NULL OR ai_resolution_verdict IN ('resolved','not_resolved')",
+            "ai_resolution_verdict IS NULL OR ai_resolution_verdict "
+            "IN ('resolved','not_resolved','non_actionable')",
             name="ai_cache_resolution_verdict_check",
         ),
         CheckConstraint(
@@ -471,7 +472,8 @@ class Ticket(Base):
             name="tickets_resolved_xor_check",
         ),
         CheckConstraint(
-            "resolved_source IS NULL OR resolved_source IN ('manual','intercom_closed')",
+            "resolved_source IS NULL OR resolved_source "
+            "IN ('manual','intercom_closed','non_actionable')",
             name="tickets_resolved_source_check",
         ),
     )
