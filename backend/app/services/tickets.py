@@ -143,10 +143,42 @@ def _resolve_title(hydrated: HydratedTicket, result: CategorizationResult) -> st
     return result.subject or None
 
 
+def _maybe_auto_resolve_from_ai(
+    row: Ticket,
+    result: CategorizationResult,
+    settings: FilterSettings,
+    now: datetime,
+) -> None:
+    """Stamp resolved_at + resolved_source when the AI verdict + settings agree.
+
+    Skipped when the ticket is already resolved by any source — never override
+    an existing resolution. Intercom-closed transitions take precedence at the
+    caller site (this helper runs only when that branch did not fire).
+    """
+    if row.resolved_at is not None:
+        return
+    if result.ai_resolution_verdict not in ("resolved", "non_actionable"):
+        return
+    if result.ai_resolution_confidence is None:
+        return
+    if result.ai_resolution_confidence < settings.ai_resolve_confidence_threshold:
+        return
+    effective = (
+        row.ai_resolve_enabled
+        if row.ai_resolve_enabled is not None
+        else settings.ai_resolve_default
+    )
+    if not effective:
+        return
+    row.resolved_at = now
+    row.resolved_source = result.ai_resolution_verdict
+
+
 async def _upsert_ticket(
     session: AsyncSession,
     hydrated: HydratedTicket,
     result: CategorizationResult,
+    settings: FilterSettings,
 ) -> None:
     """Insert or update one stored ticket row from its hydrated + AI data.
 
@@ -184,6 +216,8 @@ async def _upsert_ticket(
         if hydrated.state == "closed":
             new_row.resolved_at = now
             new_row.resolved_source = "intercom_closed"
+        else:
+            _maybe_auto_resolve_from_ai(new_row, result, settings, now)
         session.add(new_row)
         return
     # Closure transition: previously not closed AND now closed AND not already
@@ -191,6 +225,8 @@ async def _upsert_ticket(
     if hydrated.state == "closed" and row.state != "closed" and row.resolved_at is None:
         row.resolved_at = now
         row.resolved_source = "intercom_closed"
+    else:
+        _maybe_auto_resolve_from_ai(row, result, settings, now)
     if not row.title_user_edited:
         row.title = _resolve_title(hydrated, result)
     row.state = hydrated.state
@@ -239,7 +275,7 @@ async def ingest_tickets(
             fallback_category_id=fallback.id,
         )
         for ticket in hydrated:
-            await _upsert_ticket(session, ticket, fallback_results[ticket.id])
+            await _upsert_ticket(session, ticket, fallback_results[ticket.id], settings)
         await session.commit()
         metrics.incr("tickets_ingested_total", len(hydrated))
         return IngestResponse(received=len(hydrated), categorized=0)
@@ -282,7 +318,7 @@ async def ingest_tickets(
         results[ticket.id] = result
 
     for ticket in hydrated:
-        await _upsert_ticket(session, ticket, results[ticket.id])
+        await _upsert_ticket(session, ticket, results[ticket.id], settings)
 
     await session.commit()
     metrics.incr("tickets_ingested_total", len(hydrated))
