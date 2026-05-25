@@ -56,6 +56,16 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-reflection.ps1"
+          }
+        ]
+      }
     ]
   }
 }
