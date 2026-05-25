@@ -33,7 +33,7 @@ A) Assign to an EXISTING active category:
      "subject":               "<see SUBJECT rules>",
      "summary":               "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":            <float 0..1>,
-     "resolution_verdict":    "resolved" | "not_resolved",
+     "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
      "resolution_reason":     "<see RESOLUTION rules>"
    }
@@ -45,7 +45,7 @@ B) Reuse an already-PENDING proposal:
      "subject":               "<see SUBJECT rules>",
      "summary":               "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":            <float 0..1>,
-     "resolution_verdict":    "resolved" | "not_resolved",
+     "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
      "resolution_reason":     "<see RESOLUTION rules>"
    }
@@ -59,7 +59,7 @@ C) Propose a NEW category (only when no existing category fits with reasonable
      "subject":               "<see SUBJECT rules>",
      "summary":               "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":            <float 0..1>,
-     "resolution_verdict":    "resolved" | "not_resolved",
+     "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
      "resolution_reason":     "<see RESOLUTION rules>"
    }
@@ -84,16 +84,20 @@ SUMMARY rules (applies to all three options):
 - Plain prose. No bullets, no markdown, no greetings, no closing phrases.
 
 RESOLUTION rules (applies to every response):
-- Decide whether the conversation appears resolved.
-- A conversation is "resolved" when: the customer's most recent message
-  indicates the issue is fixed, they thanked the agent for a working solution,
-  the agent's last reply closed the loop and the customer has not replied
-  since, or the customer explicitly said no further help is needed.
-- A conversation is "not_resolved" when: the customer is waiting on the
-  agent, has a new question, expressed dissatisfaction, the issue is still
-  reproducing, or the thread ends mid-troubleshooting without confirmation.
+- Decide whether the conversation appears resolved, non-actionable, or unresolved.
+- "resolved": the customer's most recent message indicates the issue is fixed,
+  they thanked the agent for a working solution, or the agent's last reply closed
+  the loop and the customer has not replied since.
+- "non_actionable": no operator response required. Examples — auto-reply
+  (out-of-office, vacation responder, calendar notification), marketing or
+  promotional email, spam, or a bare "thanks" after an agent reply with nothing
+  left to do. Lead the reason with a short kind tag where it applies:
+  "auto-reply: ...", "spam: ...", "thanks: ...".
+- "not_resolved": the customer is waiting on the agent, has a new question,
+  expressed dissatisfaction, the issue is still reproducing, or the thread ends
+  mid-troubleshooting without confirmation.
 - Add these THREE fields to EVERY response object:
-    "resolution_verdict":    "resolved" | "not_resolved",
+    "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
     "resolution_confidence": <float 0..1>,
     "resolution_reason":     "<one short clause, <=120 chars, plain text>"
 

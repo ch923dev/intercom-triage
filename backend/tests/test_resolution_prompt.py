@@ -57,3 +57,17 @@ def test_parser_truncates_resolution_reason_to_120_chars():
     parsed = parse_response(raw)
     assert parsed.resolution_reason is not None
     assert len(parsed.resolution_reason) == 120
+
+
+def test_system_prompt_includes_non_actionable_verdict():
+    assert "non_actionable" in SYSTEM_PROMPT
+    # All three verdicts present.
+    for verdict in ("resolved", "non_actionable", "not_resolved"):
+        assert verdict in SYSTEM_PROMPT
+
+
+def test_system_prompt_documents_non_actionable_examples():
+    # The prompt mentions the canonical non-actionable trigger kinds.
+    body = SYSTEM_PROMPT.lower()
+    for kind in ("auto-reply", "spam", "thanks"):
+        assert kind in body
