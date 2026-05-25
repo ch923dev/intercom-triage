@@ -56,6 +56,13 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 11. **Drag-out reopen is atomic.** Setting an override on a resolved ticket clears `resolved_at` + `resolved_source` in the same transaction.
 12. **Singleton `Settings` row enforced by `CHECK (id = 1)`.** `init_db` inserts it on first boot.
 
+## Subagent doctrine
+
+- Delegate broad codebase searches (>3 grep/glob rounds, "find every place that does X") to `Agent(subagent_type=Explore)` so the main context stays focused on the task. Direct `Grep` / `Glob` for targeted, single-file lookups.
+- Delegate independent parallel research (e.g. "summarise backend/app/services/ + extension/intercom.js side-by-side") to two `Agent` calls in one message. Don't run them sequentially in the main thread.
+- Do **not** delegate the actual edit. Cross-package edits (HydratedTicket, renderable_type, MAX_BULK_IDS) must run in the main thread with the corresponding skill loaded so the invariant guardrails apply.
+- Do **not** delegate when the answer is already in `docs/architecture.md`, `spec.md`, `plan.md`, or `tasks.md`. Read those directly — they exist precisely to short-circuit exploration.
+
 ## Scope guardrails
 
 - Single-operator local tool, not a SaaS. One workspace, one taxonomy, one operator, one machine. No multi-tenancy, auth, deployment infra, hosted observability, public surfaces.
