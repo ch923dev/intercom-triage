@@ -92,7 +92,7 @@ intercom-ticket-management/
 ├── webapp/         Vue 3 SPA — the kanban board + admin pages              ← see webapp/CLAUDE.md
 ├── extension/      Chrome MV3 popup + background service worker            ← see extension/CLAUDE.md
 ├── docs/           Long-form specs (superpowers/, design records)
-├── scripts/        dev-backend.ps1/.sh, seed-db.ps1/.sh
+├── scripts/        dev.ps1 (single-command launcher), seed-db.ps1/.sh
 ├── design_bundle/  Static design assets referenced by DESIGN.md
 ├── spec.md         Requirements — WHAT (US-*, FR-*, NFR-*)
 ├── plan.md         Architecture + decisions — HOW (§1..§12)
