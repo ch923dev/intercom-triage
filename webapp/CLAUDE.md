@@ -1,75 +1,33 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in `webapp/`.
 
-These four principles override defaults. Follow them on every change.
+> Principles: see [`../docs/principles.md`](../docs/principles.md) (Think Before Coding · Simplicity First · Surgical Changes · Goal-Driven Execution). Below = webapp-specific overrides + reference only.
 
-## 1. Think Before Coding
+## 1. Think Before Coding (in this repo)
 
-Don't assume. Don't hide confusion. Surface tradeoffs.
-
-- State assumptions explicitly before touching code. If uncertain, ask.
-- If multiple interpretations exist, present them — don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-In this repo:
 - Backend contracts live in `src/types/api.ts` + `src/api/client.ts`. If a field's nullability or PATCH/PUT shape is unclear, check `../plan.md` / `../spec.md` or ask — never guess a wire format.
 - The Intercom `renderable_type` mapping (1/12 customer, 2/24 admin, 3 internal note) is reverse-engineered and unstable. Flag any change.
 - The backend has **no Intercom Access Token**. All ticket data arrives via the Chrome extension POSTing to `/tickets/ingest`. An empty board means "operator hasn't synced," not "fetch failed." Don't add fallbacks or mock data.
 
-## 2. Simplicity First
+## 2. Simplicity First (in this repo)
 
-Minimum code that solves the problem. Nothing speculative.
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If 200 lines could be 50, rewrite it.
-
-In this repo:
 - The `tickets` store is ~500 lines of optimistic-update logic. Don't wrap it in a helper layer "in case." New mutating actions go inline alongside `applyOverride` / `markResolved` / `bulkResolve`.
 - One `api` object in `src/api/client.ts` — never inline `fetch` in components.
 - No router. Views switch via `view.view` in `App.vue`. Don't introduce vue-router for "future flexibility."
 - Default to no comments. Existing `tasks.md TXXX` / `plan §X` markers point at external specs; don't echo what the code already says.
 
-## 3. Surgical Changes
+## 3. Surgical Changes (in this repo)
 
-Touch only what you must. Clean up only your own mess.
-
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style even if you'd do it differently.
-- If you notice unrelated dead code, mention it — don't delete it.
-- Remove imports/variables your change made unused. Don't remove pre-existing dead code unless asked.
-
-In this repo:
 - Style: single-word component names (`Topbar`, `Board`, `Column`), `import type { … }` (verbatimModuleSyntax), two-space indent, trailing commas, `@/` path alias, prettier `printWidth: 100`.
 - `vue/multi-word-component-names` is disabled on purpose. Don't rename components.
 - Two vite configs (`vite.config.ts` + `vitest.config.ts`) are intentional — merging them breaks `vue-tsc`. Don't consolidate.
 - **Any UI / CSS / component change must conform to `DESIGN.md`.** That file is the design-system source of truth (palette, type scale, radii, spacing, component tokens, do's/don'ts). Use `var(--*)` tokens from `src/styles/tokens.css`; never hardcode hex or px values that exist as tokens. If a new component needs a token that isn't in `DESIGN.md`, propose the token there first.
 - `notes` (legacy) and `noteEntries` (time-tabled, successor) coexist. Don't delete `notes` without being asked.
 
-The test: every changed line traces directly to the user's request.
+## 4. Goal-Driven Execution (in this repo)
 
-## 4. Goal-Driven Execution
-
-Define success criteria. Loop until verified.
-
-Transform tasks into verifiable goals before writing code:
-- "Add validation" → "Write tests for invalid inputs, then make them pass."
-- "Fix the bug" → "Write a test that reproduces it, then make it pass."
-- "Refactor X" → "Tests pass before and after."
-
-For multi-step work, state the plan up front:
-
-```
-1. [step] → verify: [check]
-2. [step] → verify: [check]
-```
-
-Repo-specific verification commands:
+Verification commands:
 
 | Change                          | Verify with                                                |
 |---------------------------------|------------------------------------------------------------|
@@ -78,8 +36,6 @@ Repo-specific verification commands:
 | New component / restyle         | Tokens from `DESIGN.md` only (use `var(--*)` from `src/styles/tokens.css`); add to `DESIGN.md` components table if it introduces a reusable pattern |
 | Type or API-contract change     | `npm run typecheck` clean                                  |
 | Any merge-ready change          | `npm run lint` (zero-warning gate) + `npm run format:check`|
-
-"Make it work" is not a success criterion. Name the test, the click-path, or the command whose output proves the change.
 
 ---
 

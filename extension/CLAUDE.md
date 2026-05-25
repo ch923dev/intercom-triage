@@ -1,17 +1,11 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working in `extension/`. These four principles override defaults — apply them on every change.
+Guidance for Claude Code when working in `extension/`.
 
-## 1. Think Before Coding
+> Principles: see [`../docs/principles.md`](../docs/principles.md) (Think Before Coding · Simplicity First · Surgical Changes · Goal-Driven Execution). Below = extension-specific overrides + reference only.
 
-Don't assume. Don't hide confusion. Surface tradeoffs.
+## 1. Think Before Coding (in this repo)
 
-- State assumptions explicitly before touching code. If uncertain, ask.
-- If multiple interpretations exist, present them — don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-In this repo:
 - **The extension is the only Intercom integration.** The backend has no Intercom Access Token. Conversations are scraped from the operator's logged-in browser session against undocumented `ember/` endpoints and POSTed to `/tickets/ingest`. If you're tempted to add an Access-Token path or a backend-side Intercom client, stop and ask — that path doesn't exist.
 - Intercom's `ember/` endpoints (`/ember/inbox/conversations/list`, `/ember/inbox/conversations/{id}`) are **undocumented and may change without notice**. Any code touching them is brittle. Flag changes to `intercom.js` accordingly; verify against live conversations before merging.
 - The `renderable_type` mapping is reverse-engineered: `1`/`12` = inbound customer, `2`/`24` = admin reply (customer-visible), `3` = internal team note (admin-only). `5`/`6`/`14`/`71` are events and must be skipped. Adding a new type means inspecting a live payload — never guess.
@@ -20,34 +14,16 @@ In this repo:
 - `summary.last_updated` ≠ `summary.updated_at` ≠ `summary.sorting_updated_at`. `summaryUpdatedMs` walks all three for the same reason. Don't simplify it without verifying the list response shape.
 - 401/403 ≠ generic failure. Auth errors must bubble (`IntercomSessionError`) so the popup surfaces a "log in" hint; other errors degrade silently (best-effort badge / sync).
 
-## 2. Simplicity First
+## 2. Simplicity First (in this repo)
 
-Minimum code that solves the problem. Nothing speculative.
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" / "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If 200 lines could be 50, rewrite it.
-
-In this repo:
 - **No build step.** Plain ES modules loaded by MV3 (`background.service_worker.type = "module"`, `<script type="module">` in `popup.html`). Don't introduce webpack / rollup / TypeScript / a bundler. Don't add npm dependencies. Plain `.js` files only.
 - **No frameworks.** Popup DOM is built with `node(tag, className, text)` + `element.append(...)`. Don't introduce Vue / React / Preact / lit. The webapp is the place for a framework; this popup is intentionally minimal.
 - One `api.js` (backend client). One `intercom.js` (Intercom session scraper). One `background.js` (service worker). One `popup.js` (mini-board controller). Don't carve a fifth module unless a new surface justifies it.
 - The popup polls in-memory state at 1Hz via `alarmTick`. Don't replace it with reactive state, observables, or a store layer. A `state` object + targeted `render*` functions is the pattern.
 - Permissions in `manifest.json` are deliberately narrow: `storage`, `alarms`, and host permissions for `127.0.0.1:4000` / `localhost:4000` / `app.intercom.com`. Don't add `tabs`, `cookies`, `webRequest`, or broader hosts unless a feature *requires* them.
 
-## 3. Surgical Changes
+## 3. Surgical Changes (in this repo)
 
-Touch only what you must. Clean up only your own mess.
-
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style even if you'd do it differently.
-- If you notice unrelated dead code, mention it — don't delete it.
-- Remove imports / functions your change made unused. Don't remove pre-existing dead code unless asked.
-
-In this repo:
 - Style: 2-space indent, single quotes, trailing commas, semicolons, `const`/`let` only, JSDoc on exported functions. Match it.
 - Service worker is `type: "module"` — use `import` / `export`, not `importScripts`. The service worker may be killed and restarted between alarms; nothing persists across ticks except `chrome.storage.local`. Don't add module-level state that you expect to survive (counters, caches, timers).
 - `chrome.storage.local` is the only persistence. Current keys: `intercomAppId` (workspace), `pollMinutes` (background interval). Document any new key in this file before adding it.
@@ -59,25 +35,14 @@ In this repo:
 - The closure pass in `background.js:ingestFromIntercom` exists so `state: open → closed` transitions get caught (Intercom drops closed conversations from `state=open` listings). Don't simplify it away.
 - Fallback caching in the backend skips `result.fallback` rows — the extension's ingest call doesn't influence that. If you change the ingest shape, do not assume the backend will retry.
 
-The test: every changed line traces directly to the user's request.
+## 4. Goal-Driven Execution (in this repo)
 
-## 4. Goal-Driven Execution
-
-Define success criteria. Loop until verified.
-
-Transform tasks into verifiable goals before writing code:
+Examples of verifiable goals (no automated test suite for the extension — every change is verified manually):
 - "Fix the popup not loading" → "Open the popup, see N tickets render."
 - "Skip already-stored conversations" → "Sync, see `received - cache_hits == 0` in `/metrics`."
 - "Refactor `intercom.js`" → "Reload unpacked, sync, see same ticket set in `/tickets`."
 
-For multi-step work, state the plan up front:
-
-```
-1. [step] → verify: [check]
-2. [step] → verify: [check]
-```
-
-There is no automated test suite for the extension. Every change is verified manually:
+Verification table:
 
 | Change                          | Verify with                                                                 |
 |---------------------------------|-----------------------------------------------------------------------------|
@@ -86,8 +51,6 @@ There is no automated test suite for the extension. Every change is verified man
 | `background.js` polling         | Set interval in popup footer → wait ≥ 1 tick → check toolbar badge          |
 | Backend schema change           | Coordinate with `backend/app/schemas.py:HydratedTicket` — both sides ship together |
 | Manifest / permission change    | Reload unpacked — Chrome surfaces permission deltas in a confirm dialog     |
-
-"Reload and it looks fine" is not a success criterion. Name the click-path, the network call, or the `/metrics` counter that proves the change.
 
 ---
 
