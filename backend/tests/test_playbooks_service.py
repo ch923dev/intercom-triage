@@ -104,3 +104,37 @@ async def test_list_for_ticket_404_when_missing(session: AsyncSession) -> None:
     with pytest.raises(HTTPException) as exc:
         await svc.list_for_ticket(session, "nope")
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_changes_fields_and_bumps_updated_at(session: AsyncSession) -> None:
+    p = await svc.create(session, category_id=1, label="old", body="old body")
+    before = p.updated_at
+    updated = await svc.update(session, p.id, label="new", body=None)
+    assert updated.label == "new"
+    assert updated.body == "old body"
+    assert updated.updated_at >= before
+
+
+@pytest.mark.asyncio
+async def test_restore_clears_archived_at(session: AsyncSession) -> None:
+    p = await svc.create(session, category_id=1, label="x", body="y")
+    await svc.archive(session, p.id)
+    restored = await svc.restore(session, p.id)
+    assert restored.archived_at is None
+    assert [r.label for r in await svc.list_for_category(session, 1)] == ["x"]
+
+
+@pytest.mark.asyncio
+async def test_list_all_spans_categories(session: AsyncSession) -> None:
+    await svc.create(session, category_id=1, label="a", body="1")
+    await svc.create(session, category_id=2, label="b", body="2")
+    rows = await svc.list_all(session)
+    assert {r.label for r in rows} == {"a", "b"}
+
+
+@pytest.mark.asyncio
+async def test_update_404_when_missing(session: AsyncSession) -> None:
+    with pytest.raises(HTTPException) as exc:
+        await svc.update(session, 999, label="x", body=None)
+    assert exc.value.status_code == 404

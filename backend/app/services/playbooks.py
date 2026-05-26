@@ -83,3 +83,42 @@ async def archive(session: AsyncSession, playbook_id: int) -> Playbook:
         await session.refresh(row)
         metrics.incr("playbooks_archived_total")
     return row
+
+
+async def update(
+    session: AsyncSession,
+    playbook_id: int,
+    label: str | None,
+    body: str | None,
+) -> Playbook:
+    row = await session.get(Playbook, playbook_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no playbook {playbook_id}")
+    if label is not None:
+        row.label = label
+    if body is not None:
+        row.body = body
+    row.updated_at = naive_utcnow()
+    await session.commit()
+    await session.refresh(row)
+    metrics.incr("playbooks_updated_total")
+    return row
+
+
+async def restore(session: AsyncSession, playbook_id: int) -> Playbook:
+    row = await session.get(Playbook, playbook_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no playbook {playbook_id}")
+    if row.archived_at is not None:
+        row.archived_at = None
+        await session.commit()
+        await session.refresh(row)
+    return row
+
+
+async def list_all(session: AsyncSession, include_archived: bool = False) -> list[Playbook]:
+    stmt = select(Playbook)
+    if not include_archived:
+        stmt = stmt.where(Playbook.archived_at.is_(None))
+    stmt = stmt.order_by(Playbook.category_id.asc(), Playbook.created_at.asc(), Playbook.id.asc())
+    return list((await session.scalars(stmt)).all())
