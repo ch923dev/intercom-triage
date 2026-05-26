@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import CatDot from '../CatDot.vue';
+import CollapsibleSection from './CollapsibleSection.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useTicketsStore } from '@/stores/tickets';
 
@@ -25,8 +26,7 @@ async function pick(categoryId: number) {
 </script>
 
 <template>
-  <section class="block">
-    <div class="mono label">Category</div>
+  <CollapsibleSection title="Category" storage-key="category">
     <div class="cat-chips">
       <button
         v-for="c in categories.categories"
@@ -40,20 +40,10 @@ async function pick(categoryId: number) {
         <span>{{ c.name }}</span>
       </button>
     </div>
-  </section>
+  </CollapsibleSection>
 </template>
 
 <style scoped>
-.block {
-  border-top: var(--hairline) solid var(--line);
-  padding-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.label {
-  color: var(--ink-3);
-}
 .cat-chips {
   display: flex;
   flex-wrap: wrap;

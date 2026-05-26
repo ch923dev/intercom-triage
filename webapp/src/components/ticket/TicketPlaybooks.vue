@@ -2,6 +2,7 @@
      docs/superpowers/specs/2026-05-26-playbooks-design.md -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import CollapsibleSection from './CollapsibleSection.vue';
 import { usePlaybooksStore } from '@/stores/playbooks';
 
 const props = defineProps<{
@@ -70,9 +71,7 @@ async function save() {
 </script>
 
 <template>
-  <section class="block">
-    <div class="mono label">Playbooks</div>
-
+  <CollapsibleSection title="Playbooks" storage-key="playbooks">
     <p v-if="categoryId === null" class="mono empty">Categorize this ticket to use playbooks.</p>
     <p v-else-if="items.length === 0 && !showForm" class="mono empty">
       No playbooks for this category yet.
@@ -100,20 +99,10 @@ async function save() {
     <button v-else-if="categoryId !== null" class="ghost" @click="openForm">
       <span class="mono">Save as playbook</span>
     </button>
-  </section>
+  </CollapsibleSection>
 </template>
 
 <style scoped>
-.block {
-  border-top: var(--hairline) solid var(--line);
-  padding-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.label {
-  color: var(--ink-3);
-}
 .empty {
   color: var(--ink-3);
   font-size: 11px;

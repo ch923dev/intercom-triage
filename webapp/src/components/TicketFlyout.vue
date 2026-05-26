@@ -8,6 +8,7 @@ import { useAttachmentsStore } from '@/stores/attachments';
 import { useCategoriesStore } from '@/stores/categories';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
+import CollapsibleSection from './ticket/CollapsibleSection.vue';
 import TicketAttachmentBin from './ticket/TicketAttachmentBin.vue';
 import TicketCategoryPicker from './ticket/TicketCategoryPicker.vue';
 import TicketConversation from './ticket/TicketConversation.vue';
@@ -77,13 +78,12 @@ function close() {
 
             <TicketFollowup :ticket-id="ticket.id" />
 
-            <section class="block">
-              <div class="mono label">Next-step notes</div>
+            <CollapsibleSection title="Next-step notes" storage-key="notes">
               <TicketLegacyNote :ticket-id="ticket.id" />
               <TicketAttachmentBin :ticket-id="ticket.id" />
               <TicketEntryTimeline :ticket-id="ticket.id" />
               <TicketEntryForm :ticket-id="ticket.id" />
-            </section>
+            </CollapsibleSection>
 
             <TicketPlaybooks :ticket-id="ticket.id" :category-id="effectiveCategoryId" />
 
@@ -106,8 +106,8 @@ function close() {
   z-index: 40;
 }
 .modal {
-  width: min(980px, 95vw);
-  height: min(86vh, 820px);
+  width: min(1240px, 96vw);
+  height: min(90vh, 900px);
   background: var(--bg);
   border: var(--hairline) solid var(--line);
   border-radius: 14px;
@@ -133,7 +133,7 @@ function close() {
   min-height: 0;
 }
 .detail-pane {
-  flex: 0 0 320px;
+  flex: 0 0 380px;
   overflow-y: auto;
   padding: 16px;
   border-left: var(--hairline) solid var(--line);
@@ -169,15 +169,5 @@ header {
   color: var(--ink-3);
   cursor: pointer;
   font-size: 14px;
-}
-.block {
-  border-top: var(--hairline) solid var(--line);
-  padding-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.label {
-  color: var(--ink-3);
 }
 </style>

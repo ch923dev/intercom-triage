@@ -264,7 +264,9 @@ There are no traditional buttons in body content. Actions live on chips and icon
 
 ### Flyout (`TicketFlyout` + `components/ticket/*`)
 
-Right-anchored 480px panel, `panel` surface, `--shadow` elevation. Contains: `TicketHeader` (title + meta + state), `TicketConversation` (alternating customer/admin parts), `TicketEntryForm` + `TicketEntryTimeline` (time-tabled notes), `TicketFollowup` (due-at picker), `TicketAttachmentBin`, `TicketResolution`, `TicketCategoryPicker`. Each subcomponent owns its own border-bottom hairline; nothing stacks shadows.
+Right-anchored 480px panel, `panel` surface, `--shadow` elevation. Contains: `TicketHeader` (title + meta + customer identity: name / email / Intercom user ID + state), `TicketConversation` (alternating customer/admin parts), `TicketEntryForm` + `TicketEntryTimeline` (time-tabled notes), `TicketFollowup` (due-at picker), `TicketAttachmentBin`, `TicketResolution`, `TicketCategoryPicker`. Each subcomponent owns its own border-bottom hairline; nothing stacks shadows.
+
+Detail-pane sections (Category, Follow-up, Next-step notes, Playbooks, Resolution) wrap in `CollapsibleSection` — the `.block` hairline + mono `label-caps` header become a click target with a rotating `▾` chevron (ink-3). Collapsed state is sticky per section (`localStorage` key `triage.flyout.collapse.<section>`), shared across tickets, not per-ticket.
 
 ### Banners (`AlarmBanners`)
 

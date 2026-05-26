@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import CollapsibleSection from './CollapsibleSection.vue';
 import { useFollowupsStore } from '@/stores/followups';
 import { formatShortDateTime } from '@/utils/time';
 
@@ -79,9 +80,7 @@ async function snooze(mins: number) {
 </script>
 
 <template>
-  <section class="block">
-    <div class="mono label">Follow-up</div>
-
+  <CollapsibleSection title="Follow-up" storage-key="followup">
     <div v-if="followup" class="fu-active" :class="{ due }">
       <span class="mono">{{ due ? 'Due now' : `Due ${dueLabel}` }}</span>
       <span v-if="followup.reason" class="fu-reason">{{ followup.reason }}</span>
@@ -114,20 +113,10 @@ async function snooze(mins: number) {
       </button>
     </div>
     <div v-if="error" class="mono err">{{ error }}</div>
-  </section>
+  </CollapsibleSection>
 </template>
 
 <style scoped>
-.block {
-  border-top: var(--hairline) solid var(--line);
-  padding-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.label {
-  color: var(--ink-3);
-}
 .fu-active {
   display: flex;
   gap: 8px;

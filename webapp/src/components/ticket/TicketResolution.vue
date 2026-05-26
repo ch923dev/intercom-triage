@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { Ticket } from '@/types/api';
+import CollapsibleSection from './CollapsibleSection.vue';
 import { useTicketsStore } from '@/stores/tickets';
 import { formatShortDateTime } from '@/utils/time';
 
@@ -38,8 +39,7 @@ async function setAi(v: boolean | null) {
 </script>
 
 <template>
-  <section class="block">
-    <div class="mono label">Resolution</div>
+  <CollapsibleSection title="Resolution" storage-key="resolution">
     <div class="status-row">
       <span v-if="ticket.resolved_at" class="status-pill mono">
         {{ statusLabel }} · {{ formatShortDateTime(ticket.resolved_at) }}
@@ -56,34 +56,21 @@ async function setAi(v: boolean | null) {
     <div class="ai-tristate">
       <span class="mono tristate-label">AI</span>
       <div class="seg">
-        <button
-          :class="{ active: ticket.ai_resolve_override === null }"
-          @click="setAi(null)"
-        >default</button>
-        <button
-          :class="{ active: ticket.ai_resolve_override === true }"
-          @click="setAi(true)"
-        >on</button>
-        <button
-          :class="{ active: ticket.ai_resolve_override === false }"
-          @click="setAi(false)"
-        >off</button>
+        <button :class="{ active: ticket.ai_resolve_override === null }" @click="setAi(null)">
+          default
+        </button>
+        <button :class="{ active: ticket.ai_resolve_override === true }" @click="setAi(true)">
+          on
+        </button>
+        <button :class="{ active: ticket.ai_resolve_override === false }" @click="setAi(false)">
+          off
+        </button>
       </div>
     </div>
-  </section>
+  </CollapsibleSection>
 </template>
 
 <style scoped>
-.block {
-  border-top: var(--hairline) solid var(--line);
-  padding-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.label {
-  color: var(--ink-3);
-}
 .presets {
   display: flex;
   flex-wrap: wrap;
