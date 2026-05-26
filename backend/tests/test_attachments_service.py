@@ -31,9 +31,7 @@ async def test_note_attachment_model_persists(session: AsyncSession) -> None:
     session.add(row)
     await session.commit()
 
-    found = (
-        await session.scalars(select(NoteAttachment).where(NoteAttachment.id == row.id))
-    ).one()
+    found = (await session.scalars(select(NoteAttachment).where(NoteAttachment.id == row.id))).one()
     assert found.owner_kind == "ticket"
     assert found.owner_id == "T1"
     assert found.ticket_id == "T1"
@@ -55,9 +53,7 @@ def _make_config(tmp_path: Path) -> AppConfig:
 
 
 @pytest.mark.asyncio
-async def test_upload_creates_row_and_disk_file(
-    session: AsyncSession, tmp_path: Path
-) -> None:
+async def test_upload_creates_row_and_disk_file(session: AsyncSession, tmp_path: Path) -> None:
     cfg = _make_config(tmp_path)
     row = await svc.upload_attachment(
         session,
@@ -70,9 +66,7 @@ async def test_upload_creates_row_and_disk_file(
         data=b"hello world",
     )
     assert row.id is not None
-    assert row.sha256 == (
-        "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
-    )
+    assert row.sha256 == ("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
     assert row.size_bytes == 11
     disk_path = cfg.attachments_dir / row.stored_path
     assert disk_path.exists()
@@ -80,9 +74,7 @@ async def test_upload_creates_row_and_disk_file(
 
 
 @pytest.mark.asyncio
-async def test_upload_dedupes_same_bytes(
-    session: AsyncSession, tmp_path: Path
-) -> None:
+async def test_upload_dedupes_same_bytes(session: AsyncSession, tmp_path: Path) -> None:
     cfg = _make_config(tmp_path)
     a = await svc.upload_attachment(
         session, cfg, "ticket", "T1", "T1", "a.txt", "text/plain", b"same"
@@ -102,12 +94,8 @@ async def test_list_for_ticket_returns_both_owner_kinds_and_excludes_deleted(
     session: AsyncSession, tmp_path: Path
 ) -> None:
     cfg = _make_config(tmp_path)
-    t = await svc.upload_attachment(
-        session, cfg, "ticket", "T1", "T1", "t.txt", "text/plain", b"t"
-    )
-    e = await svc.upload_attachment(
-        session, cfg, "entry", "42", "T1", "e.txt", "text/plain", b"e"
-    )
+    t = await svc.upload_attachment(session, cfg, "ticket", "T1", "T1", "t.txt", "text/plain", b"t")
+    e = await svc.upload_attachment(session, cfg, "entry", "42", "T1", "e.txt", "text/plain", b"e")
     gone = await svc.upload_attachment(
         session, cfg, "ticket", "T1", "T1", "g.txt", "text/plain", b"g"
     )
@@ -142,9 +130,7 @@ async def test_soft_delete_missing_id_returns_404(session: AsyncSession) -> None
 
 
 @pytest.mark.asyncio
-async def test_sweep_unlinks_orphan_past_gc_window(
-    session: AsyncSession, tmp_path: Path
-) -> None:
+async def test_sweep_unlinks_orphan_past_gc_window(session: AsyncSession, tmp_path: Path) -> None:
     cfg = _make_config(tmp_path)
     row = await svc.upload_attachment(
         session, cfg, "ticket", "T1", "T1", "x.txt", "text/plain", b"orphan"
@@ -163,9 +149,7 @@ async def test_sweep_unlinks_orphan_past_gc_window(
 
 
 @pytest.mark.asyncio
-async def test_sweep_keeps_file_with_live_sibling(
-    session: AsyncSession, tmp_path: Path
-) -> None:
+async def test_sweep_keeps_file_with_live_sibling(session: AsyncSession, tmp_path: Path) -> None:
     cfg = _make_config(tmp_path)
     a = await svc.upload_attachment(
         session, cfg, "ticket", "T1", "T1", "a.txt", "text/plain", b"shared"
@@ -188,9 +172,7 @@ async def test_sweep_keeps_file_with_live_sibling(
 
 
 @pytest.mark.asyncio
-async def test_get_thumb_path_creates_webp_for_image(
-    session: AsyncSession, tmp_path: Path
-) -> None:
+async def test_get_thumb_path_creates_webp_for_image(session: AsyncSession, tmp_path: Path) -> None:
     from io import BytesIO
 
     from PIL import Image

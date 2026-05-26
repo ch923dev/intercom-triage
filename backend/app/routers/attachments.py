@@ -38,11 +38,7 @@ def _to_read(row: NoteAttachment) -> NoteAttachmentRead:
         size_bytes=row.size_bytes,
         created_at=row.created_at,
         raw_url=f"/api/attachments/{row.id}/raw",
-        thumb_url=(
-            f"/api/attachments/{row.id}/thumb"
-            if row.mime.startswith("image/")
-            else None
-        ),
+        thumb_url=(f"/api/attachments/{row.id}/thumb" if row.mime.startswith("image/") else None),
     )
 
 

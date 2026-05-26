@@ -50,6 +50,12 @@ export interface TicketAuthor {
   name: string | null;
   email: string | null;
   type: string | null;
+  /** Intercom "User data" panel fields. Populated for the ticket's customer
+   *  author; null on admin/part authors. */
+  location: string | null;
+  timezone: string | null;
+  phone: string | null;
+  company: string | null;
 }
 
 export interface ConversationPart {

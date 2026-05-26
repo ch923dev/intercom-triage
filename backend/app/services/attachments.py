@@ -79,9 +79,7 @@ async def upload_attachment(
     return row
 
 
-async def list_for_ticket(
-    session: AsyncSession, ticket_id: str
-) -> list[NoteAttachment]:
+async def list_for_ticket(session: AsyncSession, ticket_id: str) -> list[NoteAttachment]:
     """All non-deleted attachments for a ticket (both owner_kinds)."""
     stmt = (
         select(NoteAttachment)
@@ -144,9 +142,7 @@ class SweepResult:
     rows_deleted: int
 
 
-async def sweep_attachments(
-    session: AsyncSession, config: AppConfig
-) -> SweepResult:
+async def sweep_attachments(session: AsyncSession, config: AppConfig) -> SweepResult:
     """Hard-delete rows whose `deleted_at` is older than `attachment_gc_days`.
     Unlink the file only when no live sibling row references the same sha256."""
     cutoff = naive_utcnow() - timedelta(days=config.attachment_gc_days)

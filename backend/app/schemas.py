@@ -283,6 +283,12 @@ class TicketAuthorSchema(BaseModel):
     name: str | None = None
     email: str | None = None
     type: str | None = None
+    # Intercom "User data" panel fields (customer author only; admin/part
+    # authors leave these null). Stored in the ticket's `author` JSON blob.
+    location: str | None = None
+    timezone: str | None = None
+    phone: str | None = None
+    company: str | None = None
 
 
 class ConversationPartSchema(BaseModel):

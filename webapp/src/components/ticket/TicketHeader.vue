@@ -190,15 +190,6 @@ function cancelEdit(field: 'title' | 'summary') {
       Open in Intercom ↗
     </a>
   </div>
-
-  <div v-if="ticket.author.email || ticket.author.id" class="identity">
-    <span v-if="ticket.author.email" class="id-line" title="Customer email">{{
-      ticket.author.email
-    }}</span>
-    <span v-if="ticket.author.id" class="id-line" title="Intercom user ID"
-      >ID {{ ticket.author.id }}</span
-    >
-  </div>
 </template>
 
 <style scoped>
@@ -249,19 +240,6 @@ function cancelEdit(field: 'title' | 'summary') {
 .customer {
   font-size: 12px;
   color: var(--ink);
-}
-.identity {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: -2px;
-}
-.id-line {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-  color: var(--ink-3);
-  word-break: break-all;
 }
 .summary-row {
   display: flex;

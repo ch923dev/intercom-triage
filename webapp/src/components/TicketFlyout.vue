@@ -19,6 +19,7 @@ import TicketHeader from './ticket/TicketHeader.vue';
 import TicketLegacyNote from './ticket/TicketLegacyNote.vue';
 import TicketPlaybooks from './ticket/TicketPlaybooks.vue';
 import TicketResolution from './ticket/TicketResolution.vue';
+import TicketUserData from './ticket/TicketUserData.vue';
 
 const view = useViewStore();
 const tickets = useTicketsStore();
@@ -70,6 +71,8 @@ function close() {
 
           <aside class="detail-pane">
             <TicketHeader :ticket="ticket" :category="category" />
+
+            <TicketUserData :author="ticket.author" />
 
             <TicketCategoryPicker
               :ticket-id="ticket.id"
