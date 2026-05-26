@@ -103,7 +103,9 @@ async def set_override(
 
     # Drag-out reopen — must run before commit so it's atomic with the override.
     ticket = await session.get(Ticket, ticket_id)
-    if ticket is not None and ticket.resolved_at is not None:
+    if ticket is None:
+        raise HTTPException(status_code=404, detail=f"ticket {ticket_id!r} not found")
+    if ticket.resolved_at is not None:
         ticket.resolved_at = None
         ticket.resolved_source = None
         ticket.resolution_cleared_at = naive_utcnow()
@@ -359,7 +361,7 @@ async def edit_ticket(
     if title is not None:
         stripped = title.strip()
         if stripped:
-            row.title = stripped[:120]
+            row.title = stripped[:200]
             row.title_user_edited = True
         else:
             row.title_user_edited = False  # next sync re-derives from AI/Intercom
