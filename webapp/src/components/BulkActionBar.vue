@@ -94,6 +94,12 @@ async function runBulk<T>(fn: () => Promise<T>, op: string): Promise<T | undefin
 function onResolve() {
   void runBulk(() => tickets.bulkResolve(selection.asArray()), 'resolved');
 }
+function onNonActionable() {
+  void runBulk(
+    () => tickets.bulkMarkNonActionable(selection.asArray()),
+    'marked non-actionable',
+  );
+}
 function onReopen() {
   void runBulk(() => tickets.bulkReopen(selection.asArray()), 'reopened');
 }
@@ -133,6 +139,19 @@ function onClearSelection() {
         @click="onResolve"
       >
         Resolve
+      </button>
+
+      <button
+        type="button"
+        :disabled="busy || !noneResolved"
+        :title="
+          noneResolved
+            ? 'Mark selected non-actionable'
+            : 'Some selected are already resolved'
+        "
+        @click="onNonActionable"
+      >
+        Non-actionable
       </button>
 
       <button
