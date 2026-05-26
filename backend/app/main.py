@@ -30,6 +30,7 @@ from app.routers import health as health_router
 from app.routers import metrics as metrics_router
 from app.routers import note_entries as note_entries_router
 from app.routers import notes as notes_router
+from app.routers import playbooks as playbooks_router
 from app.routers import proposals as proposals_router
 from app.routers import settings as settings_router
 from app.routers import tickets as tickets_router
@@ -179,6 +180,7 @@ def create_app() -> FastAPI:
     app.include_router(followups_router.router)
     app.include_router(notes_router.router)
     app.include_router(note_entries_router.router)
+    app.include_router(playbooks_router.router)
     app.include_router(attachments_router.router)
     app.include_router(metrics_router.router)
 
