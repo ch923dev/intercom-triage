@@ -135,6 +135,19 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T083 ✓ — Bulk drag through Board + ResolvedColumn
 - T084 ✓ — `/metrics` bulk counters + docs refresh
 
+### [Phase 13 — Non-actionable tickets](docs/tasks/phase-13-non-actionable.md)
+- T085 ✓ — Migration 0010 widens resolved_source + ai_resolution_verdict CHECK
+- T086 ✓ — AI prompt + parser carry non_actionable verdict
+- T087 ✓ — Ingest auto-applies non_actionable under shared threshold
+- T088 ✓ — Resolution service: mark_non_actionable + bulk variant
+- T089 ✓ — `POST /tickets/{id}/non-actionable` + `POST /tickets/bulk/non-actionable`
+- T090 ✓ — Webapp types + API client + tickets store actions
+- T091 ✓ — ResolutionChip non-actionable badge variant
+- T092 ✓ — Flyout: Mark non-actionable button
+- T093 ✓ — BulkActionBar: Non-actionable button
+- T094 ✓ — Extension popup: non-actionable button + badge
+- T095 ✓ — Docs (CLAUDE.md invariant, spec/plan/tasks index)
+
 ### [Phase 9 — Backlog](docs/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to webapp and extension.
 - T102 — Token / cost meter surfacing OpenRouter spend per day.
@@ -199,3 +212,5 @@ Every requirement maps to at least one task.
 | FR-035 | T083 |
 | FR-036 | T074 |
 | US-018 | T074, T075, T076, T077, T078, T081, T082, T083 |
+| FR-037 | T086, T087, T088, T089, T090, T091, T092, T093 |
+| US-019 | T088, T089, T092, T093, T094 |
