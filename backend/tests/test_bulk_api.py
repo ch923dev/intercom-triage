@@ -95,7 +95,9 @@ async def test_bulk_resolve_partial_failure(client: AsyncClient, session: AsyncS
 
 
 @pytest.mark.asyncio
-async def test_bulk_resolve_unknown_id_in_failed(client: AsyncClient, session: AsyncSession) -> None:
+async def test_bulk_resolve_unknown_id_in_failed(
+    client: AsyncClient, session: AsyncSession
+) -> None:
     _seed_open(session, "real")
     await session.commit()
 
@@ -301,9 +303,7 @@ async def test_bulk_dismiss_chip_unknown_id_in_failed(
 
 
 @pytest.mark.asyncio
-async def test_bulk_set_followup_inserts_rows(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_bulk_set_followup_inserts_rows(client: AsyncClient, session: AsyncSession) -> None:
     from app.models import Followup
 
     r = await client.put(
@@ -373,9 +373,7 @@ async def test_bulk_set_followup_rejects_reason_over_80(client: AsyncClient) -> 
 
 
 @pytest.mark.asyncio
-async def test_bulk_clear_followup_deletes_rows(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_bulk_clear_followup_deletes_rows(client: AsyncClient, session: AsyncSession) -> None:
     from app.models import Followup
 
     await client.put(
@@ -471,3 +469,69 @@ async def test_bulk_action_all_fail_outcome(client: AsyncClient) -> None:
     counters = metrics.snapshot()
     assert counters.get("bulk_actions_total.resolve.fail", 0) == 1
     assert counters.get("bulk_action_ids_total.resolve", 0) == 0
+
+
+# ── /tickets/bulk/non-actionable ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_bulk_non_actionable_happy(client: AsyncClient, session: AsyncSession):
+    _seed_open(session, "b-na-1")
+    _seed_open(session, "b-na-2")
+    _seed_open(session, "b-na-3")
+    await session.commit()
+
+    r = await client.post(
+        "/tickets/bulk/non-actionable",
+        json={"ticket_ids": ["b-na-1", "b-na-2", "b-na-3"]},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body["ok_ids"]) == {"b-na-1", "b-na-2", "b-na-3"}
+    assert body["failed"] == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_non_actionable_partial(client: AsyncClient, session: AsyncSession):
+    _seed_open(session, "b-na-4")
+    t = Ticket(
+        id="b-na-5",
+        title="x",
+        state="open",
+        author={},
+        parts=[],
+        internal_notes=[],
+        created_at=naive_utcnow(),
+        updated_at=naive_utcnow(),
+        category_id=1,
+        summary="",
+        ai_confidence=0.0,
+        resolved_at=naive_utcnow(),
+        resolved_source="manual",
+    )
+    session.add(t)
+    await session.commit()
+
+    r = await client.post(
+        "/tickets/bulk/non-actionable",
+        json={"ticket_ids": ["b-na-4", "b-na-5"]},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok_ids"] == ["b-na-4"]
+    assert [f["id"] for f in body["failed"]] == ["b-na-5"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_non_actionable_cap_exceeded(client: AsyncClient):
+    r = await client.post(
+        "/tickets/bulk/non-actionable",
+        json={"ticket_ids": [f"x{i}" for i in range(201)]},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_bulk_non_actionable_empty(client: AsyncClient):
+    r = await client.post("/tickets/bulk/non-actionable", json={"ticket_ids": []})
+    assert r.status_code == 422

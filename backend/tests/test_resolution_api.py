@@ -398,3 +398,76 @@ async def test_drag_out_of_resolved_reopens_and_overrides(
     assert row is not None
     assert row.resolved_at is None
     assert row.resolved_source is None
+
+
+@pytest.mark.asyncio
+async def test_post_non_actionable_returns_200_and_persists(
+    client: AsyncClient, session: AsyncSession
+):
+    _seed_open(session, "t-na-r1")
+    await session.commit()
+
+    r = await client.post("/tickets/t-na-r1/non-actionable", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["resolved_source"] == "non_actionable"
+    assert body["resolved_at"]
+
+
+@pytest.mark.asyncio
+async def test_post_non_actionable_404_unknown(client: AsyncClient):
+    r = await client.post("/tickets/ghost/non-actionable", json={})
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_post_non_actionable_409_already_resolved(client: AsyncClient, session: AsyncSession):
+    t = Ticket(
+        id="t-na-r2",
+        title="x",
+        state="open",
+        author={},
+        parts=[],
+        internal_notes=[],
+        created_at=naive_utcnow(),
+        updated_at=naive_utcnow(),
+        category_id=1,
+        summary="",
+        ai_confidence=0.0,
+        resolved_at=naive_utcnow(),
+        resolved_source="manual",
+    )
+    session.add(t)
+    await session.commit()
+    r = await client.post("/tickets/t-na-r2/non-actionable", json={})
+    assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_reopen_clears_non_actionable(client: AsyncClient, session: AsyncSession):
+    t = Ticket(
+        id="t-na-r3",
+        title="x",
+        state="open",
+        author={},
+        parts=[],
+        internal_notes=[],
+        created_at=naive_utcnow(),
+        updated_at=naive_utcnow(),
+        category_id=1,
+        summary="",
+        ai_confidence=0.0,
+        resolved_at=naive_utcnow(),
+        resolved_source="non_actionable",
+    )
+    session.add(t)
+    await session.commit()
+
+    r = await client.post("/tickets/t-na-r3/reopen", json={})
+    assert r.status_code == 200
+
+    session.expire_all()
+    row = await session.get(Ticket, "t-na-r3")
+    assert row is not None
+    assert row.resolved_at is None
+    assert row.resolved_source is None

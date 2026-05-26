@@ -116,6 +116,15 @@ async def bulk_dismiss_chip(
     return await bulk_svc.bulk_dismiss_chip(session, body.ticket_ids)
 
 
+@router.post("/bulk/non-actionable", response_model=BulkResult)
+async def bulk_non_actionable(
+    body: BulkTicketIds,
+    session: AsyncSession = Depends(get_session),
+) -> BulkResult:
+    """Mark N tickets non-actionable. Already-resolved rows fail with 409."""
+    return await bulk_svc.bulk_mark_non_actionable(session, body.ticket_ids)
+
+
 @router.patch("/{ticket_id}/category", response_model=OverrideResponse)
 async def override_category(
     ticket_id: str,
@@ -151,6 +160,16 @@ async def resolve_ticket(
 ) -> ResolveResponse:
     """Manual resolve. 409 if already resolved, 404 if unknown."""
     out = await resolution_svc.resolve(session, ticket_id)
+    return ResolveResponse(resolved_at=out.resolved_at, resolved_source=out.resolved_source)
+
+
+@router.post("/{ticket_id}/non-actionable", response_model=ResolveResponse)
+async def mark_ticket_non_actionable(
+    ticket_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> ResolveResponse:
+    """Mark a ticket non-actionable. 409 if already resolved, 404 if unknown."""
+    out = await resolution_svc.mark_non_actionable(session, ticket_id)
     return ResolveResponse(resolved_at=out.resolved_at, resolved_source=out.resolved_source)
 
 

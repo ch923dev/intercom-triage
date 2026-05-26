@@ -123,9 +123,17 @@ async def test_mark_non_actionable_stamps_source(session: AsyncSession) -> None:
     now = naive_utcnow()
     session.add(
         Ticket(
-            id="t-na-svc-1", title="x", state="open", author={}, parts=[],
-            internal_notes=[], created_at=now, updated_at=now, category_id=1,
-            summary="", ai_confidence=0.0,
+            id="t-na-svc-1",
+            title="x",
+            state="open",
+            author={},
+            parts=[],
+            internal_notes=[],
+            created_at=now,
+            updated_at=now,
+            category_id=1,
+            summary="",
+            ai_confidence=0.0,
         )
     )
     await session.commit()
@@ -142,6 +150,7 @@ async def test_mark_non_actionable_stamps_source(session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_mark_non_actionable_409_when_already_resolved(session: AsyncSession) -> None:
     from fastapi import HTTPException
+
     from app.models import Ticket
     from app.services.resolution import mark_non_actionable
     from app.util import naive_utcnow
@@ -149,10 +158,19 @@ async def test_mark_non_actionable_409_when_already_resolved(session: AsyncSessi
     now = naive_utcnow()
     session.add(
         Ticket(
-            id="t-na-svc-2", title="x", state="open", author={}, parts=[],
-            internal_notes=[], created_at=now, updated_at=now, category_id=1,
-            summary="", ai_confidence=0.0,
-            resolved_at=now, resolved_source="manual",
+            id="t-na-svc-2",
+            title="x",
+            state="open",
+            author={},
+            parts=[],
+            internal_notes=[],
+            created_at=now,
+            updated_at=now,
+            category_id=1,
+            summary="",
+            ai_confidence=0.0,
+            resolved_at=now,
+            resolved_source="manual",
         )
     )
     await session.commit()
@@ -165,6 +183,7 @@ async def test_mark_non_actionable_409_when_already_resolved(session: AsyncSessi
 @pytest.mark.asyncio
 async def test_mark_non_actionable_404_unknown(session: AsyncSession) -> None:
     from fastapi import HTTPException
+
     from app.services.resolution import mark_non_actionable
 
     with pytest.raises(HTTPException) as exc:
