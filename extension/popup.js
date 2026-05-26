@@ -19,6 +19,7 @@ import {
   getSyncState,
   ingestTickets,
   markFollowupFired,
+  markNonActionable,
   overrideCategory,
   reopenTicket,
   resolveTicket,
@@ -186,15 +187,23 @@ function renderCard(ticket, { isResolved = false } = {}) {
   }
 
   if (isResolved) {
-    // Resolved tab: show ↺ Reopen button.
+    // Resolved tab: optional Non-actionable badge, then ↺ Reopen button.
+    if (ticket.resolved_source === 'non_actionable') {
+      const chip = node('span', 'na-badge mono', 'Non-actionable');
+      meta.append(chip);
+    }
     const reopenBtn = node('button', 'action-btn reopen-btn', '↺ Reopen');
     reopenBtn.addEventListener('click', () => void doReopen(ticket));
     meta.append(reopenBtn);
   } else {
-    // Open/category tabs: show ✓ Resolve button + Move button.
+    // Open/category tabs: show ✓ Resolve + ⊘ Non-actionable + Move buttons.
     const resolveBtn = node('button', 'action-btn resolve-btn', '✓ Resolve');
     resolveBtn.addEventListener('click', () => void doResolve(ticket));
     meta.append(resolveBtn);
+
+    const naBtn = node('button', 'action-btn non-actionable-btn', '⊘ Non-actionable');
+    naBtn.addEventListener('click', () => void doMarkNonActionable(ticket));
+    meta.append(naBtn);
 
     const moveBtn = node('button', 'move-btn', 'Move ▾');
     meta.append(moveBtn);
@@ -384,6 +393,23 @@ async function doResolve(ticket) {
     state.tickets = state.tickets.filter((t) => t.id !== ticket.id);
     ticket.resolved_at = result.resolved_at ?? new Date().toISOString();
     ticket.resolved_source = result.resolved_source ?? 'manual';
+    state.resolvedTickets = [ticket, ...state.resolvedTickets];
+    renderTabs();
+    renderList();
+  } catch (e) {
+    state.error = e.message;
+    renderList();
+  }
+}
+
+/** Mark a ticket non-actionable — sub-state of resolved; moves to Resolved tab with a chip. */
+async function doMarkNonActionable(ticket) {
+  try {
+    const result = await markNonActionable(ticket.id);
+    // Move locally from open tickets to resolved tickets.
+    state.tickets = state.tickets.filter((t) => t.id !== ticket.id);
+    ticket.resolved_at = result.resolved_at ?? new Date().toISOString();
+    ticket.resolved_source = result.resolved_source ?? 'non_actionable';
     state.resolvedTickets = [ticket, ...state.resolvedTickets];
     renderTabs();
     renderList();
