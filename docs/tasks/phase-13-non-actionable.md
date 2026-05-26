@@ -52,12 +52,13 @@ Plan: [`docs/superpowers/plans/2026-05-25-non-actionable-tickets.md`](../superpo
 **Acceptance:**
 - [x] `npm run typecheck` clean.
 
-### T091 — ResolutionChip non-actionable badge variant
+### T091 — `NonActionableColumn` + `ResolutionChip` cleanup
 **Depends on:** T090
 **Implements:** FR-037
-**Description:** Chip renders muted "Non-actionable" badge on resolved cards whose `resolved_source === 'non_actionable'`.
+**Description:** Add a separate `NonActionableColumn` to the webapp board (right of Resolved). Backed by a `tickets.nonActionableTickets` computed getter that filters `resolvedTickets` by `resolved_source === 'non_actionable'`; `ResolvedColumn` switches to a `pureResolvedTickets` getter. `ResolutionChip` drops the badge variant — the column itself communicates source. (Storage stays unified so `markNonActionable` / bulk / reopen rollback paths keep their single-array semantics.)
 **Acceptance:**
-- [ ] Manual smoke: chip renders on a seeded non-actionable ticket.
+- [x] Vitest covers the two getters and the rollback paths still pass.
+- [ ] Manual smoke: mark a ticket non-actionable → it lands in the Non-actionable column, not Resolved; reopen returns it to its category.
 
 ### T092 — Flyout: Mark non-actionable button
 **Depends on:** T090
@@ -76,7 +77,7 @@ Plan: [`docs/superpowers/plans/2026-05-25-non-actionable-tickets.md`](../superpo
 ### T094 — Extension popup
 **Depends on:** T089
 **Implements:** FR-037, US-019
-**Description:** Add `markNonActionable` helper, ⊘ button on open-tab cards, "Non-actionable" badge on resolved-tab cards.
+**Description:** Add `markNonActionable` helper, ⊘ button on open-tab cards, separate "Non-actionable" tab (alongside Open + Resolved). Resolved tab filters out `non_actionable` rows; the new tab shows only those rows. No per-card badge — the tab communicates source.
 **Acceptance:**
 - [ ] Manual smoke after reloading unpacked extension.
 

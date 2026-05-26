@@ -52,7 +52,7 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 7. **Fallback `CategorizationResult` rows are never cached.** Caching a fallback poisons the ticket until a new customer message arrives.
 8. **`title_user_edited` / `summary_user_edited` are sticky across re-syncs.** Extension ingest + backend `_upsert_ticket` must preserve operator edits.
 9. **`MAX_BULK_IDS = 200`.** Backend constant (`backend/app/config.py`), webapp pre-flight warning. Bump together.
-10. **`tickets.resolved_at` ⇔ `resolved_source`** (XOR CheckConstraint). `resolved_source ∈ {'manual', 'intercom_closed', 'non_actionable'}`. Non-actionable is a sub-state of resolved — same column, distinct chip; same reopen path clears it.
+10. **`tickets.resolved_at` ⇔ `resolved_source`** (XOR CheckConstraint). `resolved_source ∈ {'manual', 'intercom_closed', 'non_actionable'}`. Non-actionable renders as its own Kanban column (webapp) / its own popup tab (extension) — split from Resolved at the view layer (`tickets.nonActionableTickets` / `pureResolvedTickets` getters); storage stays unified. Reopen path clears both.
 11. **Drag-out reopen is atomic.** Setting an override on a resolved ticket clears `resolved_at` + `resolved_source` in the same transaction.
 12. **Singleton `Settings` row enforced by `CHECK (id = 1)`.** `init_db` inserts it on first boot.
 
