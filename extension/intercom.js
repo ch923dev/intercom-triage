@@ -187,12 +187,28 @@ function normalizeAuthor(raw) {
 }
 
 function authorFromSummary(summary) {
-  if (!summary) return { id: null, name: null, email: null, type: 'user' };
+  if (!summary) {
+    return { id: null, name: null, email: null, type: 'user', location: null, timezone: null, phone: null, company: null };
+  }
+  // Intercom's `user_summary` carries two identifiers: `user_id` is the
+  // user-facing "User id" shown in Intercom's contact panel; `id` is the
+  // internal contact-record id. Prefer `user_id` so triage matches Intercom;
+  // fall back to `id` for leads/contacts that have no external user_id.
+  const userId = summary.user_id ?? summary.id;
+  // Mirror Intercom's "User data" panel: compose location from geoip and pull
+  // timezone / phone / company so the webapp can show the same identity block.
+  const geo = (summary.geoip_data && typeof summary.geoip_data === 'object') ? summary.geoip_data : {};
+  const locationParts = [geo.city_name, geo.region_code, geo.country_name].filter(Boolean);
+  const company = summary.first_company?.name ?? summary.companies?.[0]?.name ?? null;
   return {
-    id: summary.id != null ? String(summary.id) : null,
+    id: userId != null ? String(userId) : null,
     name: summary.name ?? null,
     email: summary.email ?? null,
     type: summary.role ?? 'user',
+    location: locationParts.length ? locationParts.join(', ') : null,
+    timezone: summary.timezone ?? geo.timezone ?? null,
+    phone: summary.phone ?? null,
+    company,
   };
 }
 
