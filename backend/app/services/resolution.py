@@ -56,6 +56,7 @@ def apply_reopen(row: Ticket) -> None:
         raise HTTPException(status_code=409, detail="ticket is not resolved")
     row.resolved_at = None
     row.resolved_source = None
+    row.resolution_cleared_at = naive_utcnow()
 
 
 def apply_mark_non_actionable(row: Ticket) -> ResolveOutcome:
