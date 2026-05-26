@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
+import anyio
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,7 +60,7 @@ async def upload_attachment(
     abs_path = config.attachments_dir / rel
     abs_path.parent.mkdir(parents=True, exist_ok=True)
     if not abs_path.exists():
-        abs_path.write_bytes(data)
+        await anyio.to_thread.run_sync(abs_path.write_bytes, data)
 
     row = NoteAttachment(
         owner_kind=owner_kind,
@@ -112,9 +113,11 @@ async def soft_delete(session: AsyncSession, attachment_id: int) -> NoteAttachme
     return row
 
 
-def get_or_make_thumb_path(config: AppConfig, row: NoteAttachment) -> Path | None:
+async def get_or_make_thumb_path(config: AppConfig, row: NoteAttachment) -> Path | None:
     """Return the on-disk path to a 256px max-side WebP thumbnail for an image
-    attachment. Generated on first request, cached. Returns None for non-images."""
+    attachment. Generated on first request, cached. Returns None for non-images.
+    The PIL render step is offloaded to a worker thread to avoid blocking the
+    event loop on CPU-bound image I/O."""
     if not row.mime.startswith("image/"):
         return None
     thumbs_dir = config.attachments_dir / "thumbs"
@@ -127,12 +130,15 @@ def get_or_make_thumb_path(config: AppConfig, row: NoteAttachment) -> Path | Non
     if not source_path.exists():
         return None
 
-    from PIL import Image
+    def _render() -> None:
+        from PIL import Image
 
-    with Image.open(source_path) as im:
-        im = im.convert("RGB")
-        im.thumbnail((256, 256))
-        im.save(thumb_path, format="WEBP", quality=80)
+        with Image.open(source_path) as im:
+            converted = im.convert("RGB")
+            converted.thumbnail((256, 256))
+            converted.save(thumb_path, format="WEBP", quality=80)
+
+    await anyio.to_thread.run_sync(_render)
     return thumb_path
 
 
