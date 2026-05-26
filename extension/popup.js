@@ -28,6 +28,7 @@ import {
 import { fetchHydratedBatch, getAppId, IntercomSessionError, setAppId } from './intercom.js';
 
 const RESOLVED_TAB_KEY = 'resolved';
+const NON_ACTIONABLE_TAB_KEY = 'non-actionable';
 
 const state = {
   categories: [],
@@ -134,7 +135,17 @@ function renderTabs() {
       color: null,
       proposal: false,
       resolved: true,
-      count: state.resolvedTickets.length,
+      nonActionable: false,
+      count: state.resolvedTickets.filter((t) => t.resolved_source !== 'non_actionable').length,
+    },
+    {
+      key: NON_ACTIONABLE_TAB_KEY,
+      name: 'Non-actionable',
+      color: null,
+      proposal: false,
+      resolved: false,
+      nonActionable: true,
+      count: state.resolvedTickets.filter((t) => t.resolved_source === 'non_actionable').length,
     },
   ];
 
@@ -142,6 +153,7 @@ function renderTabs() {
     const btn = node('button', 'tab');
     if (tab.proposal) btn.classList.add('proposal');
     if (tab.resolved) btn.classList.add('resolved-tab');
+    if (tab.nonActionable) btn.classList.add('non-actionable-tab');
     if (tab.key === state.activeTab) btn.classList.add('active');
 
     if (tab.color) {
@@ -187,11 +199,8 @@ function renderCard(ticket, { isResolved = false } = {}) {
   }
 
   if (isResolved) {
-    // Resolved tab: optional Non-actionable badge, then ↺ Reopen button.
-    if (ticket.resolved_source === 'non_actionable') {
-      const chip = node('span', 'na-badge mono', 'Non-actionable');
-      meta.append(chip);
-    }
+    // Resolved + Non-actionable tabs both show ↺ Reopen. Source is communicated
+    // by the tab itself, so no per-card badge.
     const reopenBtn = node('button', 'action-btn reopen-btn', '↺ Reopen');
     reopenBtn.addEventListener('click', () => void doReopen(ticket));
     meta.append(reopenBtn);
@@ -249,10 +258,17 @@ function renderList() {
     return;
   }
 
-  if (state.activeTab === RESOLVED_TAB_KEY) {
-    const rows = state.resolvedTickets;
+  if (state.activeTab === RESOLVED_TAB_KEY || state.activeTab === NON_ACTIONABLE_TAB_KEY) {
+    const wantNonActionable = state.activeTab === NON_ACTIONABLE_TAB_KEY;
+    const rows = state.resolvedTickets.filter((t) =>
+      wantNonActionable
+        ? t.resolved_source === 'non_actionable'
+        : t.resolved_source !== 'non_actionable',
+    );
     if (rows.length === 0) {
-      el.list.append(node('p', 'state mono', 'No resolved tickets'));
+      el.list.append(
+        node('p', 'state mono', wantNonActionable ? 'No non-actionable tickets' : 'No resolved tickets'),
+      );
       return;
     }
     // Most-recently-resolved first.
@@ -458,6 +474,7 @@ async function load() {
       ...state.categories.map((c) => `cat-${c.id}`),
       ...state.proposals.map((p) => `prop-${p.id}`),
       RESOLVED_TAB_KEY,
+      NON_ACTIONABLE_TAB_KEY,
     ];
     if (!keys.includes(state.activeTab)) state.activeTab = keys[0] ?? null;
   } catch (e) {
