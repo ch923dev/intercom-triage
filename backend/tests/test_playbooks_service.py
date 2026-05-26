@@ -235,9 +235,7 @@ async def test_playbook_survives_ticket_resync(
         internal_notes=[],
     )
     # No AI configured → fallback categorization; this is a real ingest pass.
-    await ingest_tickets(
-        session=session, openrouter=None, config=test_config, hydrated=[hydrated]
-    )
+    await ingest_tickets(session=session, openrouter=None, config=test_config, hydrated=[hydrated])
 
     refreshed = await session.get(Playbook, saved.id)
     assert refreshed is not None
