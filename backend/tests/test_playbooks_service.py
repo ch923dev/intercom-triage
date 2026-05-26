@@ -138,3 +138,82 @@ async def test_update_404_when_missing(session: AsyncSession) -> None:
     with pytest.raises(HTTPException) as exc:
         await svc.update(session, 999, label="x", body=None)
     assert exc.value.status_code == 404
+
+
+from app.models import NoteEntry, TicketNote
+
+
+def _ticket_with_notes() -> Ticket:
+    now = naive_utcnow()
+    t = _make_ticket("TDRAFT", category_id=1, updated_at=now)
+    t.parts = [
+        {
+            "author": {"type": "user", "name": "Cust"},
+            "body": "I was double charged",
+            "created_at": "2026-05-26T10:00:00Z",
+            "is_admin": False,
+        },
+        {
+            "author": {"type": "admin", "name": "Op"},
+            "body": "Refund issued",
+            "created_at": "2026-05-26T10:05:00Z",
+            "is_admin": True,
+        },
+    ]
+    t.internal_notes = [
+        {
+            "author": {"type": "admin", "name": "Op"},
+            "body": "SECRET_INTERNAL_FLAG",
+            "created_at": "2026-05-26T10:06:00Z",
+            "is_admin": True,
+        },
+    ]
+    return t
+
+
+def test_build_draft_messages_excludes_internal_notes() -> None:
+    ticket = _ticket_with_notes()
+    entries = [NoteEntry(id=1, ticket_id="TDRAFT", body="checked Stripe dashboard")]
+    note = TicketNote(ticket_id="TDRAFT", body="customer on Pro plan")
+
+    messages = svc.build_draft_messages(ticket, entries, note)
+    blob = "\n".join(m["content"] for m in messages)
+
+    assert "double charged" in blob
+    assert "checked Stripe dashboard" in blob
+    assert "customer on Pro plan" in blob
+    assert "SECRET_INTERNAL_FLAG" not in blob  # invariant #4
+
+
+class _FakeClient:
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+
+    async def complete(self, *, model: str, messages: list[dict[str, str]], ticket_id: str) -> str:
+        return self.reply
+
+
+@pytest.mark.asyncio
+async def test_draft_from_ticket_returns_text(session: AsyncSession) -> None:
+    session.add(_ticket_with_notes())
+    await session.commit()
+    text = await svc.draft_from_ticket(
+        session, "TDRAFT", client=_FakeClient("  1. Refund. 2. Reply.  "), model="m"
+    )
+    assert text == "1. Refund. 2. Reply."
+
+
+@pytest.mark.asyncio
+async def test_draft_from_ticket_503_without_client(session: AsyncSession) -> None:
+    session.add(_ticket_with_notes())
+    await session.commit()
+    with pytest.raises(HTTPException) as exc:
+        await svc.draft_from_ticket(session, "TDRAFT", client=None, model="m")
+    assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_draft_from_ticket_404_when_missing(session: AsyncSession) -> None:
+    with pytest.raises(HTTPException) as exc:
+        await svc.draft_from_ticket(session, "nope", client=_FakeClient("x"), model="m")
+    assert exc.value.status_code == 404
