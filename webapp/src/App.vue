@@ -11,6 +11,7 @@ import BulkActionBar from '@/components/BulkActionBar.vue';
 import CategoriesPage from '@/components/CategoriesPage.vue';
 import ExtensionCallout from '@/components/ExtensionCallout.vue';
 import FollowupBoard from '@/components/FollowupBoard.vue';
+import PlaybooksPage from '@/components/PlaybooksPage.vue';
 import ProposalsPage from '@/components/ProposalsPage.vue';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
 import TicketFlyout from '@/components/TicketFlyout.vue';
@@ -238,6 +239,7 @@ watch(
       </template>
       <FollowupBoard v-else-if="view.view === 'followups'" />
       <CategoriesPage v-else-if="view.view === 'categories'" />
+      <PlaybooksPage v-else-if="view.view === 'playbooks'" />
       <ProposalsPage v-else />
     </template>
 

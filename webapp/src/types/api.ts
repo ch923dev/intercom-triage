@@ -86,6 +86,17 @@ export interface NoteEntry {
   created_at: string;
 }
 
+export interface Playbook {
+  id: number;
+  category_id: number;
+  label: string;
+  body: string;
+  source_ticket_id: string | null;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+}
+
 export interface NoteAttachment {
   id: number;
   owner_kind: 'entry' | 'ticket';
