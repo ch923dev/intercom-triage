@@ -123,6 +123,124 @@ describe('ticketsStore.resolved getters', () => {
   });
 });
 
+/** A promise whose resolution the test controls — lets us hold a mutation
+ *  "in flight" while asserting other store behaviour. */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+describe('ticketsStore.silentRefresh race guard (C1)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('skips the poll while an optimistic mutation is in flight', async () => {
+    const { api } = await import('@/api/client');
+    const d = deferred<unknown>();
+    (api.resolveTicket as ReturnType<typeof vi.fn>).mockReturnValue(d.promise);
+    (api.listTickets as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a'));
+
+    // Begin an optimistic resolve but don't await it — mutating is now > 0.
+    const inFlight = s.markResolved('a');
+    expect(s.isMutating).toBe(true);
+
+    await s.silentRefresh();
+    expect(api.listTickets).not.toHaveBeenCalled();
+
+    // Let the mutation finish; the guard lifts.
+    d.resolve(undefined);
+    await inFlight;
+    expect(s.isMutating).toBe(false);
+    await s.silentRefresh();
+    expect(api.listTickets).toHaveBeenCalled();
+  });
+
+  it('does not clobber the optimistic move that the failed poll would have reverted', async () => {
+    const { api } = await import('@/api/client');
+    const d = deferred<unknown>();
+    (api.resolveTicket as ReturnType<typeof vi.fn>).mockReturnValue(d.promise);
+    // The server still reports the ticket as open (resolve not yet committed).
+    (api.listTickets as ReturnType<typeof vi.fn>).mockImplementation(
+      ({ resolved }: { resolved: boolean }) => (resolved ? [] : [fakeTicket('a')]),
+    );
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a'));
+
+    const inFlight = s.markResolved('a');
+    await s.silentRefresh(); // guarded → no-op, optimistic move preserved
+    expect(s.tickets.find((t) => t.id === 'a')).toBeUndefined();
+    expect(s.resolvedTickets.find((t) => t.id === 'a')).toBeDefined();
+
+    d.resolve(undefined);
+    await inFlight;
+  });
+});
+
+describe('ticketsStore.pendingOverrides reconcile (C1)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('drops a pending override once the server data reflects it', async () => {
+    const { api } = await import('@/api/client');
+    (api.overrideCategory as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a', { category_id: 1 }));
+
+    await s.applyOverride('a', 2);
+    expect(s.pendingOverrides.a).toBe(2);
+
+    // Server now returns the ticket already in category 2.
+    (api.listTickets as ReturnType<typeof vi.fn>).mockImplementation(
+      ({ resolved }: { resolved: boolean }) =>
+        resolved ? [] : [fakeTicket('a', { category_id: 2 })],
+    );
+    await s.refresh();
+    expect(s.pendingOverrides.a).toBeUndefined();
+  });
+});
+
+describe('ticketsStore.editTicket on a resolved ticket (A1)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('edits the title of a ticket that lives in resolvedTickets', async () => {
+    const { api } = await import('@/api/client');
+    (api.editTicket as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const s = useTicketsStore();
+    s.resolvedTickets.push(fakeTicket('r', { resolved_at: NOW, resolved_source: 'manual' }));
+
+    await s.editTicket('r', { title: 'edited title' });
+
+    const row = s.resolvedTickets.find((t) => t.id === 'r')!;
+    expect(row.title).toBe('edited title');
+    expect(row.title_user_edited).toBe(true);
+    expect(api.editTicket).toHaveBeenCalledWith('r', { title: 'edited title' });
+  });
+
+  it('rolls back a resolved-ticket edit on API failure', async () => {
+    const { api } = await import('@/api/client');
+    (api.editTicket as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
+    const s = useTicketsStore();
+    s.resolvedTickets.push(fakeTicket('r', { resolved_at: NOW, resolved_source: 'manual' }));
+
+    await expect(s.editTicket('r', { title: 'edited title' })).rejects.toThrow('boom');
+    expect(s.resolvedTickets.find((t) => t.id === 'r')!.title).toBe('t-r');
+  });
+});
+
 describe('ticketsStore.bulkMarkNonActionable', () => {
   beforeEach(() => {
     setActivePinia(createPinia());

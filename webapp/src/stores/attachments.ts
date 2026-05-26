@@ -11,6 +11,11 @@ import { ref } from 'vue';
 import { api } from '@/api/client';
 import type { NoteAttachment } from '@/types/api';
 
+/** Client-side upload cap. Mirrors the backend `attachment_max_bytes` (25 MiB)
+ *  so oversize files are rejected before upload with a clear message instead of
+ *  a 413 after the bytes are sent. Keep in sync with backend config. */
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 export const useAttachmentsStore = defineStore('attachments', () => {
   /** ticket_id → list of attachments (both owner_kinds). */
   const map = ref<Record<string, NoteAttachment[]>>({});
@@ -59,6 +64,9 @@ export const useAttachmentsStore = defineStore('attachments', () => {
     ownerId: string,
     ticketId: string,
   ): Promise<NoteAttachment> {
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      throw new Error(`File too large — max ${Math.floor(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB`);
+    }
     const tempId = nextTempId--;
     const optimistic: NoteAttachment = {
       id: tempId,

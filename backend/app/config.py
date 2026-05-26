@@ -54,6 +54,9 @@ class AppConfig(BaseSettings):
     attachments_dir: Path = Path("./data/attachments")
     attachment_gc_days: int = Field(default=7, ge=0)
     attachment_sweep_interval_seconds: int = Field(default=86_400, ge=60)
+    # Hard cap on a single uploaded file. Bounds memory per request — an
+    # unbounded read would let one upload OOM the local process.
+    attachment_max_bytes: int = Field(default=25 * 1024 * 1024, ge=1)
 
     # ── Server ────────────────────────────────────────────────────────────────
     log_level: str = "INFO"

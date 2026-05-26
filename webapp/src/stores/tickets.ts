@@ -49,6 +49,12 @@ export const useTicketsStore = defineStore('tickets', () => {
   /** Active search query. Empty string means no filter. */
   const query = ref('');
 
+  /** Count of optimistic mutations currently awaiting their server call. While
+   *  this is > 0 the board holds optimistic state the server doesn't yet
+   *  reflect, so `silentRefresh` must not overwrite it (auto-sync race). Each
+   *  mutating action increments on entry and decrements in `finally`. */
+  const mutating = ref(0);
+
   const tickets = computed(() => state.value.tickets);
   const loading = computed(() => state.value.loading);
   const lastRefresh = computed(() => state.value.lastRefresh);
@@ -106,6 +112,21 @@ export const useTicketsStore = defineStore('tickets', () => {
     return map;
   });
 
+  /** Drop pending overrides the freshly-fetched server data already reflects.
+   *  Without this, a successfully-applied override lingers in `pendingOverrides`
+   *  forever (slow staleness/memory leak across a session). */
+  function _reconcilePendingOverrides() {
+    const next = { ...state.value.pendingOverrides };
+    let changed = false;
+    for (const t of [...state.value.tickets, ...resolvedTickets.value]) {
+      if (t.id in next && next[t.id] === t.category_id) {
+        delete next[t.id];
+        changed = true;
+      }
+    }
+    if (changed) state.value.pendingOverrides = next;
+  }
+
   /** Reload the stored board. Filter settings are applied server-side. */
   async function refresh() {
     state.value.loading = true;
@@ -117,6 +138,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       ]);
       state.value.tickets = open;
       resolvedTickets.value = resolved;
+      _reconcilePendingOverrides();
     } catch (e) {
       state.value.error = (e as Error).message;
       throw e;
@@ -128,8 +150,11 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   /** Silent board refresh for auto-sync polling — does NOT set loading=true so
    *  the "Loading…" banner never flickers. Error state is still updated on
-   *  failure. */
+   *  failure. Skips entirely while a manual refresh or an optimistic mutation
+   *  is in flight: a wholesale list replacement mid-mutation would clobber the
+   *  optimistic state and corrupt index-based rollback. */
   async function silentRefresh() {
+    if (state.value.loading || mutating.value > 0) return;
     state.value.error = null;
     try {
       const [open, resolved] = await Promise.all([
@@ -138,6 +163,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       ]);
       state.value.tickets = open;
       resolvedTickets.value = resolved;
+      _reconcilePendingOverrides();
     } catch (e) {
       state.value.error = (e as Error).message;
     } finally {
@@ -152,14 +178,16 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   /** Edit the AI-supplied title / summary. Optimistic local update; rolls back
    *  on server failure. An empty string on either clears the override
-   *  server-side (next sync restores the AI value). */
-  async function editTicket(
-    ticketId: string,
-    patch: { title?: string; summary?: string },
-  ) {
-    const idx = state.value.tickets.findIndex((t) => t.id === ticketId);
+   *  server-side (next sync restores the AI value). The flyout can display a
+   *  resolved ticket, so search both lists — otherwise editing a resolved
+   *  ticket's title silently no-ops. */
+  async function editTicket(ticketId: string, patch: { title?: string; summary?: string }) {
+    const openIdx = state.value.tickets.findIndex((t) => t.id === ticketId);
+    const list = openIdx !== -1 ? 'open' : 'resolved';
+    const target = openIdx !== -1 ? state.value.tickets : resolvedTickets.value;
+    const idx = openIdx !== -1 ? openIdx : target.findIndex((t) => t.id === ticketId);
     if (idx === -1) return;
-    const prev = state.value.tickets[idx]!;
+    const prev = target[idx]!;
     const optimistic: Ticket = { ...prev };
     if (patch.title !== undefined) {
       const trimmed = patch.title.trim();
@@ -171,21 +199,20 @@ export const useTicketsStore = defineStore('tickets', () => {
       optimistic.summary = trimmed || '';
       optimistic.summary_user_edited = trimmed.length > 0;
     }
-    state.value.tickets = [
-      ...state.value.tickets.slice(0, idx),
-      optimistic,
-      ...state.value.tickets.slice(idx + 1),
-    ];
+    const writeAt = (row: Ticket) => {
+      const next = [...target.slice(0, idx), row, ...target.slice(idx + 1)];
+      if (list === 'open') state.value.tickets = next;
+      else resolvedTickets.value = next;
+    };
+    mutating.value++;
+    writeAt(optimistic);
     try {
       await api.editTicket(ticketId, patch);
     } catch (e) {
-      // Roll back to the pre-edit ticket on failure.
-      state.value.tickets = [
-        ...state.value.tickets.slice(0, idx),
-        prev,
-        ...state.value.tickets.slice(idx + 1),
-      ];
+      writeAt(prev); // roll back to the pre-edit ticket
       throw e;
+    } finally {
+      mutating.value--;
     }
   }
 
@@ -195,6 +222,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     if (idx === -1) return;
     const original = state.value.tickets[idx]!;
     // Optimistic move
+    mutating.value++;
     state.value.tickets.splice(idx, 1);
     resolvedTickets.value.unshift({
       ...original,
@@ -209,6 +237,8 @@ export const useTicketsStore = defineStore('tickets', () => {
       resolvedTickets.value = resolvedTickets.value.filter((t) => t.id !== id);
       state.value.tickets.splice(idx, 0, original);
       throw e;
+    } finally {
+      mutating.value--;
     }
   }
 
@@ -217,6 +247,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idx = state.value.tickets.findIndex((t) => t.id === id);
     if (idx === -1) return;
     const original = state.value.tickets[idx]!;
+    mutating.value++;
     state.value.tickets.splice(idx, 1);
     resolvedTickets.value.unshift({
       ...original,
@@ -230,6 +261,8 @@ export const useTicketsStore = defineStore('tickets', () => {
       resolvedTickets.value = resolvedTickets.value.filter((t) => t.id !== id);
       state.value.tickets.splice(idx, 0, original);
       throw e;
+    } finally {
+      mutating.value--;
     }
   }
 
@@ -238,6 +271,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idx = resolvedTickets.value.findIndex((t) => t.id === id);
     if (idx === -1) return;
     const original = resolvedTickets.value[idx]!;
+    mutating.value++;
     resolvedTickets.value.splice(idx, 1);
     state.value.tickets.unshift({
       ...original,
@@ -251,26 +285,38 @@ export const useTicketsStore = defineStore('tickets', () => {
       state.value.tickets = state.value.tickets.filter((t) => t.id !== id);
       resolvedTickets.value.splice(idx, 0, original);
       throw e;
+    } finally {
+      mutating.value--;
     }
   }
 
   /** Set (or clear) the per-ticket AI-resolve override; reflects optimistically. */
   async function setAiResolve(id: string, enabled: boolean | null) {
-    await api.setAiResolve(id, enabled);
-    // Optimistically reflect the raw override in both lists; effective value
-    // recomputes on next refresh.
-    for (const list of [state.value.tickets, resolvedTickets.value]) {
-      const t = list.find((t) => t.id === id);
-      if (t) t.ai_resolve_override = enabled;
+    mutating.value++;
+    try {
+      await api.setAiResolve(id, enabled);
+      // Optimistically reflect the raw override in both lists; effective value
+      // recomputes on next refresh.
+      for (const list of [state.value.tickets, resolvedTickets.value]) {
+        const t = list.find((t) => t.id === id);
+        if (t) t.ai_resolve_override = enabled;
+      }
+    } finally {
+      mutating.value--;
     }
   }
 
   /** Suppress the resolution chip until the next update_at advance. */
   async function dismissChip(id: string) {
-    await api.dismissChip(id);
-    for (const list of [state.value.tickets, resolvedTickets.value]) {
-      const t = list.find((t) => t.id === id);
-      if (t) t.resolution_chip_state = null;
+    mutating.value++;
+    try {
+      await api.dismissChip(id);
+      for (const list of [state.value.tickets, resolvedTickets.value]) {
+        const t = list.find((t) => t.id === id);
+        if (t) t.resolution_chip_state = null;
+      }
+    } finally {
+      mutating.value--;
     }
   }
 
@@ -294,6 +340,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     }
 
     const previous = state.value.pendingOverrides[ticketId];
+    mutating.value++;
     state.value.pendingOverrides = { ...state.value.pendingOverrides, [ticketId]: categoryId };
     try {
       await api.overrideCategory(ticketId, categoryId);
@@ -309,6 +356,8 @@ export const useTicketsStore = defineStore('tickets', () => {
         resolvedTickets.value.splice(resolvedIdx, 0, movedFromResolved);
       }
       throw e;
+    } finally {
+      mutating.value--;
     }
   }
 
@@ -324,6 +373,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idSet = new Set(ids);
     const snapshot: Array<{ idx: number; row: Ticket }> = [];
     const moved: Ticket[] = [];
+    mutating.value++;
     // Walk in reverse so splices don't invalidate indexes ahead of us.
     for (let i = state.value.tickets.length - 1; i >= 0; i--) {
       const t = state.value.tickets[i]!;
@@ -348,6 +398,8 @@ export const useTicketsStore = defineStore('tickets', () => {
       // Whole-batch failure — roll back every optimistic move.
       _rollbackAll(snapshot);
       throw e;
+    } finally {
+      mutating.value--;
     }
   }
 
@@ -356,6 +408,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idSet = new Set(ids);
     const snapshot: Array<{ idx: number; row: Ticket }> = [];
     const moved: Ticket[] = [];
+    mutating.value++;
     for (let i = state.value.tickets.length - 1; i >= 0; i--) {
       const t = state.value.tickets[i]!;
       if (!idSet.has(t.id)) continue;
@@ -377,6 +430,8 @@ export const useTicketsStore = defineStore('tickets', () => {
     } catch (e) {
       _rollbackAll(snapshot);
       throw e;
+    } finally {
+      mutating.value--;
     }
   }
 
@@ -385,6 +440,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idSet = new Set(ids);
     const snapshot: Array<{ idx: number; row: Ticket }> = [];
     const moved: Ticket[] = [];
+    mutating.value++;
     for (let i = resolvedTickets.value.length - 1; i >= 0; i--) {
       const t = resolvedTickets.value[i]!;
       if (!idSet.has(t.id)) continue;
@@ -417,6 +473,8 @@ export const useTicketsStore = defineStore('tickets', () => {
         resolvedTickets.value.splice(idx, 0, row);
       }
       throw e;
+    } finally {
+      mutating.value--;
     }
   }
 
@@ -428,6 +486,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const overrideSnap: Record<string, number | undefined> = {};
     const resolvedMoves: Array<{ idx: number; row: Ticket }> = [];
 
+    mutating.value++;
     // Move any selected resolved tickets back to the open list optimistically.
     for (let i = resolvedTickets.value.length - 1; i >= 0; i--) {
       const t = resolvedTickets.value[i]!;
@@ -484,19 +543,26 @@ export const useTicketsStore = defineStore('tickets', () => {
         resolvedTickets.value.splice(idx, 0, row);
       }
       throw e;
+    } finally {
+      mutating.value--;
     }
   }
 
   /** Bulk dismiss chip — clears `resolution_chip_state` locally for ok ids. */
   async function bulkDismissChip(ids: string[]): Promise<BulkResult> {
-    const result = await api.bulkDismissChip(ids);
-    const okSet = new Set(result.ok_ids);
-    for (const list of [state.value.tickets, resolvedTickets.value]) {
-      for (const t of list) {
-        if (okSet.has(t.id)) t.resolution_chip_state = null;
+    mutating.value++;
+    try {
+      const result = await api.bulkDismissChip(ids);
+      const okSet = new Set(result.ok_ids);
+      for (const list of [state.value.tickets, resolvedTickets.value]) {
+        for (const t of list) {
+          if (okSet.has(t.id)) t.resolution_chip_state = null;
+        }
       }
+      return result;
+    } finally {
+      mutating.value--;
     }
-    return result;
   }
 
   /** Roll back from a snapshot — reinsert each row into state.value.tickets
@@ -538,6 +604,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     applyOverride,
     editTicket,
     isEmpty: computed(() => !state.value.loading && state.value.tickets.length === 0),
+    isMutating: computed(() => mutating.value > 0),
     pendingOverrides: computed(() => state.value.pendingOverrides),
     // Resolution
     resolvedTickets,

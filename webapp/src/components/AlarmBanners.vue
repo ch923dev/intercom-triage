@@ -14,7 +14,9 @@ function open(ticketId: string) {
 }
 
 function snooze(ticketId: string, minutes: number) {
-  void followups.snooze(ticketId, minutes);
+  // The store re-raises the banner on failure; swallow the rejection here so it
+  // doesn't surface as an unhandled promise rejection.
+  void followups.snooze(ticketId, minutes).catch(() => undefined);
 }
 </script>
 

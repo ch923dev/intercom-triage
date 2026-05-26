@@ -7,6 +7,8 @@ from io import BytesIO
 import pytest
 from httpx import AsyncClient
 
+from app.config import AppConfig
+
 
 def _png_bytes(color: tuple[int, int, int] = (255, 0, 0)) -> bytes:
     from PIL import Image
@@ -164,3 +166,48 @@ async def test_post_invalid_owner_kind_returns_422(client: AsyncClient) -> None:
         files={"file": ("a.txt", b"a", "text/plain")},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_post_oversize_returns_413(client: AsyncClient, test_config: AppConfig) -> None:
+    """A file larger than `attachment_max_bytes` is rejected with 413."""
+    test_config.attachment_max_bytes = 10
+    resp = await client.post(
+        "/attachments",
+        data={"owner_kind": "ticket", "owner_id": "T1", "ticket_id": "T1"},
+        files={"file": ("big.bin", b"x" * 11, "application/octet-stream")},
+    )
+    assert resp.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_get_raw_forces_attachment_for_html(client: AsyncClient) -> None:
+    """HTML (and any non-image mime) is served as a download with nosniff so it
+    can't execute script in the backend origin when opened."""
+    created = (
+        await client.post(
+            "/attachments",
+            data={"owner_kind": "ticket", "owner_id": "T1", "ticket_id": "T1"},
+            files={"file": ("x.html", b"<script>alert(1)</script>", "text/html")},
+        )
+    ).json()
+    resp = await client.get(f"/attachments/{created['id']}/raw")
+    assert resp.status_code == 200
+    assert resp.headers.get("content-disposition", "").startswith("attachment")
+    assert resp.headers.get("x-content-type-options") == "nosniff"
+
+
+@pytest.mark.asyncio
+async def test_get_raw_keeps_image_inline(client: AsyncClient) -> None:
+    """Images stay inline (preview UX) but still carry nosniff."""
+    created = (
+        await client.post(
+            "/attachments",
+            data={"owner_kind": "ticket", "owner_id": "T1", "ticket_id": "T1"},
+            files={"file": ("a.png", _png_bytes(), "image/png")},
+        )
+    ).json()
+    resp = await client.get(f"/attachments/{created['id']}/raw")
+    assert resp.status_code == 200
+    assert resp.headers.get("content-disposition", "").startswith("inline")
+    assert resp.headers.get("x-content-type-options") == "nosniff"

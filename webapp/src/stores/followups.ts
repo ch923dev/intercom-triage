@@ -165,11 +165,26 @@ export const useFollowupsStore = defineStore('followups', () => {
     }
   }
 
-  /** Reschedule by `minutes` and clear `fired` (FR-022). Drops the banner. */
+  /** Reschedule by `minutes` and clear `fired` (FR-022). Drops the banner.
+   *  On server failure, restore the prior record AND re-raise the banner —
+   *  otherwise the alarm silently vanishes while its `due_at` stays in the past
+   *  (a dropped, still-due follow-up the operator can no longer see). */
   async function snooze(ticketId: string, minutes: number) {
+    const previous = map.value[ticketId];
     dismissBanner(ticketId);
-    const saved = await api.snoozeFollowup(ticketId, minutes);
-    map.value = { ...map.value, [ticketId]: saved };
+    try {
+      const saved = await api.snoozeFollowup(ticketId, minutes);
+      map.value = { ...map.value, [ticketId]: saved };
+    } catch (e) {
+      rollback(ticketId, previous);
+      if (previous !== undefined) {
+        banners.value = [
+          ...banners.value,
+          { ticketId, dueAt: previous.due_at, reason: previous.reason },
+        ];
+      }
+      throw e;
+    }
   }
 
   /** Flag the alarm as rung so reloads don't re-ring it (FR-021). */
@@ -221,6 +236,9 @@ export const useFollowupsStore = defineStore('followups', () => {
     for (const f of Object.values(map.value)) {
       if (f.fired) continue;
       if (Date.parse(f.due_at) > now.value) continue;
+      // Don't stack a second banner if one is already showing for this ticket
+      // (e.g. after a reschedule-to-past re-clears `fired`).
+      if (banners.value.some((b) => b.ticketId === f.ticket_id)) continue;
       banners.value = [
         ...banners.value,
         { ticketId: f.ticket_id, dueAt: f.due_at, reason: f.reason },

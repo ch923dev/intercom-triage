@@ -25,6 +25,12 @@ from app.services import attachments as svc
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
+# Mimes safe to render inline in the browser. Everything else (HTML, SVG, PDF,
+# octet-stream, …) is served as an attachment so a maliciously-typed upload
+# can't execute script in the backend origin when opened. Paired with
+# `X-Content-Type-Options: nosniff` so the browser honours the declared type.
+_INLINE_SAFE_MIMES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"})
+
 
 def _to_read(row: NoteAttachment) -> NoteAttachmentRead:
     """Serialize an ORM row to the wire schema, computing raw/thumb URLs."""
@@ -53,7 +59,14 @@ async def post_attachment(
 ) -> NoteAttachmentRead:
     """Upload a single file. Multipart fields: file (binary), owner_kind,
     owner_id, ticket_id. Content-addressed dedup is transparent to the caller."""
-    data = await file.read()
+    # Read one byte past the cap so we can reject oversize files without ever
+    # holding more than the limit in memory.
+    data = await file.read(config.attachment_max_bytes + 1)
+    if len(data) > config.attachment_max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"file exceeds the {config.attachment_max_bytes}-byte limit",
+        )
     row = await svc.upload_attachment(
         session,
         config,
@@ -83,16 +96,21 @@ async def get_raw(
     session: AsyncSession = Depends(get_session),
     config: AppConfig = Depends(get_app_config),
 ) -> FileResponse:
-    """Stream the file bytes inline. `Content-Disposition: inline; filename="…"`."""
+    """Stream the file bytes. Images render inline; every other type is forced
+    to download (`Content-Disposition: attachment`) so an uploaded HTML/SVG file
+    can't execute script in the backend origin. `nosniff` stops the browser
+    second-guessing the declared mime."""
     row = await svc.get(session, attachment_id)
     abs_path = config.attachments_dir / row.stored_path
     if not abs_path.exists():
         raise HTTPException(status_code=404, detail="file missing on disk")
+    disposition = "inline" if row.mime in _INLINE_SAFE_MIMES else "attachment"
     return FileResponse(
         path=abs_path,
         media_type=row.mime,
         filename=row.filename,
-        content_disposition_type="inline",
+        content_disposition_type=disposition,
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 
