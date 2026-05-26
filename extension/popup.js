@@ -435,12 +435,15 @@ async function doMarkNonActionable(ticket) {
   }
 }
 
-/** Reopen a resolved ticket — removes it from Resolved tab, triggers a reload. */
+/** Reopen a resolved ticket — moves it back into its category tab. */
 async function doReopen(ticket) {
   try {
     await reopenTicket(ticket.id);
-    // Remove from resolved list; the ticket will reappear on next load/sync.
     state.resolvedTickets = state.resolvedTickets.filter((t) => t.id !== ticket.id);
+    ticket.resolved_at = null;
+    ticket.resolved_source = null;
+    ticket.resolution_chip_state = null;
+    state.tickets = [ticket, ...state.tickets];
     renderTabs();
     renderList();
   } catch (e) {
