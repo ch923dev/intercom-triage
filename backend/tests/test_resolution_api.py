@@ -6,11 +6,13 @@ Both fixtures depend on the same `app` fixture, so they share one in-memory DB.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Ticket
+from app.models import Settings, Ticket
 from app.util import naive_utcnow
 
 
@@ -473,3 +475,45 @@ async def test_reopen_clears_non_actionable(client: AsyncClient, session: AsyncS
     assert row is not None
     assert row.resolved_at is None
     assert row.resolved_source is None
+
+
+@pytest.mark.asyncio
+async def test_chip_state_new_reply_when_resolved_with_new_activity_and_ai_off(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """_chip_state returns 'new_reply' when a resolved ticket has new activity
+    (updated_at > resolved_at) and AI resolution is disabled (use_ai=False).
+
+    This covers the third return branch in _chip_state:
+        if resolved_at is not None and new_activity and not ai_on: return 'new_reply'
+    """
+    settings = await session.get(Settings, 1)
+    assert settings is not None
+    settings.use_ai = False
+
+    resolved_at = naive_utcnow() - timedelta(seconds=30)
+    updated_at = naive_utcnow()  # strictly after resolved_at → new_activity=True
+
+    session.add(
+        Ticket(
+            id="new-reply-1",
+            title="x",
+            state="open",
+            author={},
+            parts=[],
+            internal_notes=[],
+            created_at=resolved_at,
+            updated_at=updated_at,
+            category_id=1,
+            summary="",
+            ai_confidence=0.0,
+            resolved_at=resolved_at,
+            resolved_source="manual",
+        )
+    )
+    await session.commit()
+
+    r = await client.get("/tickets?resolved=true")
+    assert r.status_code == 200
+    payload = next(t for t in r.json() if t["id"] == "new-reply-1")
+    assert payload["resolution_chip_state"] == "new_reply"
