@@ -46,7 +46,9 @@ function sizeLabel(bytes: number): string {
       <a :href="a.raw_url" target="_blank" rel="noopener" class="att-pill-link">
         📄 {{ a.filename }} · {{ sizeLabel(a.size_bytes) }}
       </a>
-      <button class="att-x att-x-inline" title="Remove" @click.prevent="emit('remove', a.id)">×</button>
+      <button class="att-x att-x-inline" title="Remove" @click.prevent="emit('remove', a.id)">
+        ×
+      </button>
     </span>
   </div>
 </template>

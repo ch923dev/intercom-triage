@@ -3,7 +3,6 @@ import type { Ticket } from '@/types/api';
 import { computed } from 'vue';
 import { formatShortDateTime } from '@/utils/time';
 
-
 // ── Conversation timeline ────────────────────────────────────────────────────
 // One chronological stream: customer messages, teammate replies, and Intercom
 // internal notes — merged + sorted by `created_at`. Customer messages sit left,
@@ -20,8 +19,8 @@ interface TimelineItem {
 }
 
 const { ticket } = defineProps<{
-  ticket: Ticket
-}>()
+  ticket: Ticket;
+}>();
 
 const messageCount = computed(() => ticket.parts.length ?? 0);
 const noteCount = computed(() => ticket.internal_notes.length ?? 0);
@@ -55,7 +54,6 @@ function initials(name: string | null): string {
   const parts = name.trim().split(/\s+/).slice(0, 2);
   return parts.map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
 }
-
 </script>
 
 <template>
@@ -65,13 +63,12 @@ function initials(name: string | null): string {
       <span class="convo-count">
         {{ messageCount }} message{{ messageCount === 1 ? '' : 's' }}
         <template v-if="noteCount">
-          · {{ noteCount }} note{{ noteCount === 1 ? '' : 's' }}</template>
+          · {{ noteCount }} note{{ noteCount === 1 ? '' : 's' }}</template
+        >
       </span>
     </div>
 
-    <p v-if="!timeline.length" class="convo-empty mono">
-      No conversation messages yet
-    </p>
+    <p v-if="!timeline.length" class="convo-empty mono">No conversation messages yet</p>
     <div v-else class="chat">
       <template v-for="(m, i) in timeline" :key="i">
         <!-- Internal note — centred inset, side-channel context. -->
@@ -143,7 +140,6 @@ function initials(name: string | null): string {
     min-height: 220px;
   }
 }
-
 
 /* ── Conversation timeline — modern chat ──────────────────────────────────── */
 .chat {

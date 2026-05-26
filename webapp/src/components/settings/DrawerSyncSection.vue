@@ -14,11 +14,7 @@ function onAutoSyncChange(event: Event) {
   <section>
     <Mono>Background sync</Mono>
     <div class="row">
-      <select
-        class="sync-select"
-        :value="tweaks.autoSyncSeconds"
-        @change="onAutoSyncChange"
-      >
+      <select class="sync-select" :value="tweaks.autoSyncSeconds" @change="onAutoSyncChange">
         <option :value="0">Off</option>
         <option :value="30">30s</option>
         <option :value="60">1m</option>
@@ -26,8 +22,8 @@ function onAutoSyncChange(event: Event) {
       </select>
     </div>
     <p class="hint">
-      Refreshes the board silently when the extension or another browser
-      session ingests new tickets.
+      Refreshes the board silently when the extension or another browser session ingests new
+      tickets.
     </p>
   </section>
 </template>

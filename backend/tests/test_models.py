@@ -170,9 +170,9 @@ async def test_alembic_version_matches_head() -> None:
             rows = result.fetchall()
 
         assert len(rows) == 1, "Expected exactly one row in alembic_version"
-        assert (
-            rows[0][0] == head_revision
-        ), f"alembic_version={rows[0][0]!r} but expected head={head_revision!r}"
+        assert rows[0][0] == head_revision, (
+            f"alembic_version={rows[0][0]!r} but expected head={head_revision!r}"
+        )
     finally:
         await engine.dispose()
 

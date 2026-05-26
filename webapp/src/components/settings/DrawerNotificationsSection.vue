@@ -45,8 +45,8 @@ async function onToggleNotifications(event: Event) {
     </label>
     <p v-if="notifyHint" class="hint">{{ notifyHint }}</p>
     <p v-else class="hint">
-      A browser notification fires alongside the in-app alarm, even when
-      this tab is in the background.
+      A browser notification fires alongside the in-app alarm, even when this tab is in the
+      background.
     </p>
   </section>
 </template>

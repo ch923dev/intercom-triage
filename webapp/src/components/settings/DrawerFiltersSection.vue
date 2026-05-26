@@ -88,8 +88,7 @@ function onToggleHideEmptyCategories(event: Event) {
       </div>
     </div>
     <p class="hint">
-      Conversations updated in the last {{ settings.lookbackValue }}
-      {{ settings.lookbackUnit }}.
+      Conversations updated in the last {{ settings.lookbackValue }} {{ settings.lookbackUnit }}.
     </p>
   </section>
 

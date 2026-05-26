@@ -61,7 +61,9 @@ const DENSITY_LABEL: Record<Density, string> = {
 
     <Mono>Theme</Mono>
     <div class="seg">
-      <button :class="{ active: !tweaks.darkMode }" @click="tweaks.setDarkMode(false)">Light</button>
+      <button :class="{ active: !tweaks.darkMode }" @click="tweaks.setDarkMode(false)">
+        Light
+      </button>
       <button :class="{ active: tweaks.darkMode }" @click="tweaks.setDarkMode(true)">Dark</button>
     </div>
 

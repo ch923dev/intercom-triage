@@ -97,8 +97,7 @@ async def test_already_resolved_ticket_not_restamped_on_second_closure(
     openrouter = AsyncMock()
     openrouter.classify = AsyncMock(
         return_value=(
-            '{"assignment":"existing","category_id":1,"subject":"s","summary":"x",'
-            '"confidence":0.9}'
+            '{"assignment":"existing","category_id":1,"subject":"s","summary":"x","confidence":0.9}'
         )
     )
 

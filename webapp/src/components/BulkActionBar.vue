@@ -34,20 +34,16 @@ const selectedTickets = computed(() => {
 
 const allResolved = computed(
   () =>
-    selectedTickets.value.length > 0 &&
-    selectedTickets.value.every((t) => t.resolved_at !== null),
+    selectedTickets.value.length > 0 && selectedTickets.value.every((t) => t.resolved_at !== null),
 );
 const noneResolved = computed(
   () =>
-    selectedTickets.value.length > 0 &&
-    selectedTickets.value.every((t) => t.resolved_at === null),
+    selectedTickets.value.length > 0 && selectedTickets.value.every((t) => t.resolved_at === null),
 );
 const anyHasChip = computed(() =>
   selectedTickets.value.some((t) => t.resolution_chip_state !== null),
 );
-const anyHasFollowup = computed(() =>
-  selectedTickets.value.some((t) => t.followup !== null),
-);
+const anyHasFollowup = computed(() => selectedTickets.value.some((t) => t.followup !== null));
 
 /** Drop the chip preset row, since following the same template as the flyout's
  *  preset picker keeps the operator's spatial model intact. */
@@ -95,10 +91,7 @@ function onResolve() {
   void runBulk(() => tickets.bulkResolve(selection.asArray()), 'resolved');
 }
 function onNonActionable() {
-  void runBulk(
-    () => tickets.bulkMarkNonActionable(selection.asArray()),
-    'marked non-actionable',
-  );
+  void runBulk(() => tickets.bulkMarkNonActionable(selection.asArray()), 'marked non-actionable');
 }
 function onReopen() {
   void runBulk(() => tickets.bulkReopen(selection.asArray()), 'reopened');
@@ -145,9 +138,7 @@ function onClearSelection() {
         type="button"
         :disabled="busy || !noneResolved"
         :title="
-          noneResolved
-            ? 'Mark selected non-actionable'
-            : 'Some selected are already resolved'
+          noneResolved ? 'Mark selected non-actionable' : 'Some selected are already resolved'
         "
         @click="onNonActionable"
       >
@@ -166,9 +157,7 @@ function onClearSelection() {
       <div class="divider" />
 
       <div class="dropdown">
-        <button type="button" :disabled="busy" @click="moveOpen = !moveOpen">
-          Move to ▾
-        </button>
+        <button type="button" :disabled="busy" @click="moveOpen = !moveOpen">Move to ▾</button>
         <div v-if="moveOpen" class="menu" role="menu">
           <button
             v-for="cat in categories.categories"
@@ -266,7 +255,10 @@ function onClearSelection() {
   border-radius: var(--radius-chip);
   padding: 4px 10px;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
 }
 .clear {
   color: var(--ink-3);

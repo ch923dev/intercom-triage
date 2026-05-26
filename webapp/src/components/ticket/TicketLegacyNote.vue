@@ -62,20 +62,9 @@ function appendPreset(text: string) {
       Legacy note {{ open ? '▾' : '▸' }}
       <span v-if="saving" class="dim">· saving…</span>
     </summary>
-    <textarea
-      v-model="draft"
-      class="notes"
-      rows="3"
-      @input="scheduleSave"
-      @blur="flushNote"
-    />
+    <textarea v-model="draft" class="notes" rows="3" @input="scheduleSave" @blur="flushNote" />
     <div class="presets">
-      <button
-        v-for="p in NOTE_PRESETS"
-        :key="p"
-        class="chip"
-        @click="appendPreset(p)"
-      >
+      <button v-for="p in NOTE_PRESETS" :key="p" class="chip" @click="appendPreset(p)">
         + {{ p }}
       </button>
     </div>

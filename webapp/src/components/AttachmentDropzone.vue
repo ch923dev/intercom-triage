@@ -47,13 +47,7 @@ function onKey(e: KeyboardEvent) {
     @click="inputRef?.click()"
   >
     <span class="mono dim">Drop files, paste, or click to browse</span>
-    <input
-      ref="inputRef"
-      type="file"
-      multiple
-      hidden
-      @change="onPick"
-    />
+    <input ref="inputRef" type="file" multiple hidden @change="onPick" />
   </div>
 </template>
 

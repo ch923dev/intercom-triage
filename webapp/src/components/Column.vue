@@ -182,7 +182,10 @@ header {
   padding: 2px 6px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+  transition:
+    opacity 0.12s,
+    color 0.12s,
+    border-color 0.12s;
   margin-left: auto;
 }
 .column:hover .select-all,

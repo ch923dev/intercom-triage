@@ -74,9 +74,7 @@ async function addEntry() {
     );
     if (filesToUpload.length > 0) {
       await Promise.all(
-        filesToUpload.map((f) =>
-          attachments.upload(f, 'entry', String(saved.id), ticketId),
-        ),
+        filesToUpload.map((f) => attachments.upload(f, 'entry', String(saved.id), ticketId)),
       );
     }
     draft.value = '';
@@ -106,12 +104,7 @@ async function addEntry() {
       @dragover.prevent
     />
     <div v-if="pendingFiles.length" class="pending-files">
-      <span
-        v-for="(f, i) in pendingFiles"
-        :key="i"
-        class="att-pill pending-pill"
-        :title="f.name"
-      >
+      <span v-for="(f, i) in pendingFiles" :key="i" class="att-pill pending-pill" :title="f.name">
         <span>📎 {{ f.name }} · {{ pendingSizeLabel(f.size) }}</span>
         <button class="att-x att-x-inline" title="Remove" @click="removePending(i)">×</button>
       </span>

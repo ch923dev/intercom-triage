@@ -10,9 +10,7 @@ const error = ref<string | null>(null);
 
 async function onFiles(files: File[]) {
   try {
-    await Promise.all(
-      files.map((f) => attachments.upload(f, 'ticket', ticketId, ticketId)),
-    );
+    await Promise.all(files.map((f) => attachments.upload(f, 'ticket', ticketId, ticketId)));
   } catch (e) {
     error.value = (e as Error).message;
   }

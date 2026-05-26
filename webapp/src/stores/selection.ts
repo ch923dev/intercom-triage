@@ -51,12 +51,7 @@ export const useSelectionStore = defineStore('selection', () => {
    *  If `orderedIds` doesn't contain both `fromId` and `toId`, this is a
    *  no-op rather than throwing — keeps the UI robust against a race where
    *  the column re-sorts between the anchor click and the shift click. */
-  function addRange(
-    columnId: string,
-    fromId: string,
-    toId: string,
-    orderedIds: string[],
-  ): void {
+  function addRange(columnId: string, fromId: string, toId: string, orderedIds: string[]): void {
     const fromIdx = orderedIds.indexOf(fromId);
     const toIdx = orderedIds.indexOf(toId);
     if (fromIdx === -1 || toIdx === -1) return;

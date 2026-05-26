@@ -31,8 +31,8 @@ function onConfidenceThreshold(event: Event) {
       <span class="sentence">Use AI to categorize &amp; summarize</span>
     </label>
     <p class="hint">
-      When off, synced tickets land in the fallback category with no AI
-      subject or summary — set those yourself on each ticket.
+      When off, synced tickets land in the fallback category with no AI subject or summary — set
+      those yourself on each ticket.
     </p>
   </section>
 
@@ -64,9 +64,8 @@ function onConfidenceThreshold(event: Event) {
       <span class="mono threshold-val">{{ settings.aiResolveConfidenceThreshold.toFixed(2) }}</span>
     </label>
     <p class="hint">
-      When AI confidence ≥ threshold, tickets the AI judges resolved or
-      non-actionable are closed automatically. AI never closes other tickets
-      without your confirmation.
+      When AI confidence ≥ threshold, tickets the AI judges resolved or non-actionable are closed
+      automatically. AI never closes other tickets without your confirmation.
     </p>
   </section>
 </template>

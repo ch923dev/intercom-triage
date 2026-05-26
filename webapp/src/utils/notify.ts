@@ -30,12 +30,7 @@ export async function requestPermission(): Promise<NotificationPermission> {
  * try/catch: some browsers throw from the constructor, and that must never
  * break the once-per-second alarm tick.
  */
-export function notify(
-  title: string,
-  body: string,
-  tag: string,
-  onClick: () => void,
-): void {
+export function notify(title: string, body: string, tag: string, onClick: () => void): void {
   if (permission() !== 'granted') return;
   try {
     const n = new Notification(title, { body, tag });

@@ -61,8 +61,7 @@ const followupLabel = computed(() => {
 
 // Notes chip: legacy line count + time-tabled entries count.
 const noteLines = computed(
-  () =>
-    countNoteLines(notes.bodyOf(props.ticket.id)) + noteEntries.countOf(props.ticket.id),
+  () => countNoteLines(notes.bodyOf(props.ticket.id)) + noteEntries.countOf(props.ticket.id),
 );
 
 // Reply state — derived from the Intercom-visible thread.
@@ -100,7 +99,9 @@ const isClosed = computed(() => props.ticket.state === 'closed');
         class="resolve-icon"
         :title="props.ticket.resolved_at ? 'Reopen' : 'Mark resolved'"
         @click="onResolveClick"
-      >{{ props.ticket.resolved_at ? '↺' : '✓' }}</button>
+      >
+        {{ props.ticket.resolved_at ? '↺' : '✓' }}
+      </button>
     </header>
 
     <h3 class="title">{{ props.ticket.title }}</h3>

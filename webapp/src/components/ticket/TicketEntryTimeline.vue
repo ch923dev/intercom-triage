@@ -27,7 +27,6 @@ async function onRemoveAttachment(id: number) {
     error.value = (e as Error).message;
   }
 }
-
 </script>
 
 <template>
