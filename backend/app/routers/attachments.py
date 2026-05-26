@@ -122,7 +122,7 @@ async def get_thumb(
 ) -> FileResponse:
     """Return the 256px-max-side WebP thumbnail for an image. 404 otherwise."""
     row = await svc.get(session, attachment_id)
-    thumb = svc.get_or_make_thumb_path(config, row)
+    thumb = await svc.get_or_make_thumb_path(config, row)
     if thumb is None:
         raise HTTPException(status_code=404, detail="no thumbnail for this mime type")
     return FileResponse(path=thumb, media_type="image/webp")

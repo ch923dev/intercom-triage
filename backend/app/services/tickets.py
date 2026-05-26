@@ -103,9 +103,12 @@ async def set_override(
 
     # Drag-out reopen — must run before commit so it's atomic with the override.
     ticket = await session.get(Ticket, ticket_id)
-    if ticket is not None and ticket.resolved_at is not None:
+    if ticket is None:
+        raise HTTPException(status_code=404, detail=f"ticket {ticket_id!r} not found")
+    if ticket.resolved_at is not None:
         ticket.resolved_at = None
         ticket.resolved_source = None
+        ticket.resolution_cleared_at = naive_utcnow()
 
     override = await session.get(Override, ticket_id)
     if override is None:
@@ -148,14 +151,22 @@ def _maybe_auto_resolve_from_ai(
     result: CategorizationResult,
     settings: FilterSettings,
     now: datetime,
+    content_signature: datetime,
 ) -> None:
     """Stamp resolved_at + resolved_source when the AI verdict + settings agree.
 
     Skipped when the ticket is already resolved by any source — never override
     an existing resolution. Intercom-closed transitions take precedence at the
     caller site (this helper runs only when that branch did not fire).
+
+    Skipped when the operator manually reopened (resolution_cleared_at is set)
+    and the content_signature has not advanced past that timestamp — prevents
+    a cached high-confidence verdict from bouncing a ticket back to resolved
+    immediately after the operator drags it out of the Resolved column.
     """
     if row.resolved_at is not None:
+        return
+    if row.resolution_cleared_at is not None and content_signature <= row.resolution_cleared_at:
         return
     if result.ai_resolution_verdict not in ("resolved", "non_actionable"):
         return
@@ -171,7 +182,9 @@ def _maybe_auto_resolve_from_ai(
     if not effective:
         return
     row.resolved_at = now
-    row.resolved_source = result.ai_resolution_verdict
+    row.resolved_source = (
+        "ai_resolved" if result.ai_resolution_verdict == "resolved" else "non_actionable"
+    )
 
 
 async def _upsert_ticket(
@@ -195,6 +208,7 @@ async def _upsert_ticket(
     internal_notes = [n.model_dump(mode="json") for n in hydrated.internal_notes]
     row = await session.get(Ticket, hydrated.id)
     now = naive_utcnow()
+    content_signature = _content_signature(hydrated)
     if row is None:
         new_row = Ticket(
             id=hydrated.id,
@@ -217,7 +231,7 @@ async def _upsert_ticket(
             new_row.resolved_at = now
             new_row.resolved_source = "intercom_closed"
         else:
-            _maybe_auto_resolve_from_ai(new_row, result, settings, now)
+            _maybe_auto_resolve_from_ai(new_row, result, settings, now, content_signature)
         session.add(new_row)
         return
     # Closure transition: previously not closed AND now closed AND not already
@@ -226,7 +240,7 @@ async def _upsert_ticket(
         row.resolved_at = now
         row.resolved_source = "intercom_closed"
     else:
-        _maybe_auto_resolve_from_ai(row, result, settings, now)
+        _maybe_auto_resolve_from_ai(row, result, settings, now, content_signature)
     if not row.title_user_edited:
         row.title = _resolve_title(hydrated, result)
     row.state = hydrated.state
@@ -347,7 +361,7 @@ async def edit_ticket(
     if title is not None:
         stripped = title.strip()
         if stripped:
-            row.title = stripped[:120]
+            row.title = stripped[:200]
             row.title_user_edited = True
         else:
             row.title_user_edited = False  # next sync re-derives from AI/Intercom

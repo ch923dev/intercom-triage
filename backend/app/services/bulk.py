@@ -143,6 +143,7 @@ async def bulk_recategorize(
         if ticket.resolved_at is not None:
             ticket.resolved_at = None
             ticket.resolved_source = None
+            ticket.resolution_cleared_at = naive_utcnow()
         override = await session.get(Override, tid)
         now = naive_utcnow()
         if override is None:

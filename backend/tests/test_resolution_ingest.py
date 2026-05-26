@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
@@ -52,19 +51,13 @@ async def test_intercom_closed_transition_auto_resolves(
     from app.models import Ticket
     from app.services.tickets import ingest_tickets
 
-    openrouter = AsyncMock()
-    openrouter.classify = AsyncMock(
-        return_value=(
-            '{"assignment":"existing","category_id":1,"subject":"s","summary":"x",'
-            '"confidence":0.9,"resolution_verdict":"not_resolved",'
-            '"resolution_confidence":0.5,"resolution_reason":"open"}'
-        )
-    )
+    # Pass openrouter=None — these tests exercise Intercom-state transitions,
+    # not AI categorization. The fallback path is sufficient.
 
     # First sync — open state, store the ticket.
     await ingest_tickets(
         session=session,
-        openrouter=openrouter,
+        openrouter=None,
         config=test_config,
         hydrated=[make_hydrated(state="open")],
     )
@@ -74,7 +67,7 @@ async def test_intercom_closed_transition_auto_resolves(
     # Second sync — same id, state=closed, later updated_at.
     await ingest_tickets(
         session=session,
-        openrouter=openrouter,
+        openrouter=None,
         config=test_config,
         hydrated=[make_hydrated(state="closed", updated_at=datetime(2026, 5, 24))],
     )
@@ -93,13 +86,6 @@ async def test_already_resolved_ticket_not_restamped_on_second_closure(
     from app.models import Ticket
     from app.services.tickets import ingest_tickets
     from app.util import naive_utcnow
-
-    openrouter = AsyncMock()
-    openrouter.classify = AsyncMock(
-        return_value=(
-            '{"assignment":"existing","category_id":1,"subject":"s","summary":"x","confidence":0.9}'
-        )
-    )
 
     # Pre-store as resolved 1 hour ago.
     session.add(
@@ -124,7 +110,7 @@ async def test_already_resolved_ticket_not_restamped_on_second_closure(
 
     await ingest_tickets(
         session=session,
-        openrouter=openrouter,
+        openrouter=None,
         config=test_config,
         hydrated=[make_hydrated(id="t2", state="closed", updated_at=datetime(2026, 5, 24))],
     )
@@ -239,3 +225,192 @@ async def test_ingest_skips_auto_apply_when_confidence_below_threshold(
     assert row is not None
     assert row.resolved_at is None
     assert row.resolved_source is None
+
+
+# ── C1: ai verdict 'resolved' maps to resolved_source='ai_resolved' ───────────
+
+
+@pytest.mark.asyncio
+async def test_ingest_auto_resolves_when_verdict_resolved_uses_ai_resolved_source(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AI verdict 'resolved' + auto-resolve on + confidence >= threshold
+    → ingest stamps resolved_source='ai_resolved' (not 'resolved')."""
+    from app.ai.pipeline import CategorizationResult
+    from app.models import Settings, Ticket
+
+    s = (await session.scalars(select(Settings))).one()
+    s.use_ai = True
+    s.ai_resolve_default = True
+    s.ai_resolve_confidence_threshold = 0.7
+    await session.commit()
+
+    async def fake_categorize_many(
+        *args: object, **kwargs: object
+    ) -> dict[str, CategorizationResult]:
+        return {
+            "conv-resolved-1": CategorizationResult(
+                category_id=1,
+                proposal_id=None,
+                summary="customer confirmed fixed",
+                confidence=0.9,
+                ai_resolution_verdict="resolved",
+                ai_resolution_confidence=0.88,
+                ai_resolution_reason="customer replied: thanks, works now",
+            )
+        }
+
+    monkeypatch.setattr("app.services.tickets.categorize_many", fake_categorize_many)
+
+    payload = [
+        {
+            "id": "conv-resolved-1",
+            "title": "Issue fixed",
+            "state": "open",
+            "priority": None,
+            "url": None,
+            "author": {"name": "Customer", "type": "user"},
+            "created_at": "2026-05-25T00:00:00Z",
+            "updated_at": "2026-05-25T00:00:00Z",
+            "parts": [],
+            "internal_notes": [],
+        }
+    ]
+    r = await client.post("/tickets/ingest", json=payload)
+    assert r.status_code == 200
+
+    row = await session.get(Ticket, "conv-resolved-1")
+    assert row is not None
+    assert row.resolved_at is not None
+    assert row.resolved_source == "ai_resolved"
+
+
+# ── C2: auto-resolve must not undo a manual reopen ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_auto_resolve_does_not_undo_manual_reopen(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After an operator reopens a ticket, the same cached AI verdict must NOT
+    re-resolve it on the next sync.  Only a genuinely new customer-visible part
+    (strictly later content_signature than resolution_cleared_at) should allow
+    auto-resolve to fire again.
+
+    Flow:
+    1. Ingest → AI resolves with verdict='resolved', high conf → resolved_source='ai_resolved'.
+    2. POST /tickets/{id}/reopen → open, resolution_cleared_at stamped.
+    3. Re-ingest SAME payload (content_signature == base_part_ts ≤ cleared_at) → stays open.
+    4. Ingest with one new part whose created_at is strictly after cleared_at → resolves again.
+    """
+    from datetime import UTC
+
+    from app.ai.pipeline import CategorizationResult
+    from app.models import Settings, Ticket
+
+    s = (await session.scalars(select(Settings))).one()
+    s.use_ai = True
+    s.ai_resolve_default = True
+    s.ai_resolve_confidence_threshold = 0.7
+    await session.commit()
+
+    # Use a fixed past timestamp for the initial part — well before test runtime.
+    base_part_ts = "2026-05-25T10:00:00Z"
+
+    def make_payload(*, extra_parts: list[dict] | None = None) -> list[dict]:
+        base_parts = [
+            {
+                "author": {"type": "user"},
+                "body": "thanks, works now",
+                "created_at": base_part_ts,
+                "is_admin": False,
+            }
+        ]
+        return [
+            {
+                "id": "conv-reopen-1",
+                "title": "Resolved by AI",
+                "state": "open",
+                "priority": None,
+                "url": None,
+                "author": {"name": "Customer", "type": "user"},
+                "created_at": "2026-05-25T00:00:00Z",
+                "updated_at": "2026-05-25T10:00:00Z",
+                "parts": base_parts if extra_parts is None else base_parts + extra_parts,
+                "internal_notes": [],
+            }
+        ]
+
+    resolved_result: dict[str, CategorizationResult] = {
+        "conv-reopen-1": CategorizationResult(
+            category_id=1,
+            proposal_id=None,
+            summary="customer confirmed fixed",
+            confidence=0.9,
+            ai_resolution_verdict="resolved",
+            ai_resolution_confidence=0.88,
+            ai_resolution_reason="customer replied: thanks, works now",
+        )
+    }
+
+    async def fake_categorize_many(
+        *args: object, **kwargs: object
+    ) -> dict[str, CategorizationResult]:
+        return resolved_result
+
+    monkeypatch.setattr("app.services.tickets.categorize_many", fake_categorize_many)
+
+    # Step 1: first ingest → auto-resolves.
+    r = await client.post("/tickets/ingest", json=make_payload())
+    assert r.status_code == 200
+    session.expire_all()
+    row = await session.get(Ticket, "conv-reopen-1")
+    assert row is not None
+    assert row.resolved_at is not None
+    assert row.resolved_source == "ai_resolved"
+
+    # Step 2: reopen via API.
+    r2 = await client.post("/tickets/conv-reopen-1/reopen")
+    assert r2.status_code == 200
+    session.expire_all()
+    row = await session.get(Ticket, "conv-reopen-1")
+    assert row is not None
+    assert row.resolved_at is None
+    assert row.resolution_cleared_at is not None
+    cleared_at = row.resolution_cleared_at
+
+    # Step 3: re-ingest SAME payload (content_signature == base_part_ts ≤ cleared_at).
+    # cleared_at is naive_utcnow() at reopen time; base_part_ts is 2026-05-25 — in the
+    # past relative to the test run date of 2026-05-27.
+    r3 = await client.post("/tickets/ingest", json=make_payload())
+    assert r3.status_code == 200
+    session.expire_all()
+    row = await session.get(Ticket, "conv-reopen-1")
+    assert row is not None
+    assert row.resolved_at is None, "auto-resolve must not re-stamp after manual reopen"
+
+    # Step 4: ingest with a new part whose created_at is strictly after cleared_at.
+    # cleared_at is naive UTC from naive_utcnow() ≈ test-run wall-clock time.
+    # Make the new part one hour in the future relative to cleared_at.
+    future_ts = (cleared_at + timedelta(hours=1)).replace(tzinfo=UTC).isoformat()
+    r4 = await client.post(
+        "/tickets/ingest",
+        json=make_payload(
+            extra_parts=[
+                {
+                    "author": {"type": "user"},
+                    "body": "actually still broken",
+                    "created_at": future_ts,
+                    "is_admin": False,
+                }
+            ]
+        ),
+    )
+    assert r4.status_code == 200
+    session.expire_all()
+    row = await session.get(Ticket, "conv-reopen-1")
+    assert row is not None
+    assert (
+        row.resolved_at is not None
+    ), "new customer part after cleared_at should allow auto-resolve"
+    assert row.resolved_source == "ai_resolved"

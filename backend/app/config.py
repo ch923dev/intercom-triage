@@ -21,6 +21,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # environment.
 MAX_BULK_IDS: int = 200
 
+# Cap on tickets accepted in one POST /tickets/ingest call. Bounds memory +
+# per-request OpenRouter fan-out / token spend. Code constant for the same
+# reasons as MAX_BULK_IDS — must not drift per environment.
+MAX_INGEST_TICKETS: int = 500
+
 
 class AppConfig(BaseSettings):
     """All configuration is loaded from `.env` at the backend working directory.

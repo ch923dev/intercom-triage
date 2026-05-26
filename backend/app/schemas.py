@@ -53,7 +53,7 @@ TicketState = Literal["open", "snoozed", "closed"]
 LookbackUnit = Literal["hours", "days"]
 CategorySource = Literal["seed", "ai_proposed", "user_created"]
 ProposalStatus = Literal["pending", "approved", "merged", "rejected"]
-ResolvedSource = Literal["manual", "intercom_closed", "non_actionable"]
+ResolvedSource = Literal["manual", "intercom_closed", "non_actionable", "ai_resolved"]
 ResolutionVerdict = Literal["resolved", "non_actionable", "not_resolved"]
 ResolutionChipState = Literal["ai_resolved", "ai_reopened", "new_reply"]
 

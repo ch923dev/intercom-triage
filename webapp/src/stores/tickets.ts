@@ -29,8 +29,8 @@ export const useTicketsStore = defineStore('tickets', () => {
   });
 
   /** Resolved tickets list — backs both the Resolved column (cards whose
-   *  `resolved_source` is `'manual'` / `'intercom_closed'`) and the
-   *  Non-actionable column (cards whose `resolved_source` is `'non_actionable'`).
+   *  `resolved_source` is `'manual'` / `'intercom_closed'` / `'ai_resolved'`) and
+   *  the Non-actionable column (cards whose `resolved_source` is `'non_actionable'`).
    *  Storage stays unified so mark/bulk/reopen rollback paths keep their
    *  single-array semantics; the two columns derive via computed getters. */
   const resolvedTickets = ref<Ticket[]>([]);

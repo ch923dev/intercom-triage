@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.openrouter import OpenRouterClient
-from app.config import AppConfig
+from app.config import MAX_INGEST_TICKETS, AppConfig
 from app.db import get_session
 from app.deps import get_app_config, get_openrouter
 from app.schemas import (
@@ -65,6 +65,11 @@ async def ingest_tickets(
 ) -> IngestResponse:
     """Receive conversations the Chrome extension fetched from the operator's
     Intercom session; categorize (cache-aware) and store them."""
+    if len(body) > MAX_INGEST_TICKETS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"ingest batch too large: {len(body)} > {MAX_INGEST_TICKETS}",
+        )
     return await svc.ingest_tickets(
         session=session,
         openrouter=openrouter,

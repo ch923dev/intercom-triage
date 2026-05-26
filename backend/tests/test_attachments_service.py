@@ -184,7 +184,7 @@ async def test_get_thumb_path_creates_webp_for_image(session: AsyncSession, tmp_
         session, cfg, "ticket", "T1", "T1", "a.png", "image/png", buf.getvalue()
     )
 
-    thumb = svc.get_or_make_thumb_path(cfg, row)
+    thumb = await svc.get_or_make_thumb_path(cfg, row)
     assert thumb is not None and thumb.exists()
     assert thumb.suffix == ".webp"
     with Image.open(thumb) as im:
@@ -199,4 +199,4 @@ async def test_get_thumb_path_returns_none_for_non_image(
     row = await svc.upload_attachment(
         session, cfg, "ticket", "T1", "T1", "x.txt", "text/plain", b"hello"
     )
-    assert svc.get_or_make_thumb_path(cfg, row) is None
+    assert await svc.get_or_make_thumb_path(cfg, row) is None

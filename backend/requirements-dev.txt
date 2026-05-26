@@ -2,6 +2,11 @@
 
 ruff==0.8.4
 mypy==1.13.0
-pytest==8.3.4
+# pytest 8.4.2 (up from 8.3.4). NOTE: CVE-2025-71176 (a dev-only tmp-dir symlink
+# issue) is only fixed in pytest 9.0.3, which requires bumping pytest-asyncio AND
+# pytest-httpx past their pytest<9 pins. pytest-httpx mocks OpenRouter in the AI
+# tests, so that cascade is deferred — this CVE is test-tooling only, never in the
+# runtime, and the running-app CVEs (starlette/multipart/pillow) are all cleared.
+pytest==8.4.2
 pytest-asyncio==0.25.0
 pytest-httpx==0.35.0

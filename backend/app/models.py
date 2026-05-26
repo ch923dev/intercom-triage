@@ -505,6 +505,7 @@ class Ticket(Base):
     resolved_source: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_resolve_enabled: Mapped[bool | None] = mapped_column(nullable=True)
     resolution_chip_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolution_cleared_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
         Index("ix_tickets_updated_at", "updated_at"),
@@ -521,7 +522,7 @@ class Ticket(Base):
         ),
         CheckConstraint(
             "resolved_source IS NULL OR resolved_source "
-            "IN ('manual','intercom_closed','non_actionable')",
+            "IN ('manual','intercom_closed','non_actionable','ai_resolved')",
             name="tickets_resolved_source_check",
         ),
     )
