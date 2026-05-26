@@ -1,5 +1,7 @@
 # Web framework
-fastapi==0.115.6
+# Pinned to 0.135.4 (not the newer 0.136.x) — pip-audit flags 0.136.3 with the
+# MAL-2026-4750 advisory. 0.135.4 still resolves a patched starlette (>=1.0.1).
+fastapi==0.135.4
 uvicorn[standard]==0.34.0
 
 # HTTP client
@@ -15,10 +17,10 @@ aiosqlite==0.20.0
 alembic>=1.13,<2
 
 # Image thumbnailing for note attachments
-Pillow==11.0.0
+Pillow==12.2.0
 
 # Multipart form parsing for /attachments uploads
-python-multipart==0.0.20
+python-multipart==0.0.29
 
 # Optional Postgres swap (uncomment to enable):
 # asyncpg==0.30.0
