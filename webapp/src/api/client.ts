@@ -12,6 +12,7 @@ import type {
   Followup,
   NoteAttachment,
   NoteEntry,
+  Playbook,
   ProposalsResponse,
   ResolvedSource,
   Ticket,
@@ -259,4 +260,36 @@ export const api = {
       method: 'DELETE',
       body: JSON.stringify({ ticket_ids: ticketIds }),
     }),
+
+  // ── playbooks ─────────────────────────────────────────────────────────────
+  listPlaybooks: (
+    opts: { ticketId?: string; categoryId?: number; includeArchived?: boolean } = {},
+  ): Promise<Playbook[]> => {
+    const qs = new URLSearchParams();
+    if (opts.ticketId !== undefined) qs.set('ticket_id', opts.ticketId);
+    if (opts.categoryId !== undefined) qs.set('category_id', String(opts.categoryId));
+    if (opts.includeArchived) qs.set('include_archived', 'true');
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/playbooks${suffix}`);
+  },
+
+  createPlaybook: (body: {
+    category_id: number;
+    label: string;
+    body: string;
+    source_ticket_id?: string | null;
+  }): Promise<Playbook> =>
+    request('/playbooks', { method: 'POST', body: JSON.stringify(body) }),
+
+  updatePlaybook: (id: number, body: { label?: string; body?: string }): Promise<Playbook> =>
+    request(`/playbooks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  archivePlaybook: (id: number): Promise<{ ok: true }> =>
+    request(`/playbooks/${id}/archive`, { method: 'POST' }),
+
+  restorePlaybook: (id: number): Promise<{ ok: true }> =>
+    request(`/playbooks/${id}/restore`, { method: 'POST' }),
+
+  draftPlaybook: (ticketId: string): Promise<{ body: string }> =>
+    request('/playbooks/draft', { method: 'POST', body: JSON.stringify({ ticket_id: ticketId }) }),
 };
