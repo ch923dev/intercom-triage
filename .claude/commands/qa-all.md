@@ -15,14 +15,12 @@ mypy app
 pytest -q
 cd ..
 
-# Webapp gate
-cd webapp
-npm run lint
-npm run format:check
-npm run typecheck
-npm test
-npm run build
-cd ..
+# Webapp gate (--prefix form: cwd resets between Bash calls, and it matches the settings.json allow-list)
+npm --prefix webapp run lint
+npm --prefix webapp run format:check
+npm --prefix webapp run typecheck
+npm --prefix webapp run test
+npm --prefix webapp run build
 ```
 
 Stop at the first failure and surface the output to the user. Don't silently fix and rerun.
