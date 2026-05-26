@@ -16,6 +16,8 @@ const statusLabel = computed(() => {
       return 'Resolved · intercom';
     case 'non_actionable':
       return 'Non-actionable';
+    case 'ai_resolved':
+      return 'Resolved · ai';
     default:
       return 'Resolved';
   }
