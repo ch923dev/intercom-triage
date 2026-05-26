@@ -127,7 +127,9 @@ export const api = {
 
   // ── resolution (T011/T012) ────────────────────────────────────────────────
   /** Manually resolve a ticket. Returns the stamped resolved_at + source. */
-  resolveTicket: (ticketId: string): Promise<{ resolved_at: string; resolved_source: ResolvedSource }> =>
+  resolveTicket: (
+    ticketId: string,
+  ): Promise<{ resolved_at: string; resolved_source: ResolvedSource }> =>
     request(`/tickets/${ticketId}/resolve`, { method: 'POST', body: '{}' }),
 
   /** Reopen a resolved ticket. */
@@ -194,15 +196,13 @@ export const api = {
     fd.append('ticket_id', ticketId);
     // Cannot use `request()` directly — multipart needs no `content-type` header
     // (browser sets the boundary). Replicate the error envelope manually.
-    return fetch(`${BASE}/attachments`, { method: 'POST', body: fd }).then(
-      async (resp) => {
-        if (!resp.ok) {
-          const body = await resp.json().catch(() => ({}));
-          throw new ApiError(resp.status, body, `POST /attachments → ${resp.status}`);
-        }
-        return resp.json();
-      },
-    );
+    return fetch(`${BASE}/attachments`, { method: 'POST', body: fd }).then(async (resp) => {
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new ApiError(resp.status, body, `POST /attachments → ${resp.status}`);
+      }
+      return resp.json();
+    });
   },
 
   deleteAttachment: (id: number): Promise<{ ok: true; deleted: true; id: number }> =>
@@ -278,8 +278,7 @@ export const api = {
     label: string;
     body: string;
     source_ticket_id?: string | null;
-  }): Promise<Playbook> =>
-    request('/playbooks', { method: 'POST', body: JSON.stringify(body) }),
+  }): Promise<Playbook> => request('/playbooks', { method: 'POST', body: JSON.stringify(body) }),
 
   updatePlaybook: (id: number, body: { label?: string; body?: string }): Promise<Playbook> =>
     request(`/playbooks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),

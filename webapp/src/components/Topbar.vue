@@ -84,10 +84,9 @@ function onSearchInput(e: Event) {
         <span v-if="n.id === 'proposals' && proposalCount" class="nav-badge">{{
           proposalCount
         }}</span>
-        <span
-          v-else-if="n.id === 'followups' && followups.pendingCount"
-          class="nav-badge"
-        >{{ followups.pendingCount }}</span>
+        <span v-else-if="n.id === 'followups' && followups.pendingCount" class="nav-badge">{{
+          followups.pendingCount
+        }}</span>
       </button>
     </nav>
 
@@ -128,7 +127,9 @@ function onSearchInput(e: Event) {
     <button class="ghost" :disabled="tickets.loading" @click="refresh">
       <span class="mono">{{ tickets.loading ? 'Refreshing…' : 'Refresh' }}</span>
     </button>
-    <Mono>{{ lastSync }}<span v-if="autoSyncLabel" class="auto-label">{{ autoSyncLabel }}</span></Mono>
+    <Mono
+      >{{ lastSync }}<span v-if="autoSyncLabel" class="auto-label">{{ autoSyncLabel }}</span></Mono
+    >
 
     <div class="sep" />
 
@@ -245,7 +246,9 @@ function onSearchInput(e: Event) {
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-chip);
   background: var(--panel);
-  transition: border-color 80ms ease, background 80ms ease;
+  transition:
+    border-color 80ms ease,
+    background 80ms ease;
 }
 .search:focus-within {
   border-color: var(--accent);

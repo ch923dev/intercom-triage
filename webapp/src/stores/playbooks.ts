@@ -80,9 +80,7 @@ export const usePlaybooksStore = defineStore('playbooks', () => {
     return body;
   }
 
-  function findBucket(
-    id: number,
-  ): { categoryId: number; snapshot: Playbook[] } | null {
+  function findBucket(id: number): { categoryId: number; snapshot: Playbook[] } | null {
     for (const [cid, list] of Object.entries(byCategory.value)) {
       if (list.some((p) => p.id === id)) {
         return { categoryId: Number(cid), snapshot: list };
