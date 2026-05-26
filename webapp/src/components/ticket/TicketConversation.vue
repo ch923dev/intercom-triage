@@ -210,7 +210,7 @@ function initials(name: string | null): string {
 }
 .bubble-time {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   color: var(--ink-3);
 }
 .bubble {
@@ -276,7 +276,7 @@ html[data-theme='dark'] .note-tag {
 }
 .note-time {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   color: var(--ink-3);
   margin-left: auto;
 }

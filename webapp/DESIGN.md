@@ -19,7 +19,7 @@ colors:
   panel-dark: "#15161a"
   ink-dark: "#f5f4ef"
   ink-2-dark: "#a3a39d"
-  ink-3-dark: "#6a6a64"
+  ink-3-dark: "#8a8a82"
   line-dark: "#26282d"
   line-soft-dark: "#1e2025"
   chip-bg-dark: "#1c1d22"
@@ -167,7 +167,7 @@ A three-tier neutral hierarchy, ink-to-mist.
 
 - **ink (`#111111` / `#f5f4ef` dark)** — Headlines, ticket titles, primary text.
 - **ink-2 (`#555555` / `#a3a39d` dark)** — Body, summaries, column headers.
-- **ink-3 (`#8a8a82` / `#6a6a64` dark)** — Meta, timestamps, footer, scrollbar hover.
+- **ink-3 (`#8a8a82` / `#8a8a82` dark)** — Meta, timestamps, footer, scrollbar hover. Dark value raised from `#6a6a64` to clear WCAG AA (4.5:1) on the dark panel — section labels, email/ID lines, and timestamps were illegible at the old value (~3.3:1).
 
 ### Lines
 
@@ -282,7 +282,7 @@ Top-right stack of `banner-alarm` chips. Each banner enters via `triageSlide` (2
 - Reach for the accent only for action or alarm. Overdue follow-up = accent. Pending category override = accent. Selected row = accent. Everything else stays in the neutral ramp.
 - Use hairline borders (`var(--hairline) solid var(--line)`) for separation. Whitespace + a 0.5px rule reads as more premium than a heavier 1px line.
 - Keep mono labels uppercase, ≤ 11px, with the `0.04em` tracking. They're a typographic system, not stylistic flair.
-- Test every color change in both themes. The dark palette is not an inversion — `ink-3` shifts on the warmth axis, not the brightness axis.
+- Test every color change in both themes. The dark palette is not an inversion. Tertiary text (`ink-3`) must still clear WCAG AA (4.5:1) on the dark panel — keep it at or above `#8a8a82`.
 - Use tokens (`var(--ink-2)`, `var(--radius-card)`). Hex literals in component CSS are a regression.
 
 **Don't**
