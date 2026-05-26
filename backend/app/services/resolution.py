@@ -58,6 +58,20 @@ def apply_reopen(row: Ticket) -> None:
     row.resolved_source = None
 
 
+def apply_mark_non_actionable(row: Ticket) -> ResolveOutcome:
+    """Mutate a Ticket row to mark it non-actionable. Does NOT commit.
+
+    Sub-state of resolved — sets resolved_at + resolved_source='non_actionable'.
+    409 if the row is already resolved by any source.
+    """
+    if row.resolved_at is not None:
+        raise HTTPException(status_code=409, detail="ticket is already resolved")
+    now = naive_utcnow()
+    row.resolved_at = now
+    row.resolved_source = "non_actionable"
+    return ResolveOutcome(resolved_at=now, resolved_source="non_actionable")
+
+
 async def resolve(session: AsyncSession, ticket_id: str) -> ResolveOutcome:
     """Mark a ticket as manually resolved. 409 if already resolved."""
     row = await get_or_404(session, ticket_id)
@@ -73,6 +87,15 @@ async def reopen(session: AsyncSession, ticket_id: str) -> None:
     apply_reopen(row)
     await session.commit()
     metrics.incr("tickets_reopened_total")
+
+
+async def mark_non_actionable(session: AsyncSession, ticket_id: str) -> ResolveOutcome:
+    """Mark a ticket non-actionable. 409 if already resolved, 404 if unknown."""
+    row = await get_or_404(session, ticket_id)
+    outcome = apply_mark_non_actionable(row)
+    await session.commit()
+    metrics.incr("tickets_resolved_total.non_actionable")
+    return outcome
 
 
 async def set_ai_resolve(

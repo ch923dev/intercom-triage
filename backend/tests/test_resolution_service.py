@@ -9,6 +9,7 @@ from datetime import datetime
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Ticket
 from app.services import resolution as svc
@@ -110,4 +111,62 @@ async def test_404_on_unknown_ticket(session):
         assert exc.value.status_code == 404
     with pytest.raises(HTTPException) as exc:
         await svc.set_ai_resolve(session, "ghost", True)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_mark_non_actionable_stamps_source(session: AsyncSession) -> None:
+    from app.models import Ticket
+    from app.services.resolution import mark_non_actionable
+    from app.util import naive_utcnow
+
+    now = naive_utcnow()
+    session.add(
+        Ticket(
+            id="t-na-svc-1", title="x", state="open", author={}, parts=[],
+            internal_notes=[], created_at=now, updated_at=now, category_id=1,
+            summary="", ai_confidence=0.0,
+        )
+    )
+    await session.commit()
+
+    out = await mark_non_actionable(session, "t-na-svc-1")
+    assert out.resolved_source == "non_actionable"
+    assert out.resolved_at is not None
+
+    row = await session.get(Ticket, "t-na-svc-1")
+    assert row is not None
+    assert row.resolved_source == "non_actionable"
+
+
+@pytest.mark.asyncio
+async def test_mark_non_actionable_409_when_already_resolved(session: AsyncSession) -> None:
+    from fastapi import HTTPException
+    from app.models import Ticket
+    from app.services.resolution import mark_non_actionable
+    from app.util import naive_utcnow
+
+    now = naive_utcnow()
+    session.add(
+        Ticket(
+            id="t-na-svc-2", title="x", state="open", author={}, parts=[],
+            internal_notes=[], created_at=now, updated_at=now, category_id=1,
+            summary="", ai_confidence=0.0,
+            resolved_at=now, resolved_source="manual",
+        )
+    )
+    await session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await mark_non_actionable(session, "t-na-svc-2")
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_mark_non_actionable_404_unknown(session: AsyncSession) -> None:
+    from fastapi import HTTPException
+    from app.services.resolution import mark_non_actionable
+
+    with pytest.raises(HTTPException) as exc:
+        await mark_non_actionable(session, "ghost")
     assert exc.value.status_code == 404
