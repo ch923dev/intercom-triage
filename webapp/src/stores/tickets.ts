@@ -197,6 +197,27 @@ export const useTicketsStore = defineStore('tickets', () => {
     }
   }
 
+  /** Optimistically move ticket to resolvedTickets with non-actionable source. */
+  async function markNonActionable(id: string) {
+    const idx = state.value.tickets.findIndex((t) => t.id === id);
+    if (idx === -1) return;
+    const original = state.value.tickets[idx]!;
+    state.value.tickets.splice(idx, 1);
+    resolvedTickets.value.unshift({
+      ...original,
+      resolved_at: new Date().toISOString(),
+      resolved_source: 'non_actionable',
+      resolution_chip_state: null,
+    });
+    try {
+      await api.markNonActionable(id);
+    } catch (e) {
+      resolvedTickets.value = resolvedTickets.value.filter((t) => t.id !== id);
+      state.value.tickets.splice(idx, 0, original);
+      throw e;
+    }
+  }
+
   /** Optimistically move ticket from resolvedTickets back to open; rolls back on failure. */
   async function reopen(id: string) {
     const idx = resolvedTickets.value.findIndex((t) => t.id === id);
@@ -310,6 +331,35 @@ export const useTicketsStore = defineStore('tickets', () => {
       return result;
     } catch (e) {
       // Whole-batch failure — roll back every optimistic move.
+      _rollbackAll(snapshot);
+      throw e;
+    }
+  }
+
+  /** Bulk mark non-actionable — moves matching open rows into resolvedTickets. */
+  async function bulkMarkNonActionable(ids: string[]): Promise<BulkResult> {
+    const idSet = new Set(ids);
+    const snapshot: Array<{ idx: number; row: Ticket }> = [];
+    const moved: Ticket[] = [];
+    for (let i = state.value.tickets.length - 1; i >= 0; i--) {
+      const t = state.value.tickets[i]!;
+      if (!idSet.has(t.id)) continue;
+      snapshot.push({ idx: i, row: t });
+      state.value.tickets.splice(i, 1);
+      moved.push({
+        ...t,
+        resolved_at: new Date().toISOString(),
+        resolved_source: 'non_actionable',
+        resolution_chip_state: null,
+      });
+    }
+    resolvedTickets.value = [...moved, ...resolvedTickets.value];
+
+    try {
+      const result = await api.bulkMarkNonActionable(ids);
+      _rollbackFromSnapshot(result.failed, snapshot);
+      return result;
+    } catch (e) {
       _rollbackAll(snapshot);
       throw e;
     }
@@ -477,11 +527,13 @@ export const useTicketsStore = defineStore('tickets', () => {
     // Resolution
     resolvedTickets,
     markResolved,
+    markNonActionable,
     reopen,
     setAiResolve,
     dismissChip,
     // Bulk (Phase 12)
     bulkResolve,
+    bulkMarkNonActionable,
     bulkReopen,
     bulkRecategorize,
     bulkDismissChip,
