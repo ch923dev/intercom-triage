@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import timedelta
 from pathlib import Path
 
@@ -87,6 +88,54 @@ async def test_upload_dedupes_same_bytes(session: AsyncSession, tmp_path: Path) 
     # Only one file on disk for both rows.
     matches = list((cfg.attachments_dir).rglob(f"{a.sha256}*"))
     assert len(matches) == 1
+
+
+@pytest.mark.asyncio
+async def test_upload_unlinks_fresh_file_when_commit_fails(
+    session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A commit failure on a freshly-written file unlinks it (no row references
+    it, and the GC keys off DB rows so it could never be collected) and re-raises."""
+    cfg = _make_config(tmp_path)
+
+    async def boom() -> None:
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(session, "commit", boom)
+
+    with pytest.raises(RuntimeError, match="commit failed"):
+        await svc.upload_attachment(
+            session, cfg, "ticket", "T1", "T1", "x.txt", "text/plain", b"orphan-on-fail"
+        )
+
+    sha = hashlib.sha256(b"orphan-on-fail").hexdigest()
+    assert list(cfg.attachments_dir.rglob(f"{sha}*")) == []
+
+
+@pytest.mark.asyncio
+async def test_upload_keeps_deduped_file_when_commit_fails(
+    session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the file already existed (dedup), a commit failure must NOT unlink it
+    — a live sibling row owns those bytes."""
+    cfg = _make_config(tmp_path)
+    first = await svc.upload_attachment(
+        session, cfg, "ticket", "T1", "T1", "a.txt", "text/plain", b"shared-bytes"
+    )
+    disk_path = cfg.attachments_dir / first.stored_path
+    assert disk_path.exists()
+
+    async def boom() -> None:
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(session, "commit", boom)
+
+    with pytest.raises(RuntimeError, match="commit failed"):
+        await svc.upload_attachment(
+            session, cfg, "entry", "42", "T1", "b.txt", "text/plain", b"shared-bytes"
+        )
+
+    assert disk_path.exists()
 
 
 @pytest.mark.asyncio

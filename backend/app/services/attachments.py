@@ -52,14 +52,17 @@ async def upload_attachment(
     mime: str,
     data: bytes,
 ) -> NoteAttachment:
-    """Hash + dedup + persist. Writes the file before inserting the row so
-    a failed insert leaves a stray byte-identical file on disk that the next
-    upload of the same bytes will reuse — that's the desired behaviour."""
+    """Hash + dedup + persist. Writes the file before inserting the row. If the
+    commit then fails, a file written fresh this call is unlinked: no row
+    references it, and the GC sweep keys off DB rows so it could never be
+    collected otherwise. A pre-existing (deduped) file is left untouched — a
+    live sibling row owns it."""
     sha = hashlib.sha256(data).hexdigest()
     rel = _stored_path_for(sha, filename, mime)
     abs_path = config.attachments_dir / rel
     abs_path.parent.mkdir(parents=True, exist_ok=True)
-    if not abs_path.exists():
+    wrote_file = not abs_path.exists()
+    if wrote_file:
         await anyio.to_thread.run_sync(abs_path.write_bytes, data)
 
     row = NoteAttachment(
@@ -74,7 +77,12 @@ async def upload_attachment(
         created_at=naive_utcnow(),
     )
     session.add(row)
-    await session.commit()
+    try:
+        await session.commit()
+    except Exception:
+        if wrote_file and abs_path.exists():
+            await anyio.to_thread.run_sync(abs_path.unlink)
+        raise
     await session.refresh(row)
     metrics.incr("attachments_uploaded_total")
     return row
