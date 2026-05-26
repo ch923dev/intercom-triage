@@ -28,8 +28,23 @@ export const useTicketsStore = defineStore('tickets', () => {
     pendingOverrides: {},
   });
 
-  /** Resolved tickets list — always-visible Resolved column. */
+  /** Resolved tickets list — backs both the Resolved column (cards whose
+   *  `resolved_source` is `'manual'` / `'intercom_closed'`) and the
+   *  Non-actionable column (cards whose `resolved_source` is `'non_actionable'`).
+   *  Storage stays unified so mark/bulk/reopen rollback paths keep their
+   *  single-array semantics; the two columns derive via computed getters. */
   const resolvedTickets = ref<Ticket[]>([]);
+
+  /** Resolved tickets excluding non-actionable — feeds the Resolved column. */
+  const pureResolvedTickets = computed(() =>
+    resolvedTickets.value.filter((t) => t.resolved_source !== 'non_actionable'),
+  );
+
+  /** Resolved tickets whose source is `'non_actionable'` — feeds the
+   *  Non-actionable column. */
+  const nonActionableTickets = computed(() =>
+    resolvedTickets.value.filter((t) => t.resolved_source === 'non_actionable'),
+  );
 
   /** Active search query. Empty string means no filter. */
   const query = ref('');
@@ -526,6 +541,8 @@ export const useTicketsStore = defineStore('tickets', () => {
     pendingOverrides: computed(() => state.value.pendingOverrides),
     // Resolution
     resolvedTickets,
+    pureResolvedTickets,
+    nonActionableTickets,
     markResolved,
     markNonActionable,
     reopen,

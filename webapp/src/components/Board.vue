@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import Column from './Column.vue';
+import NonActionableColumn from './NonActionableColumn.vue';
 import ResolvedColumn from './ResolvedColumn.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
@@ -60,6 +61,7 @@ const visibleColumns = computed(() => {
       @select="onSelect"
     />
     <ResolvedColumn />
+    <NonActionableColumn />
     <div class="board-tail" />
   </div>
 </template>

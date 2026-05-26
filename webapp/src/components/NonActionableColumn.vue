@@ -1,6 +1,8 @@
-<!-- ResolvedColumn — always-visible Kanban column for resolved tickets.
-     Reference: tasks.md T13 / T066. Joins the `tickets` vuedraggable group so
-     operators can drag an open card here to resolve it. -->
+<!-- NonActionableColumn — separate Kanban column for tickets whose
+     `resolved_source === 'non_actionable'`. Mirrors ResolvedColumn:
+     drag-in from any open category column marks selected tickets
+     non-actionable; drag-out into a category column reopens + overrides
+     (handled by Column.vue + applyOverride). -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import draggable from 'vuedraggable';
@@ -15,28 +17,23 @@ const tickets = useTicketsStore();
 const view = useViewStore();
 const selection = useSelectionStore();
 
-const items = computed(() => tickets.pureResolvedTickets);
+const items = computed(() => tickets.nonActionableTickets);
 const selectedId = computed(() => view.selectedTicketId);
 
-/** Stable column key — shared by every card here so selection range-checks
- *  against `lastAnchor.columnId` work. */
-const COLUMN_KEY = '__resolved__';
+const COLUMN_KEY = '__non_actionable__';
 
 async function onChange(event: { added?: { element: Ticket } }) {
   if (!event.added) return;
   const id = event.added.element.id;
-  // Bulk drag (plan §8d, FR-035): drop a selected card into Resolved →
-  // resolve every selected ticket.
   if (selection.has(id) && selection.count > 1) {
     const ids = selection.asArray();
-    const result = await tickets.bulkResolve(ids);
+    const result = await tickets.bulkMarkNonActionable(ids);
     if (result.failed.length === 0) selection.clear();
     return;
   }
-  void tickets.markResolved(id);
+  void tickets.markNonActionable(id);
 }
 
-/** Modifier-aware click — mirrors Column.vue. */
 function onCardClick(t: Ticket, e: MouseEvent) {
   if (e.metaKey || e.ctrlKey) {
     selection.toggle(t.id, COLUMN_KEY);
@@ -57,10 +54,10 @@ function onCardClick(t: Ticket, e: MouseEvent) {
 </script>
 
 <template>
-  <section class="column resolved">
+  <section class="column non-actionable">
     <header>
       <span class="dot" />
-      <div class="name">Resolved</div>
+      <div class="name">Non-actionable</div>
       <Mono class="count">{{ items.length }}</Mono>
     </header>
 
@@ -82,19 +79,19 @@ function onCardClick(t: Ticket, e: MouseEvent) {
         />
       </template>
       <template #footer>
-        <div v-if="items.length === 0" class="empty mono">Nothing resolved yet</div>
+        <div v-if="items.length === 0" class="empty mono">Nothing non-actionable</div>
       </template>
     </draggable>
   </section>
 </template>
 
 <style scoped>
-.column.resolved {
+.column.non-actionable {
   flex: 0 0 280px;
   display: flex;
   flex-direction: column;
   border-right: var(--hairline) solid var(--line-soft);
-  border-left: 2px solid var(--accent, #ff4d2e);
+  border-left: 2px solid var(--ink-3);
   opacity: 0.95;
 }
 header {
@@ -108,13 +105,12 @@ header {
   background: var(--bg);
   z-index: 1;
 }
-/* Accent dot in the header — mirrors CatDot sizing */
 .dot {
   display: inline-block;
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--accent, #ff4d2e);
+  background: var(--ink-3);
   flex-shrink: 0;
 }
 .name {

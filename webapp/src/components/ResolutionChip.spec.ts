@@ -52,14 +52,13 @@ describe('ResolutionChip', () => {
     expect(w.find('.resolution-chip').exists()).toBe(false);
   });
 
-  it('renders the non-actionable badge on resolved non_actionable tickets', () => {
+  it('renders nothing for a resolved non-actionable ticket (column conveys source)', () => {
     const w = mount(ResolutionChip, {
       props: {
         ticket: base({ resolved_at: NOW, resolved_source: 'non_actionable' }),
       },
     });
-    expect(w.text()).toContain('Non-actionable');
-    expect(w.classes()).toContain('non-actionable');
+    expect(w.find('.resolution-chip').exists()).toBe(false);
   });
 
   it('renders the advisory chip when resolution_chip_state is set', () => {

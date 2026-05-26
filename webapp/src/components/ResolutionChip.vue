@@ -1,10 +1,7 @@
-<!-- ResolutionChip — two roles in one component:
-     1. Advisory chip on cards where the backend computed `resolution_chip_state`
-        (ai_resolved / ai_reopened / new_reply). Clicking applies the action;
-        the × dismisses it.
-     2. Static sub-state badge on resolved cards. resolved_source = 'non_actionable'
-        renders as a muted gray "Non-actionable" badge; other sources render
-        nothing here (the column itself communicates "resolved"). -->
+<!-- ResolutionChip — advisory chip on cards where the backend computed
+     `resolution_chip_state` (ai_resolved / ai_reopened / new_reply).
+     Clicking applies the action; the × dismisses it.
+     Non-actionable is communicated by its own Kanban column — no chip here. -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useTicketsStore } from '@/stores/tickets';
@@ -25,11 +22,6 @@ const advisoryLabel = computed(() => {
       return '';
   }
 });
-
-const isNonActionable = computed(
-  () =>
-    props.ticket.resolved_at !== null && props.ticket.resolved_source === 'non_actionable',
-);
 
 async function onApplyAdvisory() {
   const chipState = props.ticket.resolution_chip_state;
@@ -56,9 +48,6 @@ async function onDismiss(e: Event) {
     {{ advisoryLabel }}
     <span class="dismiss" aria-label="Dismiss suggestion" @click="onDismiss">×</span>
   </button>
-  <span v-else-if="isNonActionable" class="resolution-chip non-actionable">
-    Non-actionable
-  </span>
 </template>
 
 <style scoped>
@@ -81,12 +70,6 @@ async function onDismiss(e: Event) {
 }
 .advisory:hover {
   background: var(--hover);
-}
-.non-actionable {
-  /* Muted gray — same family as the fallback "Other" category swatch. */
-  background: oklch(0.65 0 0 / 0.12);
-  color: var(--ink-3);
-  border-color: var(--line);
 }
 .dismiss {
   font-size: 12px;

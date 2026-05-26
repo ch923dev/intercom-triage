@@ -95,6 +95,25 @@ describe('ticketsStore.markNonActionable', () => {
   });
 });
 
+describe('ticketsStore.resolved getters', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('splits resolvedTickets by source into pureResolvedTickets + nonActionableTickets', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('m', { resolved_at: NOW, resolved_source: 'manual' }),
+      fakeTicket('n', { resolved_at: NOW, resolved_source: 'non_actionable' }),
+      fakeTicket('i', { resolved_at: NOW, resolved_source: 'intercom_closed' }),
+    );
+
+    expect(s.pureResolvedTickets.map((t) => t.id).sort()).toEqual(['i', 'm']);
+    expect(s.nonActionableTickets.map((t) => t.id)).toEqual(['n']);
+  });
+});
+
 describe('ticketsStore.bulkMarkNonActionable', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
