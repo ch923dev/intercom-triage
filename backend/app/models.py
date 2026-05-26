@@ -401,6 +401,54 @@ class NoteAttachment(Base):
     )
 
 
+class Playbook(Base):
+    """A reusable next-steps recipe for an issue, scoped to a category.
+
+    Spec: docs/superpowers/specs/2026-05-26-playbooks-design.md. Durable,
+    operator-owned knowledge — NOT a cache. It is never keyed by content
+    signature and survives ingest / re-sync untouched. The flyout lists
+    active playbooks for a ticket's effective category; the library page
+    manages them. `source_ticket_id` is the exemplar the operator solved it
+    on (informational; `SET NULL` if that ticket row is ever removed).
+    """
+
+    __tablename__ = "playbooks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    category_id: Mapped[int] = mapped_column(
+        ForeignKey("categories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    source_ticket_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tickets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint("length(label) > 0", name="playbooks_label_nonempty"),
+        CheckConstraint("length(body) > 0", name="playbooks_body_nonempty"),
+        Index(
+            "ix_playbooks_category_active",
+            "category_id",
+            sqlite_where=text("archived_at IS NULL"),
+            postgresql_where=text("archived_at IS NULL"),
+        ),
+    )
+
+
 class Ticket(Base):
     """An ingested + categorized conversation — the operator's board data.
 

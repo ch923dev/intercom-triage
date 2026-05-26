@@ -237,6 +237,44 @@ class NoteAttachmentDeleted(BaseModel):
     id: int
 
 
+# ── Playbooks ─────────────────────────────────────────────────────────────────
+
+
+class PlaybookRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    category_id: int
+    label: str
+    body: str
+    source_ticket_id: str | None
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
+    archived_at: UTCDatetime | None
+
+
+class PlaybookCreate(BaseModel):
+    category_id: int
+    label: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=4000)
+    source_ticket_id: str | None = None
+
+
+class PlaybookUpdate(BaseModel):
+    """PATCH body. Omit a field to leave it unchanged."""
+
+    label: str | None = Field(default=None, min_length=1, max_length=120)
+    body: str | None = Field(default=None, min_length=1, max_length=4000)
+
+
+class PlaybookDraftRequest(BaseModel):
+    ticket_id: str = Field(min_length=1)
+
+
+class PlaybookDraftResponse(BaseModel):
+    body: str
+
+
 # ── Tickets ───────────────────────────────────────────────────────────────────
 
 

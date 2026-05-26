@@ -16,6 +16,7 @@ import TicketEntryTimeline from './ticket/TicketEntryTimeline.vue';
 import TicketFollowup from './ticket/TicketFollowup.vue';
 import TicketHeader from './ticket/TicketHeader.vue';
 import TicketLegacyNote from './ticket/TicketLegacyNote.vue';
+import TicketPlaybooks from './ticket/TicketPlaybooks.vue';
 import TicketResolution from './ticket/TicketResolution.vue';
 
 const view = useViewStore();
@@ -83,6 +84,8 @@ function close() {
               <TicketEntryTimeline :ticket-id="ticket.id" />
               <TicketEntryForm :ticket-id="ticket.id" />
             </section>
+
+            <TicketPlaybooks :ticket-id="ticket.id" :category-id="effectiveCategoryId" />
 
             <TicketResolution :ticket="ticket" />
           </aside>

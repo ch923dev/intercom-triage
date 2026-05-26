@@ -224,6 +224,12 @@ Acceptance:
   Selecting more than the cap surfaces a warning and asks me to split the
   action.
 
+### US-020 — Reusable playbooks per category
+As the operator, when I solve a ticket I can save a reusable
+"playbook" (a next-steps recipe) scoped to its category, optionally drafted
+by AI from that ticket, and see it on every other ticket in the same
+category so I handle repeat issues consistently.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -264,6 +270,10 @@ Acceptance:
 | FR-034 | Shift+click extends the selection across the contiguous range of cards in the same column (in displayed sort order). Shift+click in a different column toggles only the clicked card. | US-018 |
 | FR-035 | Dragging any selected card propagates the drop to every card in the selection set. Dropping into a category column reassigns all of them; dropping into the Resolved column resolves all of them. | US-018 |
 | FR-036 | A single bulk request is bounded by `MAX_BULK_IDS` (configurable, default 200). The webapp warns and refuses to submit a bulk action over the cap; the backend rejects oversize requests with 422. | US-018 |
+| FR-038 | Playbooks are stored in a dedicated `playbooks` table (category_id, label, body, optional source_ticket_id, soft-archive). They are operator-owned and survive ingest / re-sync untouched (never content-keyed). | US-020 |
+| FR-039 | The flyout lists active playbooks for a ticket's *effective* category (override beats AI). Uncategorized tickets show none. | US-020 |
+| FR-040 | `POST /playbooks/draft` returns an ephemeral AI-drafted body from the ticket's customer-visible `parts` + operator notes. It MUST NOT read `internal_notes` (FR-005 / invariant #4). 503 when AI is unconfigured. | US-020 |
+| FR-041 | A library page lists playbooks grouped by category with edit, archive, and restore (including an archived view); new playbooks are captured from a ticket flyout (FR-039/FR-040). | US-020 |
 
 ## 6. Non-functional requirements
 
