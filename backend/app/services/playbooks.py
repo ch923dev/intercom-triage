@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.metrics import metrics
-from app.models import Playbook
+from app.models import Override, Playbook, Ticket
 from app.util import naive_utcnow
 
 
@@ -29,6 +29,25 @@ async def list_for_category(
         stmt = stmt.where(Playbook.archived_at.is_(None))
     stmt = stmt.order_by(Playbook.created_at.asc(), Playbook.id.asc())
     return list((await session.scalars(stmt)).all())
+
+
+async def list_for_ticket(session: AsyncSession, ticket_id: str) -> list[Playbook]:
+    """Active playbooks for the ticket's *effective* category.
+
+    Effective category = ticket.category_id, unless a manual override is newer
+    than the ticket's last update (override beats AI — mirrors the board's
+    composition rule). Uncategorized tickets return an empty list.
+    """
+    ticket = await session.get(Ticket, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail=f"no ticket {ticket_id}")
+    category_id = ticket.category_id
+    override = await session.get(Override, ticket_id)
+    if override is not None and ticket.updated_at <= override.set_at:
+        category_id = override.category_id
+    if category_id is None:
+        return []
+    return await list_for_category(session, category_id)
 
 
 async def create(

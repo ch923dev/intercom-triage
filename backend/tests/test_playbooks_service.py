@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,3 +50,57 @@ async def test_list_for_category_hides_archived_by_default(session: AsyncSession
     assert await svc.list_for_category(session, 1) == []
     archived = await svc.list_for_category(session, 1, include_archived=True)
     assert [r.label for r in archived] == ["issue A"]
+
+
+from datetime import timedelta
+
+from app.models import Override, Ticket
+from app.util import naive_utcnow
+
+
+def _make_ticket(ticket_id: str, category_id: int, updated_at) -> Ticket:
+    return Ticket(
+        id=ticket_id,
+        title="t",
+        state="open",
+        author={},
+        parts=[],
+        internal_notes=[],
+        created_at=updated_at,
+        updated_at=updated_at,
+        category_id=category_id,
+        summary="",
+        ai_confidence=0.0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_for_ticket_uses_ai_category(session: AsyncSession) -> None:
+    now = naive_utcnow()
+    session.add(_make_ticket("TCK1", category_id=1, updated_at=now))
+    await session.commit()
+    await svc.create(session, category_id=1, label="ai-cat", body="steps")
+
+    rows = await svc.list_for_ticket(session, "TCK1")
+    assert [r.label for r in rows] == ["ai-cat"]
+
+
+@pytest.mark.asyncio
+async def test_list_for_ticket_override_beats_ai(session: AsyncSession) -> None:
+    now = naive_utcnow()
+    session.add(_make_ticket("TCK2", category_id=1, updated_at=now))
+    # Override set AFTER the ticket's updated_at → override wins.
+    session.add(Override(ticket_id="TCK2", category_id=2, set_at=now + timedelta(minutes=5)))
+    await session.commit()
+    await svc.create(session, category_id=1, label="ai-cat", body="x")
+    await svc.create(session, category_id=2, label="override-cat", body="y")
+
+    rows = await svc.list_for_ticket(session, "TCK2")
+    assert [r.label for r in rows] == ["override-cat"]
+
+
+@pytest.mark.asyncio
+async def test_list_for_ticket_404_when_missing(session: AsyncSession) -> None:
+    with pytest.raises(HTTPException) as exc:
+        await svc.list_for_ticket(session, "nope")
+    assert exc.value.status_code == 404
