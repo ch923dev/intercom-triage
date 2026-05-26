@@ -2,7 +2,7 @@
 #
 # Wired in .claude/settings.json under hooks.PreToolUse with matcher "Bash".
 # Receives the tool invocation as JSON on stdin. If the command is a
-# `git commit`, greps staged files for patterns that violate the 12
+# `git commit`, greps staged files for patterns that violate the 13
 # cross-package invariants in CLAUDE.md. Exits 2 on violation (Claude
 # Code interprets exit 2 as a block).
 #
