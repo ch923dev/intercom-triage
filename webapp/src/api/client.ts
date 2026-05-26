@@ -145,6 +145,12 @@ export const api = {
   dismissChip: (ticketId: string): Promise<void> =>
     request(`/tickets/${ticketId}/dismiss-chip`, { method: 'POST' }),
 
+  /** Mark a ticket non-actionable. 409 if already resolved, 404 if unknown. */
+  markNonActionable: (
+    ticketId: string,
+  ): Promise<{ resolved_at: string; resolved_source: ResolvedSource }> =>
+    request(`/tickets/${ticketId}/non-actionable`, { method: 'POST', body: '{}' }),
+
   // ── notes (T047) ──────────────────────────────────────────────────────────
   listNotes: (): Promise<TicketNote[]> => request('/notes'),
   putNote: (ticketId: string, body: string) =>
@@ -226,6 +232,13 @@ export const api = {
   /** Suppress the resolution chip on N tickets. */
   bulkDismissChip: (ticketIds: string[]): Promise<BulkResult> =>
     request('/tickets/bulk/dismiss-chip', {
+      method: 'POST',
+      body: JSON.stringify({ ticket_ids: ticketIds }),
+    }),
+
+  /** Mark N tickets non-actionable. Per-id ok/failed in the response. */
+  bulkMarkNonActionable: (ticketIds: string[]): Promise<BulkResult> =>
+    request('/tickets/bulk/non-actionable', {
       method: 'POST',
       body: JSON.stringify({ ticket_ids: ticketIds }),
     }),

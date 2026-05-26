@@ -17,8 +17,8 @@ export interface Category {
 
 export type ProposalStatus = 'pending' | 'approved' | 'merged' | 'rejected';
 
-export type ResolvedSource = 'manual' | 'intercom_closed';
-export type ResolutionVerdict = 'resolved' | 'not_resolved';
+export type ResolvedSource = 'manual' | 'intercom_closed' | 'non_actionable';
+export type ResolutionVerdict = 'resolved' | 'not_resolved' | 'non_actionable';
 export type ResolutionChipState = 'ai_resolved' | 'ai_reopened' | 'new_reply';
 
 export interface CategoryProposal {
