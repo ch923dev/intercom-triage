@@ -148,6 +148,20 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T094 ✓ — Extension popup: non-actionable button + badge
 - T095 ✓ — Docs (CLAUDE.md invariant, spec/plan/tasks index)
 
+### [Phase 14 — Playbooks](docs/tasks/phase-14-playbooks.md)
+- T130 — `Playbook` model + Alembic migration.
+- T131 — Schemas + create/list/archive service.
+- T132 — `list_for_ticket` effective-category resolution.
+- T133 — update/restore/list_all service.
+- T134 — CRUD router + registration.
+- T135 — AI draft builder (excludes internal_notes) + service.
+- T136 — Draft endpoint.
+- T137 — Frontend types + API client.
+- T138 — Pinia store.
+- T139 — Flyout playbooks section.
+- T140 — Library page + nav.
+- T141 — spec/plan/tasks/CLAUDE invariant docs.
+
 ### [Phase 9 — Backlog](docs/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to webapp and extension.
 - T102 — Token / cost meter surfacing OpenRouter spend per day.
@@ -214,3 +228,8 @@ Every requirement maps to at least one task.
 | US-018 | T074, T075, T076, T077, T078, T081, T082, T083 |
 | FR-037 | T086, T087, T088, T089, T090, T091, T092, T093 |
 | US-019 | T088, T089, T092, T093, T094 |
+| US-020 | T130, T131, T132, T134, T136, T137, T138, T139, T140, T141 |
+| FR-038 | T130, T131, T134 |
+| FR-039 | T132, T134, T139 |
+| FR-040 | T135, T136 |
+| FR-041 | T133, T134, T138, T140 |

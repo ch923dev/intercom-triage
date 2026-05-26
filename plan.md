@@ -546,3 +546,16 @@ Lightweight counters in process memory for `tickets_fetched_total`, `ai_calls_to
 | Pending proposals appear as live columns | Hide proposals until approved | Surfaces the curation work; prevents stale pending state being invisible. |
 | Server-side settings (singleton row) | `.env` or per-surface local storage | One source of truth; both surfaces read the same shape; trivial to back up. |
 | Rejected-proposal signatures table kept | Drop with the multi-tenant scope | Still useful for one user — prevents the AI re-proposing the same category every fetch. |
+
+## §13 — Playbooks
+
+Design spec: `docs/superpowers/specs/2026-05-26-playbooks-design.md`.
+
+- New `playbooks` table (one isolated backend module: `services/playbooks.py`
+  + `routers/playbooks.py`). No change to ingest, cache, or `HydratedTicket`.
+- Lookup resolves a ticket's effective category exactly as board composition
+  does (override wins iff `ticket.updated_at <= override.set_at`).
+- AI drafter reuses `OpenRouterClient`; prompt is built from `parts` + operator
+  notes only — `internal_notes` is never read.
+- Webapp: `stores/playbooks.ts`, flyout section `TicketPlaybooks.vue`, library
+  view `PlaybooksPage.vue` wired through the `view` store (no router).
