@@ -289,8 +289,6 @@ async def test_chip_state_null_when_ai_off(client: AsyncClient, session: AsyncSe
 @pytest.mark.asyncio
 async def test_chip_state_dismissed_returns_null(client: AsyncClient, session: AsyncSession):
     """Chip dismissed at or after updated_at => null."""
-    from datetime import datetime
-
     from app.models import AICacheEntry, Settings
 
     settings = await session.get(Settings, 1)
@@ -298,7 +296,11 @@ async def test_chip_state_dismissed_returns_null(client: AsyncClient, session: A
     settings.ai_resolve_default = True
     settings.ai_resolve_confidence_threshold = 0.7
     settings.use_ai = True
-    ts = datetime(2026, 5, 23, 10, 0)
+    # Use the canonical clock, not a hardcoded date: get_tickets filters by the
+    # 24h lookback window relative to now, so a fixed past date ages out and the
+    # ticket vanishes from the response. dismissed_at == updated_at still
+    # exercises the "dismissed at/after updated_at => null" path.
+    ts = naive_utcnow()
     session.add(
         AICacheEntry(
             ticket_id="dis",
