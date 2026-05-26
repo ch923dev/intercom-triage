@@ -133,6 +133,15 @@ async def test_ingest_does_not_cache_ai_failure(app: FastAPI, client: AsyncClien
 
 
 @pytest.mark.asyncio
+async def test_ingest_rejects_oversized_batch(client: AsyncClient) -> None:
+    from app.config import MAX_INGEST_TICKETS
+
+    payload = [_hydrated(f"conv-{i}") for i in range(MAX_INGEST_TICKETS + 1)]
+    resp = await client.post("/tickets/ingest", json=payload)
+    assert resp.status_code == 413
+
+
+@pytest.mark.asyncio
 async def test_get_tickets_sql_threshold_cutoff(app: FastAPI, client: AsyncClient) -> None:
     """SQL pushdown regression — tickets outside the lookback window must be
     excluded at the query level, not in Python.  A ticket inside the window
