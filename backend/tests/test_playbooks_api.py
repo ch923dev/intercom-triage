@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
+from app.util import naive_utcnow
+
 
 @pytest.mark.asyncio
 async def test_create_list_update_archive_flow(client: AsyncClient) -> None:
@@ -44,3 +46,64 @@ async def test_list_all_when_no_filter(client: AsyncClient) -> None:
     await client.post("/playbooks", json={"category_id": 2, "label": "b", "body": "2"})
     resp = await client.get("/playbooks")
     assert {p["label"] for p in resp.json()} == {"a", "b"}
+
+
+class _FakeClient:
+    async def complete(self, *, model: str, messages: list[dict[str, str]], ticket_id: str) -> str:
+        return "1. Refund. 2. Reply."
+
+
+@pytest.mark.asyncio
+async def test_draft_endpoint_uses_configured_client(client: AsyncClient, app) -> None:
+    from app.db import make_session_factory  # noqa: F401  (factory already on state)
+    from app.models import Ticket
+
+    factory = app.state.session_factory
+    async with factory() as s:
+        s.add(
+            Ticket(
+                id="TCKD",
+                title="t",
+                state="open",
+                author={},
+                parts=[],
+                internal_notes=[],
+                created_at=naive_utcnow(),
+                updated_at=naive_utcnow(),
+                summary="",
+                ai_confidence=0.0,
+            )
+        )
+        await s.commit()
+
+    app.state.openrouter = _FakeClient()
+    resp = await client.post("/playbooks/draft", json={"ticket_id": "TCKD"})
+    assert resp.status_code == 200
+    assert resp.json() == {"body": "1. Refund. 2. Reply."}
+
+
+@pytest.mark.asyncio
+async def test_draft_endpoint_503_without_client(client: AsyncClient, app) -> None:
+    from app.models import Ticket
+
+    factory = app.state.session_factory
+    async with factory() as s:
+        s.add(
+            Ticket(
+                id="TCKN",
+                title="t",
+                state="open",
+                author={},
+                parts=[],
+                internal_notes=[],
+                created_at=naive_utcnow(),
+                updated_at=naive_utcnow(),
+                summary="",
+                ai_confidence=0.0,
+            )
+        )
+        await s.commit()
+
+    app.state.openrouter = None
+    resp = await client.post("/playbooks/draft", json={"ticket_id": "TCKN"})
+    assert resp.status_code == 503

@@ -5,8 +5,18 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients.openrouter import OpenRouterClient
+from app.config import AppConfig
 from app.db import get_session
-from app.schemas import OkResponse, PlaybookCreate, PlaybookRead, PlaybookUpdate
+from app.deps import get_app_config, get_openrouter
+from app.schemas import (
+    OkResponse,
+    PlaybookCreate,
+    PlaybookDraftRequest,
+    PlaybookDraftResponse,
+    PlaybookRead,
+    PlaybookUpdate,
+)
 from app.services import playbooks as svc
 
 router = APIRouter(prefix="/playbooks", tags=["playbooks"])
@@ -43,6 +53,19 @@ async def create_playbook(
         source_ticket_id=body.source_ticket_id,
     )
     return PlaybookRead.model_validate(row)
+
+
+@router.post("/draft", response_model=PlaybookDraftResponse)
+async def draft_playbook(
+    body: PlaybookDraftRequest,
+    session: AsyncSession = Depends(get_session),
+    client: OpenRouterClient | None = Depends(get_openrouter),
+    config: AppConfig = Depends(get_app_config),
+) -> PlaybookDraftResponse:
+    text = await svc.draft_from_ticket(
+        session, body.ticket_id, client=client, model=config.openrouter_model
+    )
+    return PlaybookDraftResponse(body=text)
 
 
 @router.patch("/{playbook_id}", response_model=PlaybookRead)

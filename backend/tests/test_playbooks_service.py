@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Playbook
+from app.models import NoteEntry, Override, Playbook, Ticket, TicketNote
+from app.services import playbooks as svc
+from app.util import naive_utcnow
 
 
 @pytest.mark.asyncio
@@ -25,9 +29,6 @@ async def test_playbook_row_round_trips(session: AsyncSession) -> None:
     assert rows[0].label == "double-charge after upgrade"
     assert rows[0].archived_at is None
     assert rows[0].source_ticket_id is None
-
-
-from app.services import playbooks as svc
 
 
 @pytest.mark.asyncio
@@ -50,12 +51,6 @@ async def test_list_for_category_hides_archived_by_default(session: AsyncSession
     assert await svc.list_for_category(session, 1) == []
     archived = await svc.list_for_category(session, 1, include_archived=True)
     assert [r.label for r in archived] == ["issue A"]
-
-
-from datetime import timedelta
-
-from app.models import Override, Ticket
-from app.util import naive_utcnow
 
 
 def _make_ticket(ticket_id: str, category_id: int, updated_at) -> Ticket:
@@ -138,9 +133,6 @@ async def test_update_404_when_missing(session: AsyncSession) -> None:
     with pytest.raises(HTTPException) as exc:
         await svc.update(session, 999, label="x", body=None)
     assert exc.value.status_code == 404
-
-
-from app.models import NoteEntry, TicketNote
 
 
 def _ticket_with_notes() -> Ticket:
