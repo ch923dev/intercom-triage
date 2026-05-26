@@ -1,7 +1,10 @@
-<!-- ResolutionChip — advisory badge shown on a TicketCard when the backend
-     has computed a resolution suggestion (ai_resolved, ai_reopened, new_reply).
-     Clicking applies the action; the × dismisses the chip without acting.
-     Reference: tasks.md T14. -->
+<!-- ResolutionChip — two roles in one component:
+     1. Advisory chip on cards where the backend computed `resolution_chip_state`
+        (ai_resolved / ai_reopened / new_reply). Clicking applies the action;
+        the × dismisses it.
+     2. Static sub-state badge on resolved cards. resolved_source = 'non_actionable'
+        renders as a muted gray "Non-actionable" badge; other sources render
+        nothing here (the column itself communicates "resolved"). -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useTicketsStore } from '@/stores/tickets';
@@ -10,7 +13,7 @@ import type { Ticket } from '@/types/api';
 const props = defineProps<{ ticket: Ticket }>();
 const tickets = useTicketsStore();
 
-const label = computed(() => {
+const advisoryLabel = computed(() => {
   switch (props.ticket.resolution_chip_state) {
     case 'ai_resolved':
       return `AI: resolved? · ${(props.ticket.ai_resolution_confidence ?? 0).toFixed(2)}`;
@@ -23,7 +26,12 @@ const label = computed(() => {
   }
 });
 
-async function onApply() {
+const isNonActionable = computed(
+  () =>
+    props.ticket.resolved_at !== null && props.ticket.resolved_source === 'non_actionable',
+);
+
+async function onApplyAdvisory() {
   const chipState = props.ticket.resolution_chip_state;
   if (chipState === 'ai_resolved') {
     await tickets.markResolved(props.ticket.id);
@@ -41,13 +49,16 @@ async function onDismiss(e: Event) {
 <template>
   <button
     v-if="ticket.resolution_chip_state"
-    class="resolution-chip"
+    class="resolution-chip advisory"
     :title="ticket.ai_resolution_reason ?? ''"
-    @click.stop="onApply"
+    @click.stop="onApplyAdvisory"
   >
-    {{ label }}
+    {{ advisoryLabel }}
     <span class="dismiss" aria-label="Dismiss suggestion" @click="onDismiss">×</span>
   </button>
+  <span v-else-if="isNonActionable" class="resolution-chip non-actionable">
+    Non-actionable
+  </span>
 </template>
 
 <style scoped>
@@ -64,10 +75,18 @@ async function onDismiss(e: Event) {
   border-radius: var(--radius-chip);
   background: var(--chip-bg);
   color: var(--ink-2);
+}
+.advisory {
   cursor: pointer;
 }
-.resolution-chip:hover {
+.advisory:hover {
   background: var(--hover);
+}
+.non-actionable {
+  /* Muted gray — same family as the fallback "Other" category swatch. */
+  background: oklch(0.65 0 0 / 0.12);
+  color: var(--ink-3);
+  border-color: var(--line);
 }
 .dismiss {
   font-size: 12px;
