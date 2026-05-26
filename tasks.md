@@ -148,7 +148,7 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T094 ✓ — Extension popup: non-actionable button + badge
 - T095 ✓ — Docs (CLAUDE.md invariant, spec/plan/tasks index)
 
-### [Phase 14 — Playbooks](docs/tasks/phase-14-playbooks.md)
+### [Phase 14 — Playbooks](docs/superpowers/specs/2026-05-26-playbooks-design.md)
 - T130 — `Playbook` model + Alembic migration.
 - T131 — Schemas + create/list/archive service.
 - T132 — `list_for_ticket` effective-category resolution.

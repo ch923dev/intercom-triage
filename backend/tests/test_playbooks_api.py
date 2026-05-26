@@ -26,7 +26,6 @@ async def test_create_list_update_archive_flow(client: AsyncClient) -> None:
 
     archived = await client.post(f"/playbooks/{pid}/archive")
     assert archived.json() == {"ok": True}
-    assert await (await client.get("/playbooks", params={"category_id": 1})).aread() is not None
     assert (await client.get("/playbooks", params={"category_id": 1})).json() == []
 
     restored = await client.post(f"/playbooks/{pid}/restore")

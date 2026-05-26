@@ -273,7 +273,7 @@ category so I handle repeat issues consistently.
 | FR-038 | Playbooks are stored in a dedicated `playbooks` table (category_id, label, body, optional source_ticket_id, soft-archive). They are operator-owned and survive ingest / re-sync untouched (never content-keyed). | US-020 |
 | FR-039 | The flyout lists active playbooks for a ticket's *effective* category (override beats AI). Uncategorized tickets show none. | US-020 |
 | FR-040 | `POST /playbooks/draft` returns an ephemeral AI-drafted body from the ticket's customer-visible `parts` + operator notes. It MUST NOT read `internal_notes` (FR-005 / invariant #4). 503 when AI is unconfigured. | US-020 |
-| FR-041 | A library page lists all active playbooks grouped by category with create / edit / archive / restore. | US-020 |
+| FR-041 | A library page lists playbooks grouped by category with edit, archive, and restore (including an archived view); new playbooks are captured from a ticket flyout (FR-039/FR-040). | US-020 |
 
 ## 6. Non-functional requirements
 

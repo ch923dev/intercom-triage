@@ -2,7 +2,8 @@
 //
 // Reusable next-steps recipes scoped to a category. `ensureForCategory` lazily
 // fetches a category's active playbooks once and caches them; the flyout and
-// the library page read from the same `byCategory` map. Mutations are
+// the library page read from the same `byCategory` map. The library also loads
+// archived rows into `archivedByCategory` for the restore view. Mutations are
 // optimistic with rollback, matching the tickets/noteEntries stores.
 
 import { defineStore } from 'pinia';
@@ -13,10 +14,16 @@ import type { Playbook } from '@/types/api';
 export const usePlaybooksStore = defineStore('playbooks', () => {
   /** category_id → active playbooks (asc by created_at). */
   const byCategory = ref<Record<number, Playbook[]>>({});
+  /** category_id → archived playbooks (only populated by `loadAll(true)`). */
+  const archivedByCategory = ref<Record<number, Playbook[]>>({});
   const loaded = ref<Set<number>>(new Set());
 
   function forCategory(categoryId: number): Playbook[] {
     return byCategory.value[categoryId] ?? [];
+  }
+
+  function archivedFor(categoryId: number): Playbook[] {
+    return archivedByCategory.value[categoryId] ?? [];
   }
 
   async function ensureForCategory(categoryId: number): Promise<void> {
@@ -26,15 +33,18 @@ export const usePlaybooksStore = defineStore('playbooks', () => {
     loaded.value = new Set(loaded.value).add(categoryId);
   }
 
-  async function loadAll(): Promise<void> {
-    const rows = await api.listPlaybooks();
-    const grouped: Record<number, Playbook[]> = {};
+  async function loadAll(includeArchived = false): Promise<void> {
+    const rows = await api.listPlaybooks(includeArchived ? { includeArchived: true } : {});
+    const active: Record<number, Playbook[]> = {};
+    const archived: Record<number, Playbook[]> = {};
     const seen = new Set<number>();
     for (const r of rows) {
-      (grouped[r.category_id] ??= []).push(r);
+      if (r.archived_at === null) (active[r.category_id] ??= []).push(r);
+      else (archived[r.category_id] ??= []).push(r);
       seen.add(r.category_id);
     }
-    byCategory.value = grouped;
+    byCategory.value = active;
+    archivedByCategory.value = archived;
     loaded.value = seen;
   }
 
@@ -60,17 +70,44 @@ export const usePlaybooksStore = defineStore('playbooks', () => {
   }
 
   async function archive(id: number): Promise<void> {
-    const bucket = findBucket(id);
+    const bucket = findBucket(byCategory.value, id);
     if (bucket === null) return;
-    const { categoryId, snapshot } = bucket;
-    byCategory.value = {
-      ...byCategory.value,
-      [categoryId]: snapshot.filter((p) => p.id !== id),
-    };
+    const { categoryId, snapshot, row } = bucket;
+    byCategory.value = { ...byCategory.value, [categoryId]: snapshot.filter((p) => p.id !== id) };
     try {
       await api.archivePlaybook(id);
+      const archived = { ...row, archived_at: new Date().toISOString() };
+      archivedByCategory.value = {
+        ...archivedByCategory.value,
+        [categoryId]: [...archivedFor(categoryId), archived],
+      };
     } catch (e) {
       byCategory.value = { ...byCategory.value, [categoryId]: snapshot };
+      throw e;
+    }
+  }
+
+  async function restore(id: number): Promise<void> {
+    const bucket = findBucket(archivedByCategory.value, id);
+    if (bucket === null) return;
+    const { categoryId, snapshot, row } = bucket;
+    archivedByCategory.value = {
+      ...archivedByCategory.value,
+      [categoryId]: snapshot.filter((p) => p.id !== id),
+    };
+    const restored = { ...row, archived_at: null };
+    byCategory.value = {
+      ...byCategory.value,
+      [categoryId]: [...forCategory(categoryId), restored],
+    };
+    try {
+      await api.restorePlaybook(id);
+    } catch (e) {
+      archivedByCategory.value = { ...archivedByCategory.value, [categoryId]: snapshot };
+      byCategory.value = {
+        ...byCategory.value,
+        [categoryId]: forCategory(categoryId).filter((p) => p.id !== id),
+      };
       throw e;
     }
   }
@@ -80,14 +117,28 @@ export const usePlaybooksStore = defineStore('playbooks', () => {
     return body;
   }
 
-  function findBucket(id: number): { categoryId: number; snapshot: Playbook[] } | null {
-    for (const [cid, list] of Object.entries(byCategory.value)) {
-      if (list.some((p) => p.id === id)) {
-        return { categoryId: Number(cid), snapshot: list };
-      }
+  function findBucket(
+    map: Record<number, Playbook[]>,
+    id: number,
+  ): { categoryId: number; snapshot: Playbook[]; row: Playbook } | null {
+    for (const [cid, list] of Object.entries(map)) {
+      const row = list.find((p) => p.id === id);
+      if (row) return { categoryId: Number(cid), snapshot: list, row };
     }
     return null;
   }
 
-  return { byCategory, forCategory, ensureForCategory, loadAll, create, update, archive, draft };
+  return {
+    byCategory,
+    archivedByCategory,
+    forCategory,
+    archivedFor,
+    ensureForCategory,
+    loadAll,
+    create,
+    update,
+    archive,
+    restore,
+    draft,
+  };
 });

@@ -9,8 +9,11 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import AppConfig
 from app.models import NoteEntry, Override, Playbook, Ticket, TicketNote
+from app.schemas import HydratedTicket, TicketAuthorSchema
 from app.services import playbooks as svc
+from app.services.tickets import ingest_tickets
 from app.util import naive_utcnow
 
 
@@ -209,3 +212,35 @@ async def test_draft_from_ticket_404_when_missing(session: AsyncSession) -> None
     with pytest.raises(HTTPException) as exc:
         await svc.draft_from_ticket(session, "nope", client=_FakeClient("x"), model="m")
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_playbook_survives_ticket_resync(
+    session: AsyncSession,
+    test_config: AppConfig,
+) -> None:
+    """Invariant #13 — a full ingest / re-sync must not touch playbook rows."""
+    saved = await svc.create(session, category_id=1, label="keepme", body="steps")
+
+    hydrated = HydratedTicket(
+        id="TCKRESYNC",
+        title="Refund please",
+        state="open",
+        priority=None,
+        created_at=naive_utcnow(),
+        updated_at=naive_utcnow(),
+        author=TicketAuthorSchema(type="user", name="Cust"),
+        url=None,
+        parts=[],
+        internal_notes=[],
+    )
+    # No AI configured → fallback categorization; this is a real ingest pass.
+    await ingest_tickets(
+        session=session, openrouter=None, config=test_config, hydrated=[hydrated]
+    )
+
+    refreshed = await session.get(Playbook, saved.id)
+    assert refreshed is not None
+    assert refreshed.body == "steps"
+    assert refreshed.archived_at is None
+    assert [r.label for r in await svc.list_for_category(session, 1)] == ["keepme"]
