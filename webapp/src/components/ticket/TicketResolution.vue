@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { Ticket } from '@/types/api';
 import { useTicketsStore } from '@/stores/tickets';
 import { formatShortDateTime } from '@/utils/time';
@@ -6,12 +7,29 @@ import { formatShortDateTime } from '@/utils/time';
 const { ticket } = defineProps<{ ticket: Ticket }>();
 const tickets = useTicketsStore();
 
-async function onResolveToggle() {
-  if (ticket.resolved_at) {
-    await tickets.reopen(ticket.id);
-  } else {
-    await tickets.markResolved(ticket.id);
+const statusLabel = computed(() => {
+  switch (ticket.resolved_source) {
+    case 'manual':
+      return 'Resolved · manual';
+    case 'intercom_closed':
+      return 'Resolved · intercom';
+    case 'non_actionable':
+      return 'Non-actionable';
+    default:
+      return 'Resolved';
   }
+});
+
+async function onResolve() {
+  await tickets.markResolved(ticket.id);
+}
+
+async function onReopen() {
+  await tickets.reopen(ticket.id);
+}
+
+async function onMarkNonActionable() {
+  await tickets.markNonActionable(ticket.id);
 }
 
 async function setAi(v: boolean | null) {
@@ -24,14 +42,16 @@ async function setAi(v: boolean | null) {
     <div class="mono label">Resolution</div>
     <div class="status-row">
       <span v-if="ticket.resolved_at" class="status-pill mono">
-        Resolved · {{ ticket.resolved_source }} · {{ formatShortDateTime(ticket.resolved_at) }}
+        {{ statusLabel }} · {{ formatShortDateTime(ticket.resolved_at) }}
       </span>
       <span v-else class="status-pill mono">Open</span>
     </div>
     <div class="presets">
-      <button class="chip" @click="onResolveToggle">
-        {{ ticket.resolved_at ? 'Reopen' : 'Mark resolved' }}
-      </button>
+      <button v-if="ticket.resolved_at" class="chip" @click="onReopen">Reopen</button>
+      <template v-else>
+        <button class="chip" @click="onResolve">Mark resolved</button>
+        <button class="chip" @click="onMarkNonActionable">Mark non-actionable</button>
+      </template>
     </div>
     <div class="ai-tristate">
       <span class="mono tristate-label">AI</span>

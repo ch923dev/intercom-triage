@@ -45,7 +45,7 @@ function onConfidenceThreshold(event: Event) {
         :disabled="settings.saving || !settings.useAi"
         @change="onToggleAiResolveDefault"
       />
-      <span class="sentence">Let AI suggest resolution</span>
+      <span class="sentence">Let AI close resolved + non-actionable tickets</span>
     </label>
     <p v-if="!settings.useAi" class="hint">
       Enable AI categorization (above) to use auto-resolve suggestions.
@@ -64,8 +64,9 @@ function onConfidenceThreshold(event: Event) {
       <span class="mono threshold-val">{{ settings.aiResolveConfidenceThreshold.toFixed(2) }}</span>
     </label>
     <p class="hint">
-      Suggestions appear as chips on cards. AI never moves tickets
-      automatically — you confirm every change.
+      When AI confidence ≥ threshold, tickets the AI judges resolved or
+      non-actionable are closed automatically. AI never closes other tickets
+      without your confirmation.
     </p>
   </section>
 </template>
