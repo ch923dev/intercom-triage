@@ -186,7 +186,6 @@ async def test_resolver_propagates_resolution_fields(session: AsyncSession) -> N
         pending_proposal_ids=set(),
         pending_by_signature={},
         rejected_signatures=set(),
-        fallback_category_id=fb,
     )
     parsed = ParsedAssignment(
         "existing",

@@ -193,7 +193,6 @@ class _ResolverState:
     pending_proposal_ids: set[int]
     pending_by_signature: dict[str, int]
     rejected_signatures: set[str]
-    fallback_category_id: int
 
 
 async def resolve(
@@ -327,7 +326,6 @@ async def categorize_many(
         pending_proposal_ids={p.id for p in proposals},
         pending_by_signature={normalize_signature(p.name): p.id for p in proposals},
         rejected_signatures={r.signature for r in rejected_rows},
-        fallback_category_id=fallback_category_id,
     )
     rejected_names = [r.rejected_name for r in rejected_rows]
 
