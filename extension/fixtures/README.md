@@ -27,3 +27,12 @@ extra fields are ignored.
 | `conversation-internal-note.json` | 3                       | `internal_notes[]` |
 | `conversation-mixed.json`       | 1, 24, 3, 5 (event)       | split + skip       |
 | `conversation-unknown-type.json`| 1, 999 (unknown)          | part + warn+skip   |
+| `conversation-events.json`      | 21, 26, 31, 5 (events)    | skipped silently   |
+
+## Snapshots
+
+`extension/snapshot.test.js` locks the full `normalizeConversation` output for
+every fixture to `fixtures/expected/<name>.json`. After intentionally changing
+a fixture or the normalizer, regenerate with `UPDATE_SNAPSHOTS=1 node --test`
+and review the diff before committing. The fixtures are synthetic but
+shape-matched to a 2026-05-28 live capture (workspace `j3dxf22l`).
