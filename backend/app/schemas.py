@@ -56,6 +56,9 @@ ProposalStatus = Literal["pending", "approved", "merged", "rejected"]
 ResolvedSource = Literal["manual", "intercom_closed", "non_actionable", "ai_resolved"]
 ResolutionVerdict = Literal["resolved", "non_actionable", "not_resolved"]
 ResolutionChipState = Literal["ai_resolved", "ai_reopened", "new_reply"]
+# Roadmap 0.2 — triage facets emitted by the categorization call.
+AIPriority = Literal["low", "normal", "high", "urgent"]
+AISentiment = Literal["negative", "neutral", "positive"]
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -350,6 +353,11 @@ class TicketSchema(HydratedTicket):
     ai_resolution_confidence: float | None = None
     ai_resolution_reason: str | None = None
     resolution_chip_state: ResolutionChipState | None = None
+    # Roadmap 0.2 — triage facets surfaced on the board. `ai_priority` /
+    # `ai_sentiment` are null on pre-0.2 rows; `ai_labels` defaults to [].
+    ai_priority: AIPriority | None = None
+    ai_sentiment: AISentiment | None = None
+    ai_labels: list[str] = Field(default_factory=list)
 
 
 class CategoryUpdate(BaseModel):

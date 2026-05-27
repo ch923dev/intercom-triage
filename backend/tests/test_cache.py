@@ -113,6 +113,52 @@ async def test_cache_round_trip_resolution_fields(session: AsyncSession) -> None
 
 
 @pytest.mark.asyncio
+async def test_cache_round_trip_triage_facets(session: AsyncSession) -> None:
+    """Cache write + read preserves priority, sentiment, labels (roadmap 0.2)."""
+    sig = datetime(2026, 5, 27, 12, 0)
+    result = CategorizationResult(
+        category_id=1,
+        proposal_id=None,
+        summary="s",
+        confidence=0.9,
+        ai_priority="urgent",
+        ai_sentiment="negative",
+        ai_labels=["refund", "billing"],
+    )
+    await set_cached(session, "t-triage", result, sig)
+    await session.commit()
+
+    cached = await get_cached(session, "t-triage", sig, ttl_seconds=300)
+    assert cached is not None
+    assert cached.ai_priority == "urgent"
+    assert cached.ai_sentiment == "negative"
+    assert cached.ai_labels == ["refund", "billing"]
+
+
+@pytest.mark.asyncio
+async def test_cache_legacy_row_has_neutral_triage(session: AsyncSession) -> None:
+    """A pre-0.2 cache row (null priority/sentiment) reads back as neutral
+    defaults rather than None — keeps the ticket-row write well-typed."""
+    session.add(
+        AICacheEntry(
+            ticket_id="legacy-triage",
+            category_id=1,
+            proposal_id=None,
+            summary="s",
+            confidence=0.5,
+            ticket_updated_at=datetime(2026, 5, 27),
+        )
+    )
+    await session.commit()
+
+    cached = await get_cached(session, "legacy-triage", datetime(2026, 5, 27), 300)
+    assert cached is not None
+    assert cached.ai_priority == "normal"
+    assert cached.ai_sentiment == "neutral"
+    assert cached.ai_labels == []
+
+
+@pytest.mark.asyncio
 async def test_cache_legacy_row_has_null_resolution(session: AsyncSession) -> None:
     """An older cache row written before this feature has null verdict;
     get_cached returns None values without crashing."""

@@ -191,6 +191,20 @@ function renderCard(ticket, { isResolved = false } = {}) {
   const meta = node('div', 'card-meta');
   meta.append(node('span', 'customer', ticket.author?.name || '—'));
 
+  // Roadmap 0.2 — triage facets from the categorization call (display only).
+  // Hide 'normal'/'neutral' baselines so a card only flags an actual signal.
+  if (ticket.ai_priority && ticket.ai_priority !== 'normal') {
+    const pri = node('span', `pri-chip pri-${ticket.ai_priority}`, ticket.ai_priority);
+    pri.title = `AI priority: ${ticket.ai_priority}`;
+    meta.append(pri);
+  }
+  if (ticket.ai_sentiment && ticket.ai_sentiment !== 'neutral') {
+    const glyph = ticket.ai_sentiment === 'positive' ? '☺' : '☹';
+    const sent = node('span', `sent-chip sent-${ticket.ai_sentiment}`, glyph);
+    sent.title = `Customer sentiment: ${ticket.ai_sentiment}`;
+    meta.append(sent);
+  }
+
   if (followup && !isResolved) {
     const chip = node('span', 'fu-chip', chipLabel(followup));
     if (isDue(followup)) chip.classList.add('due');
@@ -239,6 +253,13 @@ function renderCard(ticket, { isResolved = false } = {}) {
   }
 
   card.append(meta);
+
+  // Roadmap 0.2 — secondary multi-label tags row.
+  if (Array.isArray(ticket.ai_labels) && ticket.ai_labels.length) {
+    const tags = node('div', 'card-labels');
+    for (const label of ticket.ai_labels) tags.append(node('span', 'label-tag', label));
+    card.append(tags);
+  }
 
   cardRefs.set(ticket.id, card);
   return card;

@@ -80,6 +80,19 @@ const awaitingCustomer = computed(() => adminReplyCount.value > 0 && !!lastPart.
 const teamNoteCount = computed(() => props.ticket.internal_notes.length);
 
 const isClosed = computed(() => props.ticket.state === 'closed');
+
+// Roadmap 0.2 — triage facets from the categorization call (display only; no
+// sorting/filtering — that's roadmap 1.1/1.2). 'normal' priority + 'neutral'
+// sentiment are the unremarkable baseline, so we hide those chips to keep the
+// card calm and only surface a signal when the AI flagged something.
+const priority = computed(() => props.ticket.ai_priority);
+const showPriority = computed(() => !!priority.value && priority.value !== 'normal');
+const sentiment = computed(() => props.ticket.ai_sentiment);
+const showSentiment = computed(() => !!sentiment.value && sentiment.value !== 'neutral');
+const labels = computed(() => props.ticket.ai_labels ?? []);
+const sentimentGlyph = computed(() =>
+  sentiment.value === 'positive' ? '☺' : sentiment.value === 'negative' ? '☹' : '',
+);
 </script>
 
 <template>
@@ -116,6 +129,22 @@ const isClosed = computed(() => props.ticket.state === 'closed');
 
     <div class="meta">
       <span class="customer">{{ props.ticket.author.name ?? '—' }}</span>
+      <span
+        v-if="showPriority"
+        class="pri-chip"
+        :class="`pri-${priority}`"
+        :title="`AI priority: ${priority}`"
+      >
+        {{ priority }}
+      </span>
+      <span
+        v-if="showSentiment"
+        class="sent-chip"
+        :class="`sent-${sentiment}`"
+        :title="`Customer sentiment: ${sentiment}`"
+      >
+        {{ sentimentGlyph }}
+      </span>
       <Mono v-if="props.ticket.parts.length > 1" :color="'var(--ink-3)'" :size="9.5">
         {{ props.ticket.parts.length }} msgs
       </Mono>
@@ -132,11 +161,13 @@ const isClosed = computed(() => props.ticket.state === 'closed');
         teamNoteCount ||
         awaitingCustomer ||
         isClosed ||
+        labels.length ||
         props.ticket.resolution_chip_state
       "
       class="tags"
     >
       <span v-if="isClosed" class="tag closed">Closed</span>
+      <span v-for="label in labels" :key="label" class="tag label">{{ label }}</span>
       <span v-if="awaitingCustomer" class="tag awaiting">Awaiting customer</span>
       <span v-else-if="adminReplyCount" class="tag replied">
         Replied{{ adminReplyCount > 1 ? ` (${adminReplyCount})` : '' }}
@@ -270,6 +301,54 @@ header {
 .conf {
   margin-left: auto;
 }
+/* Roadmap 0.2 — priority + sentiment chips in the meta row. Compact, mono,
+ * color-coded by urgency; 'normal'/'neutral' baselines are hidden upstream. */
+.pri-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: var(--radius-chip);
+  border: var(--hairline) solid var(--line);
+  color: var(--ink-2);
+  background: var(--chip-bg);
+}
+.pri-chip.pri-urgent {
+  color: oklch(0.45 0.18 25);
+  background: oklch(0.95 0.05 25);
+  border-color: oklch(0.72 0.12 25);
+}
+.pri-chip.pri-high {
+  color: oklch(0.48 0.14 50);
+  background: oklch(0.95 0.05 50);
+  border-color: oklch(0.74 0.1 50);
+}
+.pri-chip.pri-low {
+  color: var(--ink-3);
+  border-style: dashed;
+}
+.sent-chip {
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.sent-chip.sent-negative {
+  color: oklch(0.55 0.18 25);
+}
+.sent-chip.sent-positive {
+  color: oklch(0.52 0.14 145);
+}
+html[data-theme='dark'] .pri-chip.pri-urgent {
+  color: oklch(0.85 0.13 25);
+  background: oklch(0.28 0.06 25);
+  border-color: oklch(0.45 0.1 25);
+}
+html[data-theme='dark'] .pri-chip.pri-high {
+  color: oklch(0.85 0.12 50);
+  background: oklch(0.28 0.06 50);
+  border-color: oklch(0.45 0.09 50);
+}
 .tags {
   display: flex;
   gap: 5px;
@@ -297,6 +376,12 @@ header {
   animation: triagePulse 1.6s ease-in-out infinite;
 }
 .tag.note {
+  color: var(--ink-3);
+}
+/* Roadmap 0.2 — secondary multi-label tags. Lowercase, no uppercasing. */
+.tag.label {
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--ink-3);
 }
 .tag.replied {

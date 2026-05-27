@@ -133,6 +133,42 @@ async def test_ingest_does_not_cache_ai_failure(app: FastAPI, client: AsyncClien
 
 
 @pytest.mark.asyncio
+async def test_ingest_persists_and_exposes_triage_facets(app: FastAPI, client: AsyncClient) -> None:
+    """Roadmap 0.2 — priority/sentiment/labels from the categorization call are
+    persisted on the ticket row and surfaced on GET /tickets (same single AI
+    call; no second request)."""
+    raw = (
+        '{"assignment":"existing","category_id":1,"subject":"Refund #44812",'
+        '"summary":"Customer wants a refund.","confidence":0.9,'
+        '"priority":"urgent","sentiment":"negative","labels":["refund","billing"],'
+        '"resolution_verdict":"not_resolved","resolution_confidence":0.6,'
+        '"resolution_reason":"awaiting refund"}'
+    )
+    app.state.openrouter = FakeOpenRouter({"F1": raw})
+
+    resp = await client.post("/tickets/ingest", json=[_hydrated("F1")])
+    assert resp.status_code == 200
+
+    row = (await client.get("/tickets")).json()[0]
+    assert row["ai_priority"] == "urgent"
+    assert row["ai_sentiment"] == "negative"
+    assert row["ai_labels"] == ["refund", "billing"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_no_ai_yields_neutral_triage_facets(client: AsyncClient) -> None:
+    """With no AI client, tickets degrade to the fallback and carry the neutral
+    triage baseline (normal / neutral / []), never null priority/sentiment."""
+    resp = await client.post("/tickets/ingest", json=[_hydrated("N1")])
+    assert resp.status_code == 200
+
+    row = (await client.get("/tickets")).json()[0]
+    assert row["ai_priority"] == "normal"
+    assert row["ai_sentiment"] == "neutral"
+    assert row["ai_labels"] == []
+
+
+@pytest.mark.asyncio
 async def test_ingest_rejects_oversized_batch(client: AsyncClient) -> None:
     from app.config import MAX_INGEST_TICKETS
 

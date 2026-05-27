@@ -345,6 +345,58 @@ body {
   color: #fff;
 }
 
+/* ── Roadmap 0.2 — priority / sentiment / multi-label triage facets ──────── */
+.pri-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: var(--hairline) solid var(--line);
+  background: var(--chip-bg);
+  color: var(--ink-2);
+}
+.pri-chip.pri-urgent {
+  color: #8a2418;
+  background: #fbe7e2;
+  border-color: #e0a59a;
+}
+.pri-chip.pri-high {
+  color: #8a5418;
+  background: #fbf0e2;
+  border-color: #e0c29a;
+}
+.pri-chip.pri-low {
+  color: var(--ink-3);
+  border-style: dashed;
+}
+.sent-chip {
+  font-size: 11px;
+  line-height: 1;
+}
+.sent-chip.sent-negative {
+  color: #b23a26;
+}
+.sent-chip.sent-positive {
+  color: #2f7d4f;
+}
+.card-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.label-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: var(--hairline) solid var(--line);
+  background: var(--chip-bg);
+  color: var(--ink-3);
+}
+
 .card.due {
   border-left: 2px solid var(--accent);
 }
