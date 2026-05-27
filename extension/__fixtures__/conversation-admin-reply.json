@@ -1,0 +1,37 @@
+{
+  "_comment": "SYNTHESIZED fixture, not a real capture. Replace with a scrubbed real payload when available. Covers renderable_type 2 (admin reply via admin_summary) and 24 (admin reply via entity) — both customer-visible, go to parts[] with is_admin=true.",
+  "id": "1002",
+  "title": "Billing question",
+  "state": "open",
+  "priority": "priority",
+  "created_at": 1716810000,
+  "last_updated": 1716811000,
+  "user_summary": {
+    "user_id": "user-ext-456",
+    "name": "Sam Buyer",
+    "email": "sam@example.com",
+    "role": "user"
+  },
+  "renderable_parts": [
+    {
+      "renderable_type": 2,
+      "created_at": 1716810500,
+      "renderable_data": {
+        "admin_summary": { "id": "admin-7", "name": "Riley Agent", "email": "riley@support.example" },
+        "blocks": [
+          { "type": "paragraph", "text": "Thanks for reaching out! I've checked your account." }
+        ]
+      }
+    },
+    {
+      "renderable_type": 24,
+      "created_at": 1716810900,
+      "renderable_data": {
+        "entity": { "id": "admin-9", "name": "Jordan Lead", "email": "jordan@support.example" },
+        "blocks": [
+          { "type": "paragraph", "text": "Refund has been issued to your card." }
+        ]
+      }
+    }
+  ]
+}

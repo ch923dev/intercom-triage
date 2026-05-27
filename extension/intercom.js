@@ -41,6 +41,11 @@ const LOOKBACK_SECONDS = 7 * 24 * 60 * 60;
 const INBOUND_RENDERABLE_TYPES = new Set([1, 12]);
 const ADMIN_REPLY_RENDERABLE_TYPES = new Set([2, 24]);
 const INTERNAL_NOTE_RENDERABLE_TYPE = 3;
+// Non-text events we *expect* to skip silently: assignment/attribute changes
+// (5/6/14) and bot/AI translation (71). These are known-and-ignored, so they
+// must NOT trigger the unknown-type warning below — only genuinely
+// unrecognized codes should. Keep this list in sync with the table above.
+const KNOWN_SKIPPED_RENDERABLE_TYPES = new Set([5, 6, 14, 71]);
 
 class IntercomSessionError extends Error {
   constructor(status, message) {
@@ -273,8 +278,18 @@ export function normalizeConversation(detail, appId, summary) {
         created_at: createdAt,
         is_admin: true,
       });
+    } else if (!KNOWN_SKIPPED_RENDERABLE_TYPES.has(renderableType)) {
+      // Unknown renderable_type: the mapping is reverse-engineered, so an
+      // unrecognized code means Intercom may have introduced a new message
+      // kind we'd otherwise drop on the floor. Surface it (code + conversation
+      // id only — never the body, for privacy) so the operator can capture a
+      // real payload and decide whether to map it. Skip behavior is unchanged.
+      console.warn(
+        `[intercom] unknown renderable_type ${String(renderableType)} on conversation ${id} — skipping (mapping is reverse-engineered; capture a real payload if this recurs)`,
+      );
     }
-    // Anything else (assignment / attribute / translation events) is skipped.
+    // Known events (assignment / attribute / translation, types 5/6/14/71)
+    // are skipped silently; genuinely unknown codes are warned above.
   }
 
   const updatedRaw =
