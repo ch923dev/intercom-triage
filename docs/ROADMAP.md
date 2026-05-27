@@ -7,6 +7,8 @@
 > **As of 2026-05-28, Phases 0–3 + 4.1 + R.4 are SHIPPED to `main`.** What was a forward plan got executed almost in full. The work landed in code ahead of the source-of-truth docs; the **2026-05-28 reconciliation** wrote it back into `spec.md` v1.7 (US-022..US-039, FR-043..FR-061, NFR-009), `plan.md` v1.7 (§15–§18), and `tasks.md` v1.6 (Phases 15–18, T142–T160; T106/T102 marked `✓`). See the execution ledger below for per-item status + commit. The phase tables further down are kept verbatim as the original plan of record.
 >
 > **Still open:** Phase 4.2 (`non_actionable_kind` column / T107), 4.3 (webhook + SSE / T100), 4.4 (popup bulk / T105); robustness R.1 (payload snapshot tests), R.2 (webapp race test), R.3 (perf NFR tests). These are the live backlog.
+>
+> The original subagent dispatch artifacts that drove this execution are archived under [`docs/roadmap-execution/`](roadmap-execution/) — `TASK_CONTRACTS.md` (per-item contracts) + `DEPENDENCY_SCHEDULE.md` (wave/dependency graph).
 
 ## Execution ledger (2026-05-28)
 
