@@ -11,8 +11,10 @@ from app.ai.prompt import (
     CATEGORIZATION_RESPONSE_FORMAT,
     build_messages,
 )
+from app.metrics import metrics
 from app.models import Category, CategoryProposal, RejectedProposalSignature
 from tests.helpers import (
+    FakeCascadeOpenRouter,
     FakeOpenRouter,
     existing_assignment,
     make_hydrated,
@@ -416,3 +418,215 @@ async def test_categorize_nonconforming_response_falls_back(session: AsyncSessio
     assert out["X1"].category_id == 1
     assert out["X2"].category_id == fb
     assert out["X2"].fallback is True
+
+
+# ── 2.2 — model cascade (cheap → escalate-on-low-confidence) ───────────────────
+
+CHEAP = "anthropic/claude-3.5-haiku"
+STRONG = "anthropic/claude-sonnet-4.5"
+
+
+@pytest.mark.asyncio
+async def test_cascade_easy_ticket_stays_on_cheap(session: AsyncSession) -> None:
+    """A confident cheap-model answer (>= threshold) is kept — no escalation, the
+    strong model is never called."""
+    metrics.reset()
+    fb = await _fallback_id(session)
+    fake = FakeCascadeOpenRouter(
+        {(CHEAP, "X1"): existing_assignment(1, confidence=0.9)},
+    )
+    out = await categorize_many(
+        [make_hydrated("X1")],
+        session=session,
+        client=fake,  # type: ignore[arg-type]
+        model=STRONG,
+        concurrency=2,
+        fallback_category_id=fb,
+        cheap_model=CHEAP,
+        escalate_below=0.7,
+    )
+    assert out["X1"].category_id == 1
+    assert fake.calls_by_model.get(CHEAP) == 1
+    assert fake.calls_by_model.get(STRONG) is None
+    counters = metrics.snapshot()
+    assert counters.get("cascade_cheap_total") == 1
+    assert counters.get("cascade_escalated_total", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_cascade_low_confidence_escalates_to_strong(session: AsyncSession) -> None:
+    """A low-confidence cheap answer escalates: the STRONG model's result is used
+    and the escalation counter increments."""
+    metrics.reset()
+    fb = await _fallback_id(session)
+    fake = FakeCascadeOpenRouter(
+        {
+            (CHEAP, "X1"): existing_assignment(1, confidence=0.3),  # below 0.7
+            (STRONG, "X1"): existing_assignment(2, confidence=0.95),
+        },
+    )
+    out = await categorize_many(
+        [make_hydrated("X1")],
+        session=session,
+        client=fake,  # type: ignore[arg-type]
+        model=STRONG,
+        concurrency=2,
+        fallback_category_id=fb,
+        cheap_model=CHEAP,
+        escalate_below=0.7,
+    )
+    # Strong model's category (2) wins, not the cheap one (1).
+    assert out["X1"].category_id == 2
+    assert fake.calls_by_model.get(CHEAP) == 1
+    assert fake.calls_by_model.get(STRONG) == 1
+    counters = metrics.snapshot()
+    assert counters.get("cascade_cheap_total") == 1
+    assert counters.get("cascade_escalated_total") == 1
+
+
+@pytest.mark.asyncio
+async def test_cascade_failed_cheap_call_escalates(session: AsyncSession) -> None:
+    """A failed/malformed cheap call (no canned cheap response) escalates to the
+    strong model rather than degrading straight to fallback."""
+    metrics.reset()
+    fb = await _fallback_id(session)
+    # No (CHEAP, X1) entry → cheap call raises OpenRouterError → escalate.
+    fake = FakeCascadeOpenRouter(
+        {(STRONG, "X1"): existing_assignment(2, confidence=0.95)},
+    )
+    out = await categorize_many(
+        [make_hydrated("X1")],
+        session=session,
+        client=fake,  # type: ignore[arg-type]
+        model=STRONG,
+        concurrency=2,
+        fallback_category_id=fb,
+        cheap_model=CHEAP,
+        escalate_below=0.7,
+    )
+    assert out["X1"].category_id == 2
+    assert out["X1"].fallback is False
+    counters = metrics.snapshot()
+    assert counters.get("cascade_escalated_total") == 1
+
+
+@pytest.mark.asyncio
+async def test_cascade_disabled_single_strong_call(session: AsyncSession) -> None:
+    """cheap_model=None → single strong-model call, no cascade telemetry."""
+    metrics.reset()
+    fb = await _fallback_id(session)
+    fake = FakeCascadeOpenRouter(
+        {(STRONG, "X1"): existing_assignment(1, confidence=0.95)},
+    )
+    out = await categorize_many(
+        [make_hydrated("X1")],
+        session=session,
+        client=fake,  # type: ignore[arg-type]
+        model=STRONG,
+        concurrency=2,
+        fallback_category_id=fb,
+        cheap_model=None,
+    )
+    assert out["X1"].category_id == 1
+    assert fake.calls_by_model.get(STRONG) == 1
+    assert fake.calls_by_model.get(CHEAP) is None
+    counters = metrics.snapshot()
+    assert counters.get("cascade_cheap_total", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_cascade_same_model_collapses_to_single_call(session: AsyncSession) -> None:
+    """cheap_model == model is a no-op cascade: one call, no cascade counters."""
+    metrics.reset()
+    fb = await _fallback_id(session)
+    fake = FakeCascadeOpenRouter(
+        {(STRONG, "X1"): existing_assignment(1, confidence=0.4)},  # low conf, but no cheap split
+    )
+    out = await categorize_many(
+        [make_hydrated("X1")],
+        session=session,
+        client=fake,  # type: ignore[arg-type]
+        model=STRONG,
+        concurrency=2,
+        fallback_category_id=fb,
+        cheap_model=STRONG,
+        escalate_below=0.7,
+    )
+    assert out["X1"].category_id == 1
+    assert fake.calls_by_model.get(STRONG) == 1
+    assert metrics.snapshot().get("cascade_cheap_total", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_cascade_strong_malformed_still_falls_back(session: AsyncSession) -> None:
+    """Escalation does not save a malformed strong-model output — it still degrades
+    to the per-ticket fallback (invariant #7), and the batch completes."""
+
+    fb = await _fallback_id(session)
+    fake = FakeCascadeOpenRouter(
+        {
+            (CHEAP, "X1"): existing_assignment(1, confidence=0.2),  # escalate
+            (STRONG, "X1"): "GARBAGE NOT JSON",  # malformed → fallback
+        },
+    )
+    out = await categorize_many(
+        [make_hydrated("X1")],
+        session=session,
+        client=fake,  # type: ignore[arg-type]
+        model=STRONG,
+        concurrency=2,
+        fallback_category_id=fb,
+        cheap_model=CHEAP,
+        escalate_below=0.7,
+    )
+    assert out["X1"].category_id == fb
+    assert out["X1"].fallback is True
+
+
+@pytest.mark.asyncio
+async def test_cascade_escalation_rate_accounting(session: AsyncSession) -> None:
+    """MEASURE-FIRST harness: run a representative mixed-confidence batch through
+    the cascade and assert the escalation accounting (rate = escalated / cheap).
+
+    Mix: 7 confident (>=0.7) cheap answers kept, 3 low-confidence escalated →
+    expected escalation rate 30% (< the 40% break-even the roadmap warns about)."""
+    from app.metrics import metrics
+
+    metrics.reset()
+    fb = await _fallback_id(session)
+
+    confident = {f"C{i}" for i in range(7)}  # kept on cheap
+    weak = {f"W{i}" for i in range(3)}  # escalated to strong
+    canned: dict[tuple[str, str], str] = {}
+    for tid in confident:
+        canned[(CHEAP, tid)] = existing_assignment(1, confidence=0.85)
+    for tid in weak:
+        canned[(CHEAP, tid)] = existing_assignment(1, confidence=0.4)
+        canned[(STRONG, tid)] = existing_assignment(2, confidence=0.95)
+
+    fake = FakeCascadeOpenRouter(canned)
+    tickets = [make_hydrated(tid) for tid in (*confident, *weak)]
+    out = await categorize_many(
+        tickets,
+        session=session,
+        client=fake,  # type: ignore[arg-type]
+        model=STRONG,
+        concurrency=4,
+        fallback_category_id=fb,
+        cheap_model=CHEAP,
+        escalate_below=0.7,
+    )
+
+    assert len(out) == 10
+    counters = metrics.snapshot()
+    cheap_total = counters["cascade_cheap_total"]
+    escalated = counters["cascade_escalated_total"]
+    assert cheap_total == 10
+    assert escalated == 3
+    # Escalation rate = escalated / cheap. 3/10 = 0.30 — below the 0.40 break-even.
+    assert escalated / cheap_total == pytest.approx(0.30)
+    # Confident tickets kept the cheap category (1); escalated ones got strong (2).
+    for tid in confident:
+        assert out[tid].category_id == 1
+    for tid in weak:
+        assert out[tid].category_id == 2
