@@ -62,6 +62,9 @@ const proposalCount = computed(() => categories.pendingProposals.length);
 // Needs-review lane count (roadmap 2.3) — open, non-overridden, low-confidence.
 const reviewCount = computed(() => tickets.needsReviewTickets.length);
 
+const parkedCount = computed(() => tickets.parkedTickets.length);
+const readyCount = computed(() => tickets.readyParkedCount);
+
 function refresh() {
   void tickets.refresh();
 }
@@ -162,6 +165,19 @@ function onViewPick(e: Event) {
       @click="tickets.toggleReviewOnly()"
     >
       <span class="mono">{{ reviewCount }} review</span>
+    </button>
+
+    <button
+      v-if="parkedCount > 0 || tickets.parkedOnly"
+      class="pill parked"
+      :class="{ active: tickets.parkedOnly }"
+      :title="
+        tickets.parkedOnly ? 'Showing parked tickets — click to clear' : 'Show parked tickets'
+      "
+      @click="tickets.toggleParkedOnly()"
+    >
+      <span class="mono">⏸ {{ parkedCount }} parked</span>
+      <span v-if="readyCount > 0" class="ready-badge mono">★ {{ readyCount }}</span>
     </button>
 
     <!-- Follow-up status pill (T051) — accent-pulse while an alarm is firing. -->
@@ -304,6 +320,18 @@ function onViewPick(e: Event) {
   background: var(--ink);
   border-color: var(--ink);
   color: var(--bg);
+}
+.pill.parked {
+  cursor: pointer;
+}
+.pill.parked.active {
+  background: var(--chip-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.pill.parked .ready-badge {
+  margin-left: 6px;
+  color: var(--accent);
 }
 /* Search — the label is the visual chip; the input inside is borderless. */
 .search {
