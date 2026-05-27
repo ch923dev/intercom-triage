@@ -14,6 +14,7 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.fewshot import FewShotExample, gather_fewshot_examples
 from app.ai.prompt import CATEGORIZATION_RESPONSE_FORMAT, build_messages
 from app.clients.openrouter import OpenRouterClient
 from app.metrics import metrics
@@ -380,10 +381,18 @@ async def categorize_many(
     model: str,
     concurrency: int,
     fallback_category_id: int,
+    fewshot_examples: int = 0,
+    operator_notes: dict[str, str] | None = None,
 ) -> dict[str, CategorizationResult]:
     """Categorize a batch. Network calls run in parallel under a semaphore;
     resolution runs sequentially on the shared session. Any failure on a single
-    ticket degrades that ticket to the fallback — the batch always completes."""
+    ticket degrades that ticket to the fallback — the batch always completes.
+
+    `fewshot_examples > 0` (roadmap 2.5) injects up to that many nearest
+    confirmed-override neighbours into each ticket's prompt as in-context
+    examples. With 0 (or a cold corpus) the prompt is unchanged. The retrieval
+    reads the separate embedding store + override/category/ticket rows ONLY —
+    never `ai_cache` / the content signature (invariant #6)."""
     if not tickets:
         return {}
 
@@ -407,11 +416,27 @@ async def categorize_many(
     )
     rejected_names = [r.rejected_name for r in rejected_rows]
 
+    # Roadmap 2.5 — gather nearest confirmed-override examples per ticket BEFORE
+    # building messages (one cheap embedding query per ticket; the category-name
+    # + example-text lookups are batched inside). Cold corpus / disabled → {}.
+    examples_by_ticket: dict[str, list[FewShotExample]] = await gather_fewshot_examples(
+        session,
+        tickets,
+        max_examples=fewshot_examples,
+        operator_notes=operator_notes,
+    )
+
     semaphore = asyncio.Semaphore(concurrency)
 
     async def _call(ticket: HydratedTicket) -> str:
         async with semaphore:
-            messages = build_messages(ticket, categories, proposals, rejected_names)
+            messages = build_messages(
+                ticket,
+                categories,
+                proposals,
+                rejected_names,
+                examples_by_ticket.get(ticket.id),
+            )
             return await client.complete(
                 model=model,
                 messages=messages,

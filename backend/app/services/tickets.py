@@ -366,6 +366,19 @@ async def ingest_tickets(
         else:
             uncached.append(ticket)
 
+    # Roadmap 2.5 — few-shot examples are retrieved from the embedding store, so
+    # only when embeddings are enabled. Passing operator notes keeps the query
+    # embedding text aligned with how neighbours were stored (title + parts +
+    # note). Reads the separate embedding/override stores, never `ai_cache` (#6).
+    fewshot_notes: dict[str, str] = {}
+    fewshot_n = config.fewshot_examples if config.embeddings_enabled else 0
+    if fewshot_n and uncached:
+        uncached_ids = [t.id for t in uncached]
+        note_rows = (
+            await session.scalars(select(TicketNote).where(TicketNote.ticket_id.in_(uncached_ids)))
+        ).all()
+        fewshot_notes = {n.ticket_id: n.body for n in note_rows}
+
     fresh = await categorize_many(
         uncached,
         session=session,
@@ -373,6 +386,8 @@ async def ingest_tickets(
         model=config.openrouter_model,
         concurrency=config.ai_concurrency,
         fallback_category_id=fallback.id,
+        fewshot_examples=fewshot_n,
+        operator_notes=fewshot_notes,
     )
     for ticket in uncached:
         result = fresh[ticket.id]
