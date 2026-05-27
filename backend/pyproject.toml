@@ -46,7 +46,8 @@ warn_unused_ignores = true
 exclude = ["data", ".venv", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["aiosqlite.*"]
+# Untyped third-party deps with no stubs / py.typed marker.
+module = ["aiosqlite.*", "sqlite_vec.*", "sentence_transformers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

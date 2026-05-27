@@ -63,6 +63,13 @@ class AppConfig(BaseSettings):
     # unbounded read would let one upload OOM the local process.
     attachment_max_bytes: int = Field(default=25 * 1024 * 1024, ge=1)
 
+    # ── Embeddings (local, offline) ──────────────────────────────────────────
+    # Local sentence-transformers model (all-MiniLM-L6-v2, 384-dim, CPU). The
+    # ~80 MB model loads lazily on first use; disable to skip the heavy import
+    # entirely (e.g. low-RAM machines, or to keep ingest fast). When off, the
+    # ingest hook is a no-op — no embeddings are computed or stored.
+    embeddings_enabled: bool = True
+
     # ── Server ────────────────────────────────────────────────────────────────
     log_level: str = "INFO"
 

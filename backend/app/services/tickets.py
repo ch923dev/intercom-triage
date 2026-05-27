@@ -7,12 +7,14 @@ stores them. `get_tickets` serves the stored board with no live Intercom call.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai import embeddings
 from app.ai.pipeline import CategorizationResult, categorize_many
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig
@@ -30,6 +32,8 @@ from app.services.cache import get_cached, set_cached
 from app.services.categories import get_fallback
 from app.services.settings import get_settings
 from app.util import naive_utcnow
+
+logger = logging.getLogger(__name__)
 
 
 def _chip_state(
@@ -259,6 +263,44 @@ async def _upsert_ticket(
     row.ingested_at = now
 
 
+async def _embed_ingested_tickets(
+    session: AsyncSession,
+    hydrated: list[HydratedTicket],
+    config: AppConfig,
+) -> None:
+    """Best-effort local-embedding pass over a just-ingested batch.
+
+    Runs AFTER ingest has already committed, in its own transaction, so a model
+    or vec-table failure can never roll back or break ingest — the worst case is
+    a missing embedding row that the next sync refills. Embeds the
+    customer-visible `parts[]` plus the operator's local `ticket_notes` jot ONLY;
+    Intercom `internal_notes` are never embedded (invariant #4). This is a
+    separate store from `ai_cache` and never touches the content signature (#6).
+    """
+    if not config.embeddings_enabled:
+        return
+    ticket_ids = [t.id for t in hydrated]
+    if not ticket_ids:
+        return
+    try:
+        note_rows = (
+            await session.scalars(select(TicketNote).where(TicketNote.ticket_id.in_(ticket_ids)))
+        ).all()
+        notes = {n.ticket_id: n.body for n in note_rows}
+        stored = 0
+        for ticket in hydrated:
+            if await embeddings.embed_and_store_ticket(session, ticket, notes.get(ticket.id)):
+                stored += 1
+        await session.commit()
+        if stored:
+            metrics.incr("ticket_embeddings_stored_total", stored)
+    except Exception:
+        # Embedding is auxiliary — log and move on. Roll back the embedding
+        # transaction so a partial failure doesn't leave the session dirty.
+        await session.rollback()
+        logger.warning("embedding pass failed for ingest batch", exc_info=True)
+
+
 async def ingest_tickets(
     *,
     session: AsyncSession,
@@ -292,6 +334,7 @@ async def ingest_tickets(
             await _upsert_ticket(session, ticket, fallback_results[ticket.id], settings)
         await session.commit()
         metrics.incr("tickets_ingested_total", len(hydrated))
+        await _embed_ingested_tickets(session, hydrated, config)
         return IngestResponse(received=len(hydrated), categorized=0)
 
     # Cache key is the last-part timestamp (see `_content_signature`) — AI only
@@ -336,6 +379,7 @@ async def ingest_tickets(
 
     await session.commit()
     metrics.incr("tickets_ingested_total", len(hydrated))
+    await _embed_ingested_tickets(session, hydrated, config)
     return IngestResponse(received=len(hydrated), categorized=len(uncached))
 
 

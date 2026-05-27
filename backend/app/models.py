@@ -707,20 +707,69 @@ from sqlalchemy import event  # noqa: E402  (kept local to its usage)
 from sqlalchemy.engine import Engine  # noqa: E402
 
 
+def _is_sqlite_connection(dbapi_connection: Any) -> bool:
+    try:
+        return "sqlite" in type(dbapi_connection).__module__.lower()
+    except Exception:
+        return False
+
+
 @event.listens_for(Engine, "connect")
 def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
     # Only fire for SQLite — Postgres connections have no such concept.
-    try:
-        is_sqlite = "sqlite" in type(dbapi_connection).__module__.lower()
-    except Exception:
-        is_sqlite = False
-    if not is_sqlite:
+    if not _is_sqlite_connection(dbapi_connection):
         return
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA foreign_keys = ON")
     finally:
         cursor.close()
+
+
+# ── sqlite-vec extension load (per-connection) ────────────────────────────────
+#
+# The `vec0` virtual table (embeddings store, migration 0014) is provided by the
+# sqlite-vec loadable extension. Like the FK PRAGMA above, it does not carry
+# across connections — every new SQLite connection must load it before the
+# vec table is usable. SQLAlchemy's aiosqlite dialect surfaces the raw
+# `sqlite3.Connection` here, which exposes `enable_load_extension`. Postgres is
+# unaffected (the guard skips non-SQLite). Best-effort: if sqlite-vec is not
+# installed (embeddings disabled / heavy dep skipped) the load is silently
+# skipped so the rest of the app boots — only the embeddings layer is degraded.
+
+
+@event.listens_for(Engine, "connect")
+def _load_sqlite_vec(dbapi_connection: Any, connection_record: Any) -> None:
+    if not _is_sqlite_connection(dbapi_connection):
+        return
+    try:
+        import sqlite_vec
+    except ImportError:
+        # Embeddings disabled / heavy dep skipped — the vec0 table is unusable,
+        # but the rest of the app boots normally. Only the embedding layer is
+        # degraded (the ingest hook is best-effort, see services/tickets.py).
+        return
+
+    def _load(raw: Any) -> None:
+        raw.enable_load_extension(True)
+        try:
+            sqlite_vec.load(raw)
+        finally:
+            raw.enable_load_extension(False)
+
+    # aiosqlite (our async default) runs the real sqlite3 connection on a worker
+    # thread: its `enable_load_extension` / `load_extension` are coroutines, so
+    # they cannot be called synchronously here. Bridge onto that thread via the
+    # adapter's `await_` + aiosqlite's `_execute`, touching the underlying
+    # sqlite3.Connection (`_connection`). A plain sync sqlite3 connection (e.g.
+    # a future sync engine) exposes `enable_load_extension` directly.
+    driver = getattr(dbapi_connection, "driver_connection", dbapi_connection)
+    raw_sqlite3 = getattr(driver, "_connection", None)
+    await_ = getattr(dbapi_connection, "await_", None)
+    if raw_sqlite3 is not None and await_ is not None and hasattr(driver, "_execute"):
+        await_(driver._execute(_load, raw_sqlite3))
+    elif hasattr(dbapi_connection, "enable_load_extension"):
+        _load(dbapi_connection)
 
 
 # ── Inline smoke test ─────────────────────────────────────────────────────────
