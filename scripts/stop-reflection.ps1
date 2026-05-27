@@ -2,8 +2,9 @@
 #
 # Runs when Claude Code is about to stop (end of turn). Reads the
 # transcript and, if the session made code edits but never ran a
-# quality gate (pytest / vitest / mypy / ruff / npm lint / typecheck),
-# emits a one-time reminder to consider /qa-all.
+# quality gate (pytest / vitest / mypy / ruff / npm lint|typecheck /
+# `node --test` for the extension), emits a one-time reminder to
+# consider /qa-all.
 #
 # Triggered via .claude/settings.json hooks.Stop.
 #
@@ -55,7 +56,9 @@ try {
                 $script:editCount++
             }
             elseif ($name -eq "Bash" -or $name -eq "PowerShell") {
-                if ($cmd -match '\b(pytest|vitest|mypy|ruff|npm\s+(run\s+)?(lint|test|typecheck|build|format))\b') {
+                # `node --test` is the extension's only automated gate (plain
+                # ES modules, no bundler) — count it like the backend/webapp gates.
+                if ($cmd -match '\b(pytest|vitest|mypy|ruff|node\s+--test|npm\s+(run\s+)?(lint|test|typecheck|build|format))\b') {
                     $script:qaCount++
                 }
             }
