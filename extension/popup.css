@@ -516,3 +516,95 @@ body {
   color: var(--ink-3);
 }
 
+.action-btn.park-btn {
+  border-color: var(--line);
+  color: var(--ink-3);
+}
+
+.action-btn.park-btn:hover,
+.action-btn.unpark-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.action-btn.unpark-btn {
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+
+/* ── Click-to-reveal park menu ─────────────────────────────────────────── */
+.park-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.park-menu {
+  display: none;
+}
+
+.park-menu.open {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 158px;
+  padding: 7px 8px;
+  background: var(--bg);
+  border: var(--hairline) solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+}
+
+.park-menu-title {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.park-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.park-lbl {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-3);
+}
+
+.park-reason {
+  flex: 1;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--ink);
+  background: var(--bg);
+  border: var(--hairline) solid var(--line);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+
+.park-preset {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 3px 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.park-preset:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+

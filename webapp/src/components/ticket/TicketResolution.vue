@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import type { Ticket } from '@/types/api';
+import { computed, ref } from 'vue';
+import type { ParkedReason, Ticket } from '@/types/api';
 import CollapsibleSection from './CollapsibleSection.vue';
+import ParkMenu from '@/components/ParkMenu.vue';
 import { useTicketsStore } from '@/stores/tickets';
 import { formatShortDateTime } from '@/utils/time';
 
@@ -38,6 +39,36 @@ async function onMarkNonActionable() {
 async function setAi(v: boolean | null) {
   await tickets.setAiResolve(ticket.id, v);
 }
+
+const PARK_REASON_LABELS: Record<ParkedReason, string> = {
+  waiting_on_customer: 'waiting on customer',
+  waiting_on_third_party: 'waiting on third party',
+  waiting_internal: 'waiting (internal)',
+  other: 'parked',
+};
+
+const parkOpen = ref(false);
+
+const isReady = computed(
+  () => !!ticket.parked_until && Date.parse(ticket.parked_until) <= Date.now(),
+);
+
+const parkedLabel = computed(() => {
+  if (!ticket.parked_at || !ticket.parked_until) return '';
+  const reason = ticket.parked_reason ? PARK_REASON_LABELS[ticket.parked_reason] : 'parked';
+  return isReady.value
+    ? `★ Ready · ${reason}`
+    : `Parked · ${reason} · until ${formatShortDateTime(ticket.parked_until)}`;
+});
+
+async function onPark(untilAt: string, reason: ParkedReason) {
+  parkOpen.value = false;
+  await tickets.parkTicket(ticket.id, untilAt, reason);
+}
+
+async function onUnpark() {
+  await tickets.unparkTicket(ticket.id);
+}
 </script>
 
 <template>
@@ -46,13 +77,23 @@ async function setAi(v: boolean | null) {
       <span v-if="ticket.resolved_at" class="status-pill mono">
         {{ statusLabel }} · {{ formatShortDateTime(ticket.resolved_at) }}
       </span>
+      <span v-else-if="ticket.parked_at" class="status-pill mono" :class="{ ready: isReady }">
+        {{ parkedLabel }}
+      </span>
       <span v-else class="status-pill mono">Open</span>
     </div>
     <div class="presets">
       <button v-if="ticket.resolved_at" class="chip" @click="onReopen">Reopen</button>
+      <button v-else-if="ticket.parked_at" class="chip" @click="onUnpark">Unpark</button>
       <template v-else>
         <button class="chip" @click="onResolve">Mark resolved</button>
         <button class="chip" @click="onMarkNonActionable">Mark non-actionable</button>
+        <div class="park-anchor">
+          <button class="chip" :class="{ active: parkOpen }" @click="parkOpen = !parkOpen">
+            Park ▾
+          </button>
+          <ParkMenu v-if="parkOpen" class="park-pop" @park="onPark" />
+        </div>
       </template>
     </div>
     <div class="ai-tristate">
@@ -95,6 +136,24 @@ async function setAi(v: boolean | null) {
 .status-row {
   display: flex;
   align-items: center;
+}
+.status-pill.ready {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.park-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.park-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+}
+.chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .status-pill {
   font-size: 10px;
