@@ -70,6 +70,18 @@ export const reopenTicket = (ticketId) =>
 export const markNonActionable = (ticketId) =>
   request(`/tickets/${encodeURIComponent(ticketId)}/non-actionable`, { method: 'POST' });
 
+/** Park a ticket until `untilAt` (ISO with Z) with a structured reason.
+ *  409 if resolved or already parked. */
+export const parkTicket = (ticketId, untilAt, reason) =>
+  request(`/tickets/${encodeURIComponent(ticketId)}/park`, {
+    method: 'POST',
+    body: JSON.stringify({ until_at: untilAt, reason }),
+  });
+
+/** Unpark a ticket. 409 if not parked, 404 if unknown. */
+export const unparkTicket = (ticketId) =>
+  request(`/tickets/${encodeURIComponent(ticketId)}/unpark`, { method: 'POST' });
+
 /** Active follow-up reminders — one row per ticket (T053). */
 export const fetchFollowups = () => request('/followups');
 
