@@ -207,3 +207,26 @@ export interface FilterSettings {
    *  Resolved column always shows regardless. */
   hide_empty_categories: boolean;
 }
+
+// ── Metrics (roadmap 1.4 — token / cost meter) ───────────────────────────────
+
+/** OpenRouter token usage + estimated USD cost for one (day, model) bucket.
+ *  In-process on the backend — resets when the backend restarts. */
+export interface UsageBucket {
+  date: string; // UTC calendar day, ISO `YYYY-MM-DD`.
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  calls: number;
+  estimated_cost_usd: number;
+}
+
+/** `GET /metrics` — process-lifetime counters, latency histograms, and the
+ *  per-day OpenRouter spend meter. Only the cost-meter fields are typed here;
+ *  counters/histograms are open-ended maps the webapp does not yet consume. */
+export interface MetricsResponse {
+  counters: Record<string, number>;
+  usage: UsageBucket[];
+  today_cost_usd: number;
+}

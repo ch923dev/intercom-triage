@@ -5,6 +5,7 @@
 import Mono from './Mono.vue';
 import { useViewStore } from '@/stores/view';
 import DrawerAiSection from './settings/DrawerAiSection.vue';
+import DrawerCostSection from './settings/DrawerCostSection.vue';
 import DrawerDisplaySection from './settings/DrawerDisplaySection.vue';
 import DrawerFiltersSection from './settings/DrawerFiltersSection.vue';
 import DrawerNotificationsSection from './settings/DrawerNotificationsSection.vue';
@@ -25,6 +26,7 @@ const view = useViewStore();
         <DrawerDisplaySection />
         <DrawerFiltersSection />
         <DrawerAiSection />
+        <DrawerCostSection />
         <DrawerNotificationsSection />
         <DrawerSyncSection />
       </div>
