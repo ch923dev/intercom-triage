@@ -243,3 +243,55 @@ export interface MetricsResponse {
   usage: UsageBucket[];
   today_cost_usd: number;
 }
+
+// ── Stats dashboard (roadmap 1.3) ─────────────────────────────────────────────
+//
+// Read-only rollups over the tickets table (no migration). Mirrors
+// backend/app/schemas.py StatsResponse. Resolution mix keys on `resolved_source`
+// (manual | intercom_closed | non_actionable | ai_resolved, null = open).
+
+/** Ticket count for one effective category. `category_id` is null for
+ *  uncategorized tickets. */
+export interface CategoryCount {
+  category_id: number | null;
+  category_name: string;
+  count: number;
+}
+
+/** Tickets created on one UTC calendar day. `date` is ISO `YYYY-MM-DD`. Gap-
+ *  filled by the backend so the trend has a point per day. */
+export interface VolumePoint {
+  date: string;
+  count: number;
+}
+
+/** Resolution-source breakdown over the window. `open` counts tickets with no
+ *  `resolved_at`. */
+export interface ResolutionMix {
+  open: number;
+  manual: number;
+  intercom_closed: number;
+  non_actionable: number;
+  ai_resolved: number;
+}
+
+/** One bucket of the time-to-resolve histogram. `upper_hours` is null for the
+ *  final open-ended band. */
+export interface ResolveTimeBucket {
+  label: string;
+  lower_hours: number;
+  upper_hours: number | null;
+  count: number;
+}
+
+/** `GET /stats` — the four success metrics, computed server-side over a
+ *  trailing window of `window_days` (by ticket `created_at`). */
+export interface StatsResponse {
+  window_days: number;
+  total_tickets: number;
+  category_breakdown: CategoryCount[];
+  volume_trend: VolumePoint[];
+  resolution_mix: ResolutionMix;
+  resolve_time_buckets: ResolveTimeBucket[];
+  median_resolve_hours: number | null;
+}

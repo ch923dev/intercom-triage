@@ -28,6 +28,7 @@ const NAV: { id: View; label: string }[] = [
   { id: 'proposals', label: 'Proposals' },
   { id: 'playbooks', label: 'Playbooks' },
   { id: 'snippets', label: 'Snippets' },
+  { id: 'stats', label: 'Stats' },
 ];
 
 const lastSync = computed(() => {
