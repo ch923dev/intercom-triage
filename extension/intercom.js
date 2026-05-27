@@ -14,7 +14,7 @@
 //   - list  : GET /ember/inbox/conversations/list
 //   - detail: GET /ember/inbox/conversations/{id}
 // Detail carries `renderable_parts[]`; only the message types below hold
-// conversation text — events (5/14/etc.) are skipped.
+// conversation text — events (5/6/14/21/26/31/71) are skipped (see table below).
 
 const INTERCOM_BASE = 'https://app.intercom.com';
 const APP_ID_STORAGE_KEY = 'intercomAppId';
