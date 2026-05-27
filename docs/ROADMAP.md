@@ -4,9 +4,9 @@
 
 > ## ✅ STATUS — this roadmap is now an execution LOG, not a forward plan
 >
-> **As of 2026-05-28, Phases 0–3 + 4.1 + R.4 are SHIPPED to `main`.** What was a forward plan got executed almost in full. The work landed in code ahead of the source-of-truth docs; the **2026-05-28 reconciliation** wrote it back into `spec.md` v1.7 (US-022..US-039, FR-043..FR-061, NFR-009), `plan.md` v1.7 (§15–§18), and `tasks.md` v1.6 (Phases 15–18, T142–T160; T106/T102 marked `✓`). See the execution ledger below for per-item status + commit. The phase tables further down are kept verbatim as the original plan of record.
+> **As of 2026-05-28, Phases 0–3 + 4.1 + R.1 + R.4 are SHIPPED to `main`.** What was a forward plan got executed almost in full. The work landed in code ahead of the source-of-truth docs; the **2026-05-28 reconciliation** wrote it back into `spec.md` v1.7 (US-022..US-039, FR-043..FR-061, NFR-009), `plan.md` v1.7 (§15–§18), and `tasks.md` v1.6 (Phases 15–18, T142–T160; T106/T102 marked `✓`). See the execution ledger below for per-item status + commit. The phase tables further down are kept verbatim as the original plan of record.
 >
-> **Still open:** Phase 4.2 (`non_actionable_kind` column / T107), 4.3 (webhook + SSE / T100), 4.4 (popup bulk / T105); robustness R.1 (payload snapshot tests), R.2 (webapp race test), R.3 (perf NFR tests). These are the live backlog.
+> **Still open:** Phase 4.2 (`non_actionable_kind` column / T107), 4.3 (webhook + SSE / T100), 4.4 (popup bulk / T105); robustness R.2 (webapp race test), R.3 (perf NFR tests), R.5 (image-only message content loss — surfaced during the R.1 live capture). These are the live backlog.
 >
 > The original subagent dispatch artifacts that drove this execution are archived under [`docs/roadmap-execution/`](roadmap-execution/) — `TASK_CONTRACTS.md` (per-item contracts) + `DEPENDENCY_SCHEDULE.md` (wave/dependency graph).
 
@@ -38,10 +38,11 @@
 | 4.2 | `non_actionable_kind` column | ◯ open | T107 | — |
 | 4.3 | Webhook + SSE live updates | ◯ open | T100 | — |
 | 4.4 | Bulk actions in popup | ◯ open | T105 | — |
-| R.1 | Payload snapshot tests + unknown-type logging | ◯ open | — | highest-value hardening next |
+| R.1 | Payload snapshot tests + unknown-type logging | ✅ shipped | — | `25e7f42` — live capture (workspace j3dxf22l) found event types 21/26/31 unmapped → false unknown-type warns; added to skip set + zero-dep full-output snapshot harness for `normalizeConversation` |
 | R.2 | Webapp E2E race test | ◯ open | — | — |
 | R.3 | NFR perf integration tests | ◯ open | — | NFR-001/002 still unguarded |
 | R.4 | Latency p95 histogram | ✅ shipped | T160 | `ffb28c5` |
+| R.5 | Image-only message content loss | ◯ open | — | type 1/2/3 parts can carry `uploads[]`; a text-less attachment-only message yields empty body and is dropped (`intercom.js` `if (!body) continue`). Surfaced during the R.1 live capture |
 
 ## Where the project stood (when this was written, 2026-05-27)
 
@@ -135,10 +136,11 @@ Not a phase — slot these alongside feature work to keep the foundation honest 
 
 | ID | Item | Why | Effort |
 |----|------|-----|--------|
-| R.1 | **Intercom payload snapshot tests + unknown-`renderable_type` logging** | The Ember-API scraper is reverse-engineered and fails silently on schema drift. Archive 3–5 real payloads, snapshot-test `normalizeConversation()`, log unknown types instead of skipping. | M |
+| R.1 | **Intercom payload snapshot tests + unknown-`renderable_type` logging** ✅ **shipped 2026-05-28** (`25e7f42`) | The Ember-API scraper is reverse-engineered and fails silently on schema drift. Snapshot-test `normalizeConversation()`, log unknown types instead of skipping. Live capture instead found event types 21/26/31 unmapped → added to the skip set; fixtures kept synthetic (no PII), shape-matched to the capture. | M |
 | R.2 | **Webapp E2E race test** — `silentRefresh()` vs. in-flight optimistic mutation | Confirms a background sync can't clobber an operator's pending override. Highest-risk untested path in the webapp. | M |
 | R.3 | **NFR perf integration tests** — assert cold-fetch ≤15s (NFR-001), warm-fetch ≤3s (NFR-002) | Both SLAs are stated in `spec.md` with **zero** automated guard today. Add timed integration tests. | M |
 | R.4 | **Latency histogram / p95 in `metrics.py`** | `plan.md §11` names this the next observability step once real workload appears. Pairs with R.3 and the 1.3 dashboard. | M |
+| R.5 | **Image-only message content loss** — surface `uploads[]` when a part has no text | `normalizeConversation` drops a customer message that carries only an attachment (no text block): `blocksToPlainText` yields `''`, then `if (!body) continue` skips the whole part. Type 1/2/3 parts can carry `uploads[]`. Real content loss; surfaced during the R.1 live capture (2026-05-28). | M |
 
 ---
 
