@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai import embeddings
 from app.config import AppConfig
 from app.models import NoteEntry, Override, Playbook, Ticket, TicketNote
 from app.schemas import HydratedTicket, TicketAuthorSchema
@@ -211,6 +212,224 @@ async def test_draft_from_ticket_503_without_client(session: AsyncSession) -> No
 async def test_draft_from_ticket_404_when_missing(session: AsyncSession) -> None:
     with pytest.raises(HTTPException) as exc:
         await svc.draft_from_ticket(session, "nope", client=_FakeClient("x"), model="m")
+    assert exc.value.status_code == 404
+
+
+# ── RAG draft reply (roadmap 2.6) ─────────────────────────────────────────────
+
+
+class _CapturingClient:
+    """Records the messages it was asked to complete so tests can assert what
+    reached the prompt. Accepts `response_format` (the RAG drafter passes it)."""
+
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+        self.last_messages: list[dict[str, str]] = []
+        self.last_response_format: dict[str, str] | None = None
+
+    async def complete(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, str]],
+        ticket_id: str,
+        response_format: dict[str, str] | None = None,
+    ) -> str:
+        self.last_messages = messages
+        self.last_response_format = response_format
+        return self.reply
+
+
+def _resolved_ticket(ticket_id: str, *, part_body: str, internal_note: str | None = None) -> Ticket:
+    now = naive_utcnow()
+    t = _make_ticket(ticket_id, category_id=1, updated_at=now)
+    t.parts = [
+        {
+            "author": {"type": "user", "name": "Cust"},
+            "body": part_body,
+            "created_at": "2026-05-26T10:00:00Z",
+            "is_admin": False,
+        }
+    ]
+    if internal_note is not None:
+        t.internal_notes = [
+            {
+                "author": {"type": "admin", "name": "Op"},
+                "body": internal_note,
+                "created_at": "2026-05-26T10:06:00Z",
+                "is_admin": True,
+            }
+        ]
+    t.resolved_at = now
+    t.resolved_source = "manual"
+    return t
+
+
+async def _store_embedding(session: AsyncSession, ticket: Ticket) -> None:
+    """Embed a ticket's customer-visible text into the vec store (test helper).
+
+    Mirrors what ingest does, using the deterministic fake encoder so identical
+    text yields ~0 distance."""
+    text = svc._query_text(ticket)
+    vector = embeddings.embed_text(text)
+    await embeddings.store_embedding(session, ticket.id, vector)
+
+
+@pytest.mark.asyncio
+async def test_draft_reply_grounds_in_resolved_precedent(session: AsyncSession) -> None:
+    """The nearest RESOLVED ticket's customer-visible parts reach the prompt and
+    its id is reported as grounding."""
+    past = _resolved_ticket("TPAST", part_body="refund the duplicate charge from Stripe")
+    current = _make_ticket("TCUR", category_id=1, updated_at=naive_utcnow())
+    current.parts = [
+        {
+            "author": {"type": "user", "name": "Cust"},
+            "body": "refund the duplicate charge from Stripe",
+            "created_at": "2026-05-26T11:00:00Z",
+            "is_admin": False,
+        }
+    ]
+    session.add_all([past, current])
+    await session.commit()
+    await _store_embedding(session, past)
+    await session.commit()
+
+    client = _CapturingClient("Sorry about that — see TPAST.")
+    draft = await svc.draft_reply_from_ticket(session, "TCUR", client=client, model="m")
+
+    assert draft.grounding_ticket_ids == ["TPAST"]
+    blob = "\n".join(m["content"] for m in client.last_messages)
+    assert "refund the duplicate charge from Stripe" in blob
+    assert "TPAST" in blob  # precedent block is labelled with the ticket id
+    # The RAG drafter asks for free-text output, not a JSON object.
+    assert client.last_response_format == {"type": "text"}
+
+
+@pytest.mark.asyncio
+async def test_draft_reply_excludes_internal_notes_of_precedents(session: AsyncSession) -> None:
+    """Invariant #4: a resolved precedent's internal_notes must NEVER be
+    reachable in the draft-prompt messages."""
+    sentinel = "SENTINEL_INTERNAL_NOTE_DO_NOT_LEAK"
+    past = _resolved_ticket(
+        "TPAST",
+        part_body="my export to CSV is missing fields",
+        internal_note=sentinel,
+    )
+    current = _make_ticket("TCUR", category_id=1, updated_at=naive_utcnow())
+    current.parts = [
+        {
+            "author": {"type": "user", "name": "Cust"},
+            "body": "my export to CSV is missing fields",
+            "created_at": "2026-05-26T11:00:00Z",
+            "is_admin": False,
+        }
+    ]
+    session.add_all([past, current])
+    await session.commit()
+    await _store_embedding(session, past)
+    await session.commit()
+
+    client = _CapturingClient("Here is how to fix the export.")
+    draft = await svc.draft_reply_from_ticket(session, "TCUR", client=client, model="m")
+
+    # The precedent WAS retrieved (proves the path is exercised)...
+    assert draft.grounding_ticket_ids == ["TPAST"]
+    # ...but the sentinel never reached the prompt OR the returned body.
+    blob = "\n".join(m["content"] for m in client.last_messages)
+    assert sentinel not in blob
+    assert sentinel not in draft.body
+
+
+@pytest.mark.asyncio
+async def test_draft_reply_excludes_unresolved_neighbours(session: AsyncSession) -> None:
+    """Only RESOLVED tickets are precedent — an unresolved nearest neighbour is
+    filtered out even though it embeds identically."""
+    body = "password reset email never arrives"
+    unresolved = _make_ticket("TOPEN", category_id=1, updated_at=naive_utcnow())
+    unresolved.parts = [
+        {
+            "author": {"type": "user", "name": "Cust"},
+            "body": body,
+            "created_at": "2026-05-26T10:00:00Z",
+            "is_admin": False,
+        }
+    ]
+    current = _make_ticket("TCUR", category_id=1, updated_at=naive_utcnow())
+    current.parts = [
+        {
+            "author": {"type": "user", "name": "Cust"},
+            "body": body,
+            "created_at": "2026-05-26T11:00:00Z",
+            "is_admin": False,
+        }
+    ]
+    session.add_all([unresolved, current])
+    await session.commit()
+    await _store_embedding(session, unresolved)
+    await session.commit()
+
+    client = _CapturingClient("reply")
+    draft = await svc.draft_reply_from_ticket(session, "TCUR", client=client, model="m")
+    assert draft.grounding_ticket_ids == []
+
+
+@pytest.mark.asyncio
+async def test_draft_reply_grounds_in_effective_category_playbooks(session: AsyncSession) -> None:
+    """Invariant #13: the draft sees playbooks for the ticket's effective
+    category (override beats AI)."""
+    now = naive_utcnow()
+    current = _make_ticket("TCUR", category_id=1, updated_at=now)
+    current.parts = [
+        {
+            "author": {"type": "user", "name": "Cust"},
+            "body": "billing question",
+            "created_at": "2026-05-26T11:00:00Z",
+            "is_admin": False,
+        }
+    ]
+    session.add(current)
+    session.add(Override(ticket_id="TCUR", category_id=2, set_at=now + timedelta(minutes=5)))
+    await session.commit()
+    await svc.create(session, category_id=1, label="ai-cat-playbook", body="ai steps")
+    pb = await svc.create(session, category_id=2, label="override-playbook", body="override steps")
+
+    client = _CapturingClient("reply")
+    draft = await svc.draft_reply_from_ticket(session, "TCUR", client=client, model="m")
+
+    assert draft.playbook_ids == [pb.id]
+    blob = "\n".join(m["content"] for m in client.last_messages)
+    assert "override-playbook" in blob
+    assert "ai-cat-playbook" not in blob
+
+
+@pytest.mark.asyncio
+async def test_draft_reply_excludes_self(session: AsyncSession) -> None:
+    """A ticket must not ground itself even if its own embedding is the nearest
+    match."""
+    current = _resolved_ticket("TSELF", part_body="self-similar text")
+    session.add(current)
+    await session.commit()
+    await _store_embedding(session, current)
+    await session.commit()
+
+    client = _CapturingClient("reply")
+    draft = await svc.draft_reply_from_ticket(session, "TSELF", client=client, model="m")
+    assert "TSELF" not in draft.grounding_ticket_ids
+
+
+@pytest.mark.asyncio
+async def test_draft_reply_503_without_client(session: AsyncSession) -> None:
+    session.add(_make_ticket("TCUR", category_id=1, updated_at=naive_utcnow()))
+    await session.commit()
+    with pytest.raises(HTTPException) as exc:
+        await svc.draft_reply_from_ticket(session, "TCUR", client=None, model="m")
+    assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_draft_reply_404_when_missing(session: AsyncSession) -> None:
+    with pytest.raises(HTTPException) as exc:
+        await svc.draft_reply_from_ticket(session, "nope", client=_CapturingClient("x"), model="m")
     assert exc.value.status_code == 404
 
 

@@ -106,3 +106,105 @@ async def test_draft_endpoint_503_without_client(client: AsyncClient, app) -> No
     app.state.openrouter = None
     resp = await client.post("/playbooks/draft", json={"ticket_id": "TCKN"})
     assert resp.status_code == 503
+
+
+# ── RAG draft reply (roadmap 2.6) ─────────────────────────────────────────────
+
+
+class _ReplyClient:
+    async def complete(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, str]],
+        ticket_id: str,
+        response_format: dict[str, str] | None = None,
+    ) -> str:
+        return "Sorry about that — see TPAST."
+
+
+@pytest.mark.asyncio
+async def test_draft_reply_endpoint_returns_grounding(client: AsyncClient, app) -> None:
+    from app.ai import embeddings
+    from app.models import Ticket
+    from app.services import playbooks as svc
+
+    factory = app.state.session_factory
+    async with factory() as s:
+        past = Ticket(
+            id="TPAST",
+            title="dup charge",
+            state="open",
+            author={},
+            parts=[
+                {
+                    "author": {"type": "user"},
+                    "body": "refund the duplicate charge",
+                    "is_admin": False,
+                }
+            ],
+            internal_notes=[{"author": {"type": "admin"}, "body": "LEAK_ME_NOT", "is_admin": True}],
+            created_at=naive_utcnow(),
+            updated_at=naive_utcnow(),
+            summary="",
+            ai_confidence=0.0,
+            resolved_at=naive_utcnow(),
+            resolved_source="manual",
+        )
+        current = Ticket(
+            id="TCUR",
+            title="dup charge",
+            state="open",
+            author={},
+            parts=[
+                {
+                    "author": {"type": "user"},
+                    "body": "refund the duplicate charge",
+                    "is_admin": False,
+                }
+            ],
+            internal_notes=[],
+            created_at=naive_utcnow(),
+            updated_at=naive_utcnow(),
+            summary="",
+            ai_confidence=0.0,
+        )
+        s.add_all([past, current])
+        await s.commit()
+        vector = embeddings.embed_text(svc._query_text(past))
+        await embeddings.store_embedding(s, "TPAST", vector)
+        await s.commit()
+
+    app.state.openrouter = _ReplyClient()
+    resp = await client.post("/playbooks/draft-reply", json={"ticket_id": "TCUR"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["grounding_ticket_ids"] == ["TPAST"]
+    assert "LEAK_ME_NOT" not in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_draft_reply_endpoint_503_without_client(client: AsyncClient, app) -> None:
+    from app.models import Ticket
+
+    factory = app.state.session_factory
+    async with factory() as s:
+        s.add(
+            Ticket(
+                id="TCKN",
+                title="t",
+                state="open",
+                author={},
+                parts=[],
+                internal_notes=[],
+                created_at=naive_utcnow(),
+                updated_at=naive_utcnow(),
+                summary="",
+                ai_confidence=0.0,
+            )
+        )
+        await s.commit()
+
+    app.state.openrouter = None
+    resp = await client.post("/playbooks/draft-reply", json={"ticket_id": "TCKN"})
+    assert resp.status_code == 503
