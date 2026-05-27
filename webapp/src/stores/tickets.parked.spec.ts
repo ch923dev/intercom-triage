@@ -49,6 +49,7 @@ function ticket(id: string, over: Partial<Ticket> = {}): Ticket {
     parked_at: null,
     parked_until: null,
     parked_reason: null,
+    parked_note: null,
     ...over,
   } as Ticket;
 }
@@ -90,13 +91,18 @@ describe('tickets store — parked', () => {
   it('parkTicket sets the trio optimistically and calls the api', async () => {
     const store = useTicketsStore();
     store.tickets.push(ticket('p-1'));
-    const spy = vi
-      .spyOn(api, 'parkTicket')
-      .mockResolvedValue({ parked_at: 'x', parked_until: 'y', parked_reason: 'other' });
+    const spy = vi.spyOn(api, 'parkTicket').mockResolvedValue({
+      parked_at: 'x',
+      parked_until: 'y',
+      parked_reason: 'other',
+      parked_note: 'vendor delay',
+    });
     const future = new Date(Date.now() + 3_600_000).toISOString();
-    await store.parkTicket('p-1', future, 'other');
-    expect(spy).toHaveBeenCalledWith('p-1', future, 'other');
-    expect(store.tickets.find((t) => t.id === 'p-1')!.parked_at).not.toBeNull();
+    await store.parkTicket('p-1', future, 'other', 'vendor delay');
+    expect(spy).toHaveBeenCalledWith('p-1', future, 'other', 'vendor delay');
+    const parked = store.tickets.find((t) => t.id === 'p-1')!;
+    expect(parked.parked_at).not.toBeNull();
+    expect(parked.parked_note).toBe('vendor delay');
   });
 
   it('parkTicket rolls back the trio on api failure', async () => {

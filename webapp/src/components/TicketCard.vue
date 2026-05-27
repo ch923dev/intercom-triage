@@ -57,9 +57,9 @@ function onParkToggle(e: Event) {
   e.stopPropagation();
   parkOpen.value = !parkOpen.value;
 }
-function onPark(untilAt: string, reason: ParkedReason) {
+function onPark(untilAt: string, reason: ParkedReason, note: string | null) {
   parkOpen.value = false;
-  void tickets.parkTicket(props.ticket.id, untilAt, reason);
+  void tickets.parkTicket(props.ticket.id, untilAt, reason, note);
 }
 function onUnpark(e: Event) {
   e.stopPropagation();
@@ -126,6 +126,13 @@ const sentimentGlyph = computed(() =>
 const aging = computed(() =>
   agingTier(props.ticket.parts, props.ticket.resolved_at !== null, followups.now),
 );
+
+// Parked tag label: show the free-text note when the reason is 'other'.
+const parkedTagLabel = computed(() => {
+  const t = props.ticket;
+  if (t.parked_reason === 'other' && t.parked_note) return t.parked_note;
+  return t.parked_reason ?? 'parked';
+});
 </script>
 
 <template>
@@ -222,7 +229,7 @@ const aging = computed(() =>
       class="tags"
     >
       <span v-if="props.ticket.parked_at !== null" class="tag parked">
-        ⏸ {{ props.ticket.parked_reason ?? 'parked' }}
+        ⏸ {{ parkedTagLabel }}
       </span>
       <span v-if="isClosed" class="tag closed">Closed</span>
       <span v-for="label in labels" :key="label" class="tag label">{{ label }}</span>

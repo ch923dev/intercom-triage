@@ -72,10 +72,10 @@ export const markNonActionable = (ticketId) =>
 
 /** Park a ticket until `untilAt` (ISO with Z) with a structured reason.
  *  409 if resolved or already parked. */
-export const parkTicket = (ticketId, untilAt, reason) =>
+export const parkTicket = (ticketId, untilAt, reason, note = null) =>
   request(`/tickets/${encodeURIComponent(ticketId)}/park`, {
     method: 'POST',
-    body: JSON.stringify({ until_at: untilAt, reason }),
+    body: JSON.stringify({ until_at: untilAt, reason, note }),
   });
 
 /** Unpark a ticket. 409 if not parked, 404 if unknown. */

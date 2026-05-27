@@ -423,7 +423,12 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   /** Park a ticket in place (it stays in the open list, drops out of columns).
    *  Optimistic; rolls back on server failure. */
-  async function parkTicket(id: string, untilAt: string, reason: ParkedReason) {
+  async function parkTicket(
+    id: string,
+    untilAt: string,
+    reason: ParkedReason,
+    note: string | null = null,
+  ) {
     const idx = state.value.tickets.findIndex((t) => t.id === id);
     if (idx === -1) return;
     const original = state.value.tickets[idx]!;
@@ -433,9 +438,10 @@ export const useTicketsStore = defineStore('tickets', () => {
       parked_at: new Date().toISOString(),
       parked_until: untilAt,
       parked_reason: reason,
+      parked_note: note,
     });
     try {
-      await api.parkTicket(id, untilAt, reason);
+      await api.parkTicket(id, untilAt, reason, note);
     } catch (e) {
       state.value.tickets.splice(idx, 1, original);
       throw e;
@@ -455,6 +461,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       parked_at: null,
       parked_until: null,
       parked_reason: null,
+      parked_note: null,
     });
     try {
       await api.unparkTicket(id);
@@ -746,10 +753,11 @@ export const useTicketsStore = defineStore('tickets', () => {
     ids: string[],
     untilAt: string,
     reason: ParkedReason,
+    note: string | null = null,
   ): Promise<BulkResult> {
     mutating.value++;
     try {
-      const result = await api.bulkPark(ids, untilAt, reason);
+      const result = await api.bulkPark(ids, untilAt, reason, note);
       const okSet = new Set(result.ok_ids);
       const stamped = new Date().toISOString();
       for (const t of state.value.tickets) {
@@ -757,6 +765,7 @@ export const useTicketsStore = defineStore('tickets', () => {
           t.parked_at = stamped;
           t.parked_until = untilAt;
           t.parked_reason = reason;
+          t.parked_note = note;
         }
       }
       return result;
@@ -776,6 +785,7 @@ export const useTicketsStore = defineStore('tickets', () => {
           t.parked_at = null;
           t.parked_until = null;
           t.parked_reason = null;
+          t.parked_note = null;
         }
       }
       return result;

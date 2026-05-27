@@ -159,13 +159,17 @@ async def bulk_recategorize(
 
 
 async def bulk_park(
-    session: AsyncSession, ticket_ids: list[str], until_at: datetime, reason: ParkedReason
+    session: AsyncSession,
+    ticket_ids: list[str],
+    until_at: datetime,
+    reason: ParkedReason,
+    note: str | None = None,
 ) -> BulkResult:
     """Park N tickets until `until_at`. Resolved/already-parked rows fail 409."""
 
     async def per_id(tid: str) -> None:
         row = await resolution_svc.get_or_404(session, tid)
-        resolution_svc.apply_park(row, until_at, reason)
+        resolution_svc.apply_park(row, until_at, reason, note)
         metrics.incr("tickets_parked_total")
 
     result = await _run_per_id(session, ticket_ids, per_id)

@@ -166,10 +166,16 @@ export const api = {
     ticketId: string,
     untilAt: string,
     reason: ParkedReason,
-  ): Promise<{ parked_at: string; parked_until: string; parked_reason: ParkedReason }> =>
+    note: string | null = null,
+  ): Promise<{
+    parked_at: string;
+    parked_until: string;
+    parked_reason: ParkedReason;
+    parked_note: string | null;
+  }> =>
     request(`/tickets/${ticketId}/park`, {
       method: 'POST',
-      body: JSON.stringify({ until_at: untilAt, reason }),
+      body: JSON.stringify({ until_at: untilAt, reason, note }),
     }),
 
   /** Unpark a ticket. */
@@ -267,10 +273,15 @@ export const api = {
     }),
 
   /** Park N tickets until `untilAt` with one reason. Per-id ok/failed. */
-  bulkPark: (ticketIds: string[], untilAt: string, reason: ParkedReason): Promise<BulkResult> =>
+  bulkPark: (
+    ticketIds: string[],
+    untilAt: string,
+    reason: ParkedReason,
+    note: string | null = null,
+  ): Promise<BulkResult> =>
     request('/tickets/bulk/park', {
       method: 'POST',
-      body: JSON.stringify({ ticket_ids: ticketIds, until_at: untilAt, reason }),
+      body: JSON.stringify({ ticket_ids: ticketIds, until_at: untilAt, reason, note }),
     }),
 
   /** Unpark N tickets. Per-id ok/failed. */

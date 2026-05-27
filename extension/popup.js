@@ -277,6 +277,18 @@ function renderCard(ticket, { isResolved = false } = {}) {
       }
       reasonRow.append(node('span', 'park-lbl', 'reason'), reasonSelect);
 
+      // Free-text note, shown only when reason = 'other'.
+      const noteInput = node('input', 'park-reason');
+      noteInput.type = 'text';
+      noteInput.maxLength = 200;
+      noteInput.placeholder = 'Reason (optional)';
+      const noteRow = node('div', 'park-row');
+      noteRow.style.display = 'none';
+      noteRow.append(noteInput);
+      reasonSelect.addEventListener('change', () => {
+        noteRow.style.display = reasonSelect.value === 'other' ? 'flex' : 'none';
+      });
+
       const presetRow = node('div', 'park-row');
       const presets = [
         { label: '1h', minutes: 60 },
@@ -287,16 +299,18 @@ function renderCard(ticket, { isResolved = false } = {}) {
       for (const p of presets) {
         const presetBtn = node('button', 'park-preset', `+${p.label}`);
         presetBtn.addEventListener('click', () => {
+          const note = reasonSelect.value === 'other' ? noteInput.value.trim() || null : null;
           void doPark(
             ticket,
             new Date(Date.now() + p.minutes * 60 * 1000).toISOString(),
             reasonSelect.value,
+            note,
           );
         });
         presetRow.append(presetBtn);
       }
 
-      menu.append(node('span', 'park-menu-title', 'Park until'), reasonRow, presetRow);
+      menu.append(node('span', 'park-menu-title', 'Park until'), reasonRow, noteRow, presetRow);
       parkWrap.append(parkToggle, menu);
       meta.append(parkWrap);
     }
@@ -549,13 +563,14 @@ async function doMarkNonActionable(ticket) {
 }
 
 /** Park an open ticket until `untilAt` ISO — moves it out of category columns, into Parked tab. */
-async function doPark(ticket, untilAt, reason) {
+async function doPark(ticket, untilAt, reason, note = null) {
   try {
-    await parkTicket(ticket.id, untilAt, reason);
+    await parkTicket(ticket.id, untilAt, reason, note);
     // Reflect parked state locally so the card leaves its column and shows in Parked.
     ticket.parked_at = new Date().toISOString();
     ticket.parked_until = untilAt;
     ticket.parked_reason = reason;
+    ticket.parked_note = note;
     renderTabs();
     renderList();
   } catch (e) {

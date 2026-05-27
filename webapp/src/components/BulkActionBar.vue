@@ -154,9 +154,9 @@ function onClearFollowup() {
 function onDismissChip() {
   void runBulk(() => tickets.bulkDismissChip(selection.asArray()), 'chips dismissed');
 }
-function onPark(untilAt: string, reason: ParkedReason) {
+function onPark(untilAt: string, reason: ParkedReason, note: string | null) {
   parkOpen.value = false;
-  void runBulk(() => tickets.bulkPark(selection.asArray(), untilAt, reason), 'parked');
+  void runBulk(() => tickets.bulkPark(selection.asArray(), untilAt, reason, note), 'parked');
 }
 function onUnpark() {
   void runBulk(() => tickets.bulkUnpark(selection.asArray()), 'unparked');

@@ -56,15 +56,20 @@ const isReady = computed(
 
 const parkedLabel = computed(() => {
   if (!ticket.parked_at || !ticket.parked_until) return '';
-  const reason = ticket.parked_reason ? PARK_REASON_LABELS[ticket.parked_reason] : 'parked';
+  const reasonText =
+    ticket.parked_reason === 'other' && ticket.parked_note
+      ? ticket.parked_note
+      : ticket.parked_reason
+        ? PARK_REASON_LABELS[ticket.parked_reason]
+        : 'parked';
   return isReady.value
-    ? `★ Ready · ${reason}`
-    : `Parked · ${reason} · until ${formatShortDateTime(ticket.parked_until)}`;
+    ? `★ Ready · ${reasonText}`
+    : `Parked · ${reasonText} · until ${formatShortDateTime(ticket.parked_until)}`;
 });
 
-async function onPark(untilAt: string, reason: ParkedReason) {
+async function onPark(untilAt: string, reason: ParkedReason, note: string | null) {
   parkOpen.value = false;
-  await tickets.parkTicket(ticket.id, untilAt, reason);
+  await tickets.parkTicket(ticket.id, untilAt, reason, note);
 }
 
 async function onUnpark() {

@@ -28,6 +28,7 @@ class ParkOutcome:
     parked_at: datetime
     parked_until: datetime
     parked_reason: ParkedReason
+    parked_note: str | None
 
 
 async def get_or_404(session: AsyncSession, ticket_id: str) -> Ticket:
@@ -74,9 +75,12 @@ def clear_parked(row: Ticket) -> None:
     row.parked_at = None
     row.parked_until = None
     row.parked_reason = None
+    row.parked_note = None
 
 
-def apply_park(row: Ticket, until_at: datetime, reason: ParkedReason) -> ParkOutcome:
+def apply_park(
+    row: Ticket, until_at: datetime, reason: ParkedReason, note: str | None = None
+) -> ParkOutcome:
     """Mutate a Ticket row into the parked state. Does NOT commit.
     409 if the row is resolved (reopen first) or already parked."""
     if row.resolved_at is not None:
@@ -87,7 +91,8 @@ def apply_park(row: Ticket, until_at: datetime, reason: ParkedReason) -> ParkOut
     row.parked_at = now
     row.parked_until = until_at
     row.parked_reason = reason
-    return ParkOutcome(parked_at=now, parked_until=until_at, parked_reason=reason)
+    row.parked_note = note
+    return ParkOutcome(parked_at=now, parked_until=until_at, parked_reason=reason, parked_note=note)
 
 
 def apply_unpark(row: Ticket) -> None:
@@ -139,11 +144,15 @@ async def mark_non_actionable(session: AsyncSession, ticket_id: str) -> ResolveO
 
 
 async def park(
-    session: AsyncSession, ticket_id: str, until_at: datetime, reason: ParkedReason
+    session: AsyncSession,
+    ticket_id: str,
+    until_at: datetime,
+    reason: ParkedReason,
+    note: str | None = None,
 ) -> ParkOutcome:
     """Park a ticket until `until_at`. 409 if resolved or already parked."""
     row = await get_or_404(session, ticket_id)
-    outcome = apply_park(row, until_at, reason)
+    outcome = apply_park(row, until_at, reason, note)
     await session.commit()
     metrics.incr("tickets_parked_total")
     return outcome

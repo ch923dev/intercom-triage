@@ -70,6 +70,8 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     `_upsert_ticket` never writes the trio, so parked state survives re-sync by
     construction (cf. #8). Parked tickets are excluded from the live category
     columns and surfaced via a parked-only filter chip (roadmap 4.1 / T106).
+    Reason `other` may carry an optional free-text `parked_note` (≤200 chars),
+    cleared with the trio.
 
 ## Subagent doctrine
 

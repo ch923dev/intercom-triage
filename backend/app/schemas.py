@@ -477,6 +477,7 @@ class TicketSchema(HydratedTicket):
     parked_at: UTCDatetime | None = None
     parked_until: UTCDatetime | None = None
     parked_reason: ParkedReason | None = None
+    parked_note: str | None = None
 
 
 class CategoryUpdate(BaseModel):
@@ -507,6 +508,7 @@ class ParkRequest(BaseModel):
 
     until_at: NaiveUTCDatetime
     reason: ParkedReason
+    note: str | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
     def _check_future(self) -> ParkRequest:
@@ -519,6 +521,7 @@ class ParkResponse(BaseModel):
     parked_at: UTCDatetime
     parked_until: UTCDatetime
     parked_reason: ParkedReason
+    parked_note: str | None = None
 
 
 class UnparkResponse(BaseModel):
@@ -640,6 +643,7 @@ class BulkParkRequest(BulkTicketIds):
 
     until_at: NaiveUTCDatetime
     reason: ParkedReason
+    note: str | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
     def _check_future(self) -> BulkParkRequest:
