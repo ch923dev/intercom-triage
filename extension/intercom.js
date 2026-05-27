@@ -14,7 +14,7 @@
 //   - list  : GET /ember/inbox/conversations/list
 //   - detail: GET /ember/inbox/conversations/{id}
 // Detail carries `renderable_parts[]`; only the message types below hold
-// conversation text — events (5/14/etc.) are skipped.
+// conversation text — events (5/6/14/21/26/31/71) are skipped (see table below).
 
 const INTERCOM_BASE = 'https://app.intercom.com';
 const APP_ID_STORAGE_KEY = 'intercomAppId';
@@ -31,6 +31,9 @@ const LOOKBACK_SECONDS = 7 * 24 * 60 * 60;
 //   2  — Admin reply visible to the customer → parts[], is_admin=true
 //   24 — Admin reply visible to the customer → parts[], is_admin=true
 //   3  — Internal team note (admin-only)     → internal_notes[]
+//   21 — Priority-change event               → skip
+//   26 — Participant-added event             → skip
+//   31 — Bot / workflow-rule event           → skip
 //   5/6/14 — assignment/attribute events     → skip
 //   71 — Bot / AI translation event          → skip
 //
@@ -42,10 +45,12 @@ const INBOUND_RENDERABLE_TYPES = new Set([1, 12]);
 const ADMIN_REPLY_RENDERABLE_TYPES = new Set([2, 24]);
 const INTERNAL_NOTE_RENDERABLE_TYPE = 3;
 // Non-text events we *expect* to skip silently: assignment/attribute changes
-// (5/6/14) and bot/AI translation (71). These are known-and-ignored, so they
-// must NOT trigger the unknown-type warning below — only genuinely
-// unrecognized codes should. Keep this list in sync with the table above.
-const KNOWN_SKIPPED_RENDERABLE_TYPES = new Set([5, 6, 14, 71]);
+// (5/6/14), priority change (21), participant added (26), bot/workflow-rule
+// fired (31), and bot/AI translation (71). These are known-and-ignored, so
+// they must NOT trigger the unknown-type warning below — only genuinely
+// unrecognized codes should. Verified against a 2026-05-28 live capture
+// (workspace j3dxf22l). Keep this list in sync with the table above.
+const KNOWN_SKIPPED_RENDERABLE_TYPES = new Set([5, 6, 14, 21, 26, 31, 71]);
 
 class IntercomSessionError extends Error {
   constructor(status, message) {
@@ -288,8 +293,9 @@ export function normalizeConversation(detail, appId, summary) {
         `[intercom] unknown renderable_type ${String(renderableType)} on conversation ${id} — skipping (mapping is reverse-engineered; capture a real payload if this recurs)`,
       );
     }
-    // Known events (assignment / attribute / translation, types 5/6/14/71)
-    // are skipped silently; genuinely unknown codes are warned above.
+    // Known events (assignment / attribute / translation / priority-change /
+    // participant-added / bot-rule, types 5/6/14/21/26/31/71) are skipped
+    // silently; genuinely unknown codes are warned above.
   }
 
   const updatedRaw =

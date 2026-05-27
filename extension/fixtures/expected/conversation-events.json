@@ -1,0 +1,21 @@
+{
+  "id": "1006",
+  "title": "Ticket with only system events",
+  "state": "open",
+  "priority": null,
+  "created_at": "2024-05-27T22:46:40.000Z",
+  "updated_at": "2024-05-27T23:03:20.000Z",
+  "author": {
+    "id": "user-ext-999",
+    "name": "Sam Eventful",
+    "email": "sam@example.com",
+    "type": "user",
+    "location": "Chicago, IL, United States",
+    "timezone": "America/Chicago",
+    "phone": "+1-555-0199",
+    "company": null
+  },
+  "url": "https://app.intercom.com/a/inbox/j3dxf22l/inbox/conversation/1006",
+  "parts": [],
+  "internal_notes": []
+}

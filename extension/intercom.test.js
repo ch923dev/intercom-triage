@@ -8,7 +8,7 @@
 //   - renderable_type split: customer (1/12) + admin (2/24) -> parts[];
 //     internal note (3) -> internal_notes[]; the two arrays never mix
 //     (cross-package invariant #4).
-//   - known non-text events (5/6/14/71) are skipped SILENTLY (no warn).
+//   - known non-text events (5/6/14/21/26/31/71) are skipped SILENTLY (no warn).
 //   - a genuinely UNKNOWN renderable_type is skipped AND triggers a
 //     console.warn carrying the code + conversation id (and nothing else —
 //     no message body, for privacy).
@@ -152,4 +152,30 @@ test('empty / missing renderable_parts produces empty arrays, no warning', () =>
   assert.deepEqual(t.parts, []);
   assert.deepEqual(t.internal_notes, []);
   assert.equal(calls.length, 0);
+});
+
+test('live event types 21/26/31 are skipped SILENTLY (no unknown-type warning)', () => {
+  const { result: t, calls } = withWarnSpy(() =>
+    normalizeConversation(fixture('conversation-events.json'), APP_ID),
+  );
+
+  // Priority-change (21), participant-added (26), bot-rule (31) and
+  // assignment (5) carry no conversation text — none should land anywhere.
+  assert.equal(t.parts.length, 0);
+  assert.equal(t.internal_notes.length, 0);
+  // The whole point of the fix: these are KNOWN events, not unknown codes,
+  // so they must NOT trip the reverse-engineered-mapping warning.
+  assert.equal(calls.length, 0, '21/26/31 must be known-skipped, not warned');
+});
+
+test('author.company is null when companies[] is empty (confirmed live shape)', () => {
+  const { result: t } = withWarnSpy(() =>
+    normalizeConversation(fixture('conversation-events.json'), APP_ID),
+  );
+
+  // Live user_summary carries company_ids but no company NAME
+  // (first_company:null, companies:[]). The normalizer must resolve null,
+  // not throw and not invent a value.
+  assert.equal(t.author.company, null);
+  assert.equal(t.author.id, 'user-ext-999');
 });
