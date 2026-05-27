@@ -10,6 +10,7 @@ The AI drafter reuses the OpenRouter client and excludes `internal_notes`
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from fastapi import HTTPException
@@ -389,3 +390,99 @@ async def draft_reply_from_ticket(
         grounding_ticket_ids=[tid for tid, _ in precedents],
         playbook_ids=[p.id for p in playbooks],
     )
+
+
+# ── Semantic auto-match (roadmap 3.3) ─────────────────────────────────────────
+#
+# On ticket open, suggest the most-relevant playbook by embedding similarity.
+# Candidates are restricted to the ticket's EFFECTIVE-category playbooks (reuse
+# `list_for_ticket`, override beating AI — invariant #13), then ranked by cosine
+# similarity between the ticket's customer-visible text (`_query_text`, mirroring
+# `embeddings.build_embedding_text`, parts + title ONLY — invariant #4) and each
+# candidate playbook's durable text (label + body — #13).
+#
+# STORAGE: computed on-demand in-memory, NOT a persisted vec0 table. At
+# single-operator scale a category has only a handful of playbooks, so embedding
+# the few candidates plus the ticket per request is cheap, and there is no
+# migration / recompute-on-edit hook / backfill to keep durable playbook rows and
+# their vectors in sync. Embedding is read-only w.r.t. `ai_cache` (invariant #6) —
+# it never reads or writes the cache or the content signature. Ephemeral: the
+# suggestion is a computed view, never stored as ticket state.
+
+_DEFAULT_SUGGEST_TOP_N = 3
+
+
+@dataclass(frozen=True)
+class PlaybookSuggestion:
+    """One ranked playbook candidate plus its similarity score in [-1, 1].
+
+    `score` is the cosine similarity between the ticket query embedding and the
+    playbook's (label + body) embedding; higher is closer. Ephemeral — computed,
+    never persisted."""
+
+    playbook: Playbook
+    score: float
+
+
+def _playbook_embedding_text(playbook: Playbook) -> str:
+    """Durable text to embed for a playbook: its label + body (invariant #13).
+
+    Operator-owned knowledge only — no ticket content, no `internal_notes`
+    (invariant #4 is trivially satisfied; a playbook has neither)."""
+    return f"{playbook.label}\n\n{playbook.body}".strip()
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity of two equal-length vectors. Returns 0.0 if either is a
+    zero vector (degenerate, no direction to compare)."""
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+async def suggest_playbooks(
+    session: AsyncSession,
+    ticket_id: str,
+    top_n: int = _DEFAULT_SUGGEST_TOP_N,
+) -> list[PlaybookSuggestion]:
+    """Rank the ticket's effective-category playbooks by semantic similarity.
+
+    Candidates come from `list_for_ticket` (effective category, override beats
+    AI — invariant #13). Each candidate is scored by cosine similarity between
+    the ticket's customer-visible query text (`_query_text`, parts + title only —
+    invariant #4) and the playbook's durable (label + body) text. Returns up to
+    `top_n` candidates ordered most-relevant-first.
+
+    Graceful degradation: an empty list if the ticket has no effective-category
+    playbooks OR no customer-visible text to embed (nothing to rank against).
+    Read-only over `ai_cache` (invariant #6) — embedding never touches the cache.
+    """
+    ticket = await session.get(Ticket, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail=f"no ticket {ticket_id}")
+
+    candidates = await list_for_ticket(session, ticket_id)
+    if not candidates:
+        return []
+
+    query_text = _query_text(ticket)
+    if not query_text:
+        # No customer-visible content to rank against — nothing to suggest.
+        return []
+
+    query_vec = embeddings.embed_text(query_text)
+    scored: list[PlaybookSuggestion] = []
+    for playbook in candidates:
+        text_to_embed = _playbook_embedding_text(playbook)
+        if not text_to_embed:
+            continue
+        playbook_vec = embeddings.embed_text(text_to_embed)
+        scored.append(PlaybookSuggestion(playbook, _cosine(query_vec, playbook_vec)))
+
+    # Highest similarity first; ties fall back to insertion order (stable sort).
+    scored.sort(key=lambda s: s.score, reverse=True)
+    metrics.incr("playbook_suggestions_total")
+    return scored[:top_n]

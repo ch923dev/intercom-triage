@@ -208,3 +208,63 @@ async def test_draft_reply_endpoint_503_without_client(client: AsyncClient, app)
     app.state.openrouter = None
     resp = await client.post("/playbooks/draft-reply", json={"ticket_id": "TCKN"})
     assert resp.status_code == 503
+
+
+# ── Semantic auto-match (roadmap 3.3) ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_suggested_endpoint_ranks_and_scores(client: AsyncClient, app) -> None:
+    """The suggestion endpoint returns ranked in-category playbooks with scores.
+    Read-only — no AI client configured."""
+    from app.models import Ticket
+
+    factory = app.state.session_factory
+    async with factory() as s:
+        s.add(
+            Ticket(
+                id="TSAPI",
+                title="refund",
+                state="open",
+                author={},
+                parts=[
+                    {
+                        "author": {"type": "user", "name": "Cust"},
+                        "body": "double charge",
+                        "is_admin": False,
+                    }
+                ],
+                internal_notes=[],
+                created_at=naive_utcnow(),
+                updated_at=naive_utcnow(),
+                category_id=1,
+                summary="",
+                ai_confidence=0.0,
+            )
+        )
+        await s.commit()
+
+    # `_query_text` = "refund\n\n[Cust] double charge"; the close playbook mirrors it.
+    close = await client.post(
+        "/playbooks", json={"category_id": 1, "label": "refund", "body": "[Cust] double charge"}
+    )
+    await client.post(
+        "/playbooks", json={"category_id": 1, "label": "unrelated", "body": "different topic"}
+    )
+    # Out-of-category playbook must never appear.
+    await client.post(
+        "/playbooks", json={"category_id": 2, "label": "refund", "body": "[Cust] double charge"}
+    )
+
+    resp = await client.get("/playbooks/suggested", params={"ticket_id": "TSAPI"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload[0]["playbook"]["id"] == close.json()["id"]
+    assert payload[0]["score"] == pytest.approx(1.0, abs=1e-6)
+    assert all(p["playbook"]["category_id"] == 1 for p in payload)
+
+
+@pytest.mark.asyncio
+async def test_suggested_endpoint_404_when_missing(client: AsyncClient) -> None:
+    resp = await client.get("/playbooks/suggested", params={"ticket_id": "nope"})
+    assert resp.status_code == 404

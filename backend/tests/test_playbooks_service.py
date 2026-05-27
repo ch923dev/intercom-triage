@@ -433,6 +433,151 @@ async def test_draft_reply_404_when_missing(session: AsyncSession) -> None:
     assert exc.value.status_code == 404
 
 
+# ── Semantic auto-match (roadmap 3.3) ─────────────────────────────────────────
+
+
+def _ticket_for_suggest(ticket_id: str, *, category_id: int, title: str, body: str) -> Ticket:
+    """A ticket with one customer-visible part — `_query_text` is deterministic
+    so a playbook can be crafted to embed identically (fake encoder → cosine 1)."""
+    t = _make_ticket(ticket_id, category_id=category_id, updated_at=naive_utcnow())
+    t.title = title
+    t.parts = [
+        {
+            "author": {"type": "user", "name": "Cust"},
+            "body": body,
+            "created_at": "2026-05-26T10:00:00Z",
+            "is_admin": False,
+        }
+    ]
+    return t
+
+
+@pytest.mark.asyncio
+async def test_suggest_ranks_closest_in_category_playbook_first(session: AsyncSession) -> None:
+    """The semantically-closest in-category playbook ranks above the others.
+
+    The fake encoder is deterministic: identical text → identical vector →
+    cosine 1.0; unrelated text → ~0. A playbook whose (label + body) equals the
+    ticket's query text is the closest match and must rank first."""
+    ticket = _ticket_for_suggest("TSUG", category_id=1, title="refund", body="double charge")
+    session.add(ticket)
+    await session.commit()
+
+    # `_query_text` = "refund\n\n[Cust] double charge"; mirror it exactly so the
+    # fake encoder yields the same vector (cosine 1.0).
+    close = await svc.create(session, category_id=1, label="refund", body="[Cust] double charge")
+    far = await svc.create(
+        session, category_id=1, label="unrelated", body="totally different topic"
+    )
+
+    suggestions = await svc.suggest_playbooks(session, "TSUG")
+    assert [s.playbook.id for s in suggestions] == [close.id, far.id]
+    assert suggestions[0].score > suggestions[1].score
+    assert suggestions[0].score == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_suggest_never_returns_out_of_category_playbook(session: AsyncSession) -> None:
+    """Invariant #13: out-of-category playbooks are never candidates, even if
+    they would embed closer."""
+    ticket = _ticket_for_suggest("TSUG2", category_id=1, title="refund", body="double charge")
+    session.add(ticket)
+    await session.commit()
+
+    # An out-of-category playbook crafted to embed IDENTICALLY to the ticket
+    # query text — it must still be excluded because it is in category 2.
+    await svc.create(session, category_id=2, label="refund", body="[Cust] double charge")
+    in_cat = await svc.create(session, category_id=1, label="some-cat-1-pb", body="cat 1 steps")
+
+    suggestions = await svc.suggest_playbooks(session, "TSUG2")
+    assert [s.playbook.id for s in suggestions] == [in_cat.id]
+    assert all(s.playbook.category_id == 1 for s in suggestions)
+
+
+@pytest.mark.asyncio
+async def test_suggest_respects_effective_category_override(session: AsyncSession) -> None:
+    """Invariant #13: override beats AI — suggestions follow the override
+    category, not the ticket's AI category."""
+    now = naive_utcnow()
+    ticket = _ticket_for_suggest("TSUG3", category_id=1, title="refund", body="double charge")
+    ticket.updated_at = now
+    ticket.created_at = now
+    session.add(ticket)
+    session.add(Override(ticket_id="TSUG3", category_id=2, set_at=now + timedelta(minutes=5)))
+    await session.commit()
+    await svc.create(session, category_id=1, label="ai-pb", body="ai steps")
+    override_pb = await svc.create(
+        session, category_id=2, label="override-pb", body="override steps"
+    )
+
+    suggestions = await svc.suggest_playbooks(session, "TSUG3")
+    assert [s.playbook.id for s in suggestions] == [override_pb.id]
+
+
+@pytest.mark.asyncio
+async def test_suggest_empty_when_no_playbooks(session: AsyncSession) -> None:
+    ticket = _ticket_for_suggest("TSUG4", category_id=1, title="refund", body="double charge")
+    session.add(ticket)
+    await session.commit()
+    assert await svc.suggest_playbooks(session, "TSUG4") == []
+
+
+@pytest.mark.asyncio
+async def test_suggest_empty_when_no_customer_visible_text(session: AsyncSession) -> None:
+    """No `parts` and no title → nothing to rank against → graceful empty list,
+    even though in-category playbooks exist."""
+    t = _make_ticket("TSUG5", category_id=1, updated_at=naive_utcnow())
+    t.title = ""
+    t.parts = []
+    session.add(t)
+    await session.commit()
+    await svc.create(session, category_id=1, label="pb", body="steps")
+    assert await svc.suggest_playbooks(session, "TSUG5") == []
+
+
+@pytest.mark.asyncio
+async def test_suggest_excludes_internal_notes(session: AsyncSession) -> None:
+    """Invariant #4: a ticket's internal_notes never enter the query text used
+    for ranking (so they cannot influence — or leak via — a suggestion)."""
+    sentinel = "SENTINEL_INTERNAL_DO_NOT_EMBED"
+    t = _ticket_for_suggest("TSUG6", category_id=1, title="export", body="csv missing fields")
+    t.internal_notes = [
+        {
+            "author": {"type": "admin", "name": "Op"},
+            "body": sentinel,
+            "created_at": "2026-05-26T10:06:00Z",
+            "is_admin": True,
+        }
+    ]
+    session.add(t)
+    await session.commit()
+    await svc.create(session, category_id=1, label="pb", body="steps")
+
+    # The query text feeds the encoder; assert the sentinel was never embedded.
+    encoder = embeddings._get_encoder()
+    encoder.encoded.clear()  # type: ignore[attr-defined]
+    await svc.suggest_playbooks(session, "TSUG6")
+    assert all(sentinel not in t for t in encoder.encoded)  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_suggest_404_when_missing(session: AsyncSession) -> None:
+    with pytest.raises(HTTPException) as exc:
+        await svc.suggest_playbooks(session, "nope")
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_suggest_top_n_caps_results(session: AsyncSession) -> None:
+    ticket = _ticket_for_suggest("TSUG7", category_id=1, title="refund", body="double charge")
+    session.add(ticket)
+    await session.commit()
+    for i in range(5):
+        await svc.create(session, category_id=1, label=f"pb{i}", body=f"steps {i}")
+    suggestions = await svc.suggest_playbooks(session, "TSUG7", top_n=2)
+    assert len(suggestions) == 2
+
+
 @pytest.mark.asyncio
 async def test_playbook_survives_ticket_resync(
     session: AsyncSession,

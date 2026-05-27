@@ -12,6 +12,7 @@ vi.mock('@/api/client', () => ({
     archivePlaybook: vi.fn(),
     restorePlaybook: vi.fn(),
     draftPlaybook: vi.fn(),
+    suggestedPlaybooks: vi.fn(),
   },
 }));
 
@@ -92,6 +93,30 @@ describe('playbooksStore', () => {
     await s.loadAll(true);
     expect(s.forCategory(1).map((p) => p.label)).toEqual(['active']);
     expect(s.archivedFor(1).map((p) => p.label)).toEqual(['gone']);
+  });
+
+  it('ensureSuggestion caches the top suggested playbook id', async () => {
+    mocked.suggestedPlaybooks.mockResolvedValue([
+      { playbook: make({ id: 7 }), score: 0.9 },
+      { playbook: make({ id: 8 }), score: 0.3 },
+    ]);
+    const s = usePlaybooksStore();
+    await s.ensureSuggestion('T1');
+    expect(s.suggestedTopFor('T1')).toBe(7);
+  });
+
+  it('ensureSuggestion records null when there is no suggestion', async () => {
+    mocked.suggestedPlaybooks.mockResolvedValue([]);
+    const s = usePlaybooksStore();
+    await s.ensureSuggestion('T2');
+    expect(s.suggestedTopFor('T2')).toBeNull();
+  });
+
+  it('ensureSuggestion is best-effort: swallows errors, leaves no highlight', async () => {
+    mocked.suggestedPlaybooks.mockRejectedValue(new Error('500'));
+    const s = usePlaybooksStore();
+    await expect(s.ensureSuggestion('T3')).resolves.toBeUndefined();
+    expect(s.suggestedTopFor('T3')).toBeNull();
   });
 
   it('restore moves a row back to active and rolls back on failure', async () => {
