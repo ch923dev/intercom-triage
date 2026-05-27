@@ -1,0 +1,35 @@
+# gitleaks config — secret scanning for pre-commit.
+# Used by .githooks/pre-commit when the `gitleaks` binary is installed.
+# Install (optional, strengthens the hook): https://github.com/gitleaks/gitleaks
+#   winget install gitleaks   |   scoop install gitleaks   |   brew install gitleaks
+# The hook works WITHOUT gitleaks too (built-in regex fallback) — this file only
+# tunes gitleaks when present.
+
+# Inherit gitleaks' built-in ruleset (AWS, GitHub, Stripe, private keys, JWTs, …).
+[extend]
+useDefault = true
+
+# Project-specific extra rule: OpenRouter keys (sk-or-v1-...), the one live
+# secret format this repo uses.
+[[rules]]
+id = "openrouter-api-key"
+description = "OpenRouter API key"
+regex = '''sk-or-v1-[0-9a-f]{32,}'''
+keywords = ["sk-or-v1-"]
+
+[allowlist]
+description = "Known-safe matches — placeholders, examples, test fixtures, audit notes"
+paths = [
+  '''\.env\.example$''',
+  '''(^|/)backend/tests/''',
+  '''(^|/)webapp/.*\.spec\.ts$''',
+  '''(^|/)extension/.*\.test\.js$''',
+  '''(^|/)extension/fixtures/''',
+  '''(^|/)\.audit/''',
+]
+# j3dxf22l = public Intercom workspace app_id (visible in any Intercom URL), not a secret.
+# "test-openrouter-key" / "test" = dummy values in test config.
+regexes = [
+  '''j3dxf22l''',
+  '''test-openrouter-key''',
+]

@@ -1,0 +1,70 @@
+#!/bin/sh
+# Pre-commit secret guard for intercom-ticket-management.
+#
+# Two layers, both run on every commit:
+#   1. File-name guard  — blocks staging credential-bearing files outright,
+#      even via `git add -f` (which bypasses .gitignore).
+#   2. Content scan     — greps the staged diff for high-signal secret patterns.
+#      Uses `gitleaks` if installed (deeper ruleset, see .gitleaks.toml);
+#      otherwise falls back to a built-in regex sweep so the hook ALWAYS guards.
+#
+# Enable (once per clone):  git config core.hooksPath .githooks
+# Bypass for a known-safe commit:  git commit --no-verify   (use sparingly)
+
+set -eu
+
+red()  { printf '\033[31m%s\033[0m\n' "$1"; }
+ylw()  { printf '\033[33m%s\033[0m\n' "$1"; }
+
+fail=0
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# ── Layer 1: forbidden file names (force-add bypasses .gitignore) ─────────────
+# Real .env (but allow .env.example / .env.sample), keys, certs, credential dumps.
+forbidden=$(printf '%s\n' "$staged" | grep -E \
+  '\.env$|\.env\.|\.(pem|key|p12|pfx|crt)$|(^|/)id_rsa($|\.)|(^|/)(secrets|credentials)($|\.)|(^|/)\.npmrc$' \
+  | grep -Ev '\.env\.(example|sample|template)$' || true)
+
+if [ -n "$forbidden" ]; then
+  red "✖ pre-commit: refusing to commit credential-bearing file(s):"
+  printf '    %s\n' $forbidden
+  ylw "  These match the secret patterns in .gitignore. If truly safe, commit with --no-verify."
+  fail=1
+fi
+
+# ── Layer 2: content scan ─────────────────────────────────────────────────────
+if command -v gitleaks >/dev/null 2>&1; then
+  # gitleaks present: authoritative scan of staged changes.
+  if ! gitleaks protect --staged --redact --no-banner -c .gitleaks.toml; then
+    red "✖ pre-commit: gitleaks found a secret in staged changes (see above)."
+    fail=1
+  fi
+else
+  # Fallback: built-in regex sweep of the staged diff (added lines only).
+  # Skips known-safe paths (tests, fixtures, .env.example, .audit/).
+  diff=$(git diff --cached --diff-filter=ACM -U0 \
+    -- . \
+    ':(exclude).env.example' \
+    ':(exclude)backend/tests/**' \
+    ':(exclude)webapp/**/*.spec.ts' \
+    ':(exclude)extension/**/*.test.js' \
+    ':(exclude)extension/fixtures/**' \
+    ':(exclude).audit/**' \
+    | grep -E '^\+' || true)
+
+  hits=$(printf '%s\n' "$diff" | grep -E \
+    'sk-or-v1-[0-9a-f]{16,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|AIza[0-9A-Za-z_-]{30,}' \
+    || true)
+
+  if [ -n "$hits" ]; then
+    red "✖ pre-commit: possible secret in staged changes:"
+    printf '%s\n' "$hits" | sed 's/^/    /'
+    ylw "  Install gitleaks for accurate scanning, or commit with --no-verify if this is a false positive."
+    fail=1
+  fi
+fi
+
+[ "$fail" -eq 0 ] && exit 0
+exit 1

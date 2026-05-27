@@ -2,6 +2,21 @@
 .env
 .env.local
 .env.*.local
+*.env
+!*.env.example
+# Generic credential/key material — never commit, even if dropped in ad-hoc
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa
+id_rsa.*
+secrets
+secrets.*
+credentials
+credentials.*
+.npmrc
 
 # ── Local data ────────────────────────────────────────────────────────────────
 backend/data/
