@@ -19,6 +19,10 @@ interface TweaksState {
   desktopNotifications: boolean;
   /** 0 = off; 30 | 60 | 300 = poll interval in seconds. Per-browser pref. */
   autoSyncSeconds: 0 | 30 | 60 | 300;
+  /** Roadmap 1.2 — when on, order cards within each column by `ai_priority`
+   *  (urgent → low) on top of the default recency/follow-up order. Off by
+   *  default so the existing ordering is the baseline. Per-browser pref. */
+  sortByPriority: boolean;
 }
 
 const DEFAULTS: TweaksState = {
@@ -29,6 +33,7 @@ const DEFAULTS: TweaksState = {
   showConfidence: true,
   desktopNotifications: false,
   autoSyncSeconds: 0,
+  sortByPriority: false,
 };
 
 const ACCENT_SWATCHES = ['#ff4d2e', '#2e7fff', '#22a06b', '#a855f7', '#111111'] as const;
@@ -53,6 +58,7 @@ export const useTweaksStore = defineStore('tweaks', () => {
   const showConfidence = computed(() => state.value.showConfidence);
   const desktopNotifications = computed(() => state.value.desktopNotifications);
   const autoSyncSeconds = computed(() => state.value.autoSyncSeconds);
+  const sortByPriority = computed(() => state.value.sortByPriority);
 
   function setDarkMode(v: boolean) {
     state.value.darkMode = v;
@@ -75,6 +81,9 @@ export const useTweaksStore = defineStore('tweaks', () => {
   function setAutoSyncSeconds(v: 0 | 30 | 60 | 300) {
     state.value.autoSyncSeconds = v;
   }
+  function setSortByPriority(v: boolean) {
+    state.value.sortByPriority = v;
+  }
 
   // Persist + apply to <html>.
   watch(
@@ -96,6 +105,7 @@ export const useTweaksStore = defineStore('tweaks', () => {
     showConfidence,
     desktopNotifications,
     autoSyncSeconds,
+    sortByPriority,
     setDarkMode,
     setAccent,
     setDensity,
@@ -103,6 +113,7 @@ export const useTweaksStore = defineStore('tweaks', () => {
     setShowConfidence,
     setDesktopNotifications,
     setAutoSyncSeconds,
+    setSortByPriority,
     ACCENT_SWATCHES,
   };
 });

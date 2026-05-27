@@ -75,6 +75,9 @@ function fakeTicket(id: string, overrides: Partial<Ticket> = {}): Ticket {
     ai_resolution_confidence: null,
     ai_resolution_reason: null,
     resolution_chip_state: null,
+    ai_priority: null,
+    ai_sentiment: null,
+    ai_labels: [],
     ...overrides,
   };
 }

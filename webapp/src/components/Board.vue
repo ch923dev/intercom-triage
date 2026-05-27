@@ -8,13 +8,16 @@ import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
 import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
+import { useTweaksStore } from '@/stores/tweaks';
 import { useViewStore } from '@/stores/view';
 import type { Ticket } from '@/types/api';
+import { byPriorityDesc } from '@/utils/priority';
 
 const categories = useCategoriesStore();
 const tickets = useTicketsStore();
 const followups = useFollowupsStore();
 const settings = useSettingsStore();
+const tweaks = useTweaksStore();
 const view = useViewStore();
 
 const emit = defineEmits<{
@@ -27,13 +30,25 @@ const focusedId = computed(() => view.focusedTicketId);
 
 /** Tickets for a column, with due follow-ups pinned to the top (T050). The
  *  source list is already `updated_at`-sorted; `sort` is stable so the rest
- *  keeps that order. */
+ *  keeps that order.
+ *
+ *  Roadmap 1.2 — when the operator turns on "Sort by priority", a second stable
+ *  sort by `ai_priority` (urgent → low) runs on top. Sort keys compose by
+ *  precedence: priority first, then follow-up-due, then recency. So an urgent
+ *  card floats above a due follow-up, but within one priority tier the
+ *  follow-up pinning and recency order are preserved unchanged. The toggle is
+ *  off by default, leaving the existing follow-up/recency order as the
+ *  baseline. */
 function ticketsForColumn(col: { kind: 'category' | 'proposal'; id: number }) {
   const list =
     col.kind === 'category'
       ? (tickets.byCategory.get(col.id) ?? [])
       : (tickets.byProposal.get(col.id) ?? []);
-  return [...list].sort((a, b) => Number(followups.isDue(b.id)) - Number(followups.isDue(a.id)));
+  const sorted = [...list].sort(
+    (a, b) => Number(followups.isDue(b.id)) - Number(followups.isDue(a.id)),
+  );
+  if (tweaks.sortByPriority) sorted.sort(byPriorityDesc);
+  return sorted;
 }
 
 function onSelect(t: Ticket) {

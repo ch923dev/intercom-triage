@@ -47,6 +47,16 @@ const DENSITY_LABEL: Record<Density, string> = {
       <span class="sentence">Show AI confidence on cards</span>
     </label>
 
+    <Mono>Board order</Mono>
+    <label class="check">
+      <input
+        type="checkbox"
+        :checked="tweaks.sortByPriority"
+        @change="tweaks.setSortByPriority(($event.target as HTMLInputElement).checked)"
+      />
+      <span class="sentence">Sort columns by AI priority (urgent first)</span>
+    </label>
+
     <Mono>Accent color</Mono>
     <div class="swatches">
       <button
