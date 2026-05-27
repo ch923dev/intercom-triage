@@ -22,6 +22,8 @@ const emit = defineEmits<{
 }>();
 
 const selectedId = computed(() => view.selectedTicketId);
+// Keyboard-triage cursor (NFR-007) — separate from the flyout selection.
+const focusedId = computed(() => view.focusedTicketId);
 
 /** Tickets for a column, with due follow-ups pinned to the top (T050). The
  *  source list is already `updated_at`-sorted; `sort` is stable so the rest
@@ -58,6 +60,7 @@ const visibleColumns = computed(() => {
       :column="col"
       :tickets="ticketsForColumn(col)"
       :selected-id="selectedId"
+      :focused-id="focusedId"
       @select="onSelect"
     />
     <ResolvedColumn />

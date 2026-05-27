@@ -21,11 +21,16 @@ interface Props {
   /** Member of the bulk-selection set (Cmd/Ctrl/Shift+click). Renders the
    *  accent ring used by Phase 12 bulk actions; distinct from `selected`. */
   multiSelected?: boolean;
+  /** Keyboard-triage cursor (NFR-007). Additive: a dashed outline distinct
+   *  from `selected`/`multiSelected`; the j/k cursor sits here without opening
+   *  the flyout. */
+  focused?: boolean;
 }
 const props = withDefaults(defineProps<Props>(), {
   overridden: false,
   selected: false,
   multiSelected: false,
+  focused: false,
 });
 
 const tweaks = useTweaksStore();
@@ -85,6 +90,7 @@ const isClosed = computed(() => props.ticket.state === 'closed');
       rich,
       selected: props.selected,
       'multi-selected': props.multiSelected,
+      focused: props.focused,
       overridden: props.overridden,
     }"
     :data-selected="props.multiSelected ? 'true' : undefined"
@@ -175,6 +181,13 @@ const isClosed = computed(() => props.ticket.state === 'closed');
 .card.multi-selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent);
+}
+/* Keyboard-triage cursor (NFR-007). Dashed outline so it reads as "cursor is
+ * here" distinct from the solid flyout/bulk rings; outline doesn't shift
+ * layout and stacks harmlessly with the selection box-shadows. */
+.card.focused {
+  outline: 2px dashed var(--accent);
+  outline-offset: 1px;
 }
 .override-marker {
   position: absolute;
