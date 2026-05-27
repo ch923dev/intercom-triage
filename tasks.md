@@ -149,18 +149,18 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T095 ✓ — Docs (CLAUDE.md invariant, spec/plan/tasks index)
 
 ### [Phase 14 — Playbooks](docs/superpowers/specs/2026-05-26-playbooks-design.md)
-- T130 — `Playbook` model + Alembic migration.
-- T131 — Schemas + create/list/archive service.
-- T132 — `list_for_ticket` effective-category resolution.
-- T133 — update/restore/list_all service.
-- T134 — CRUD router + registration.
-- T135 — AI draft builder (excludes internal_notes) + service.
-- T136 — Draft endpoint.
-- T137 — Frontend types + API client.
-- T138 — Pinia store.
-- T139 — Flyout playbooks section.
-- T140 — Library page + nav.
-- T141 — spec/plan/tasks/CLAUDE invariant docs.
+- T130 ✓ — `Playbook` model + Alembic migration.
+- T131 ✓ — Schemas + create/list/archive service.
+- T132 ✓ — `list_for_ticket` effective-category resolution.
+- T133 ✓ — update/restore/list_all service.
+- T134 ✓ — CRUD router + registration.
+- T135 ✓ — AI draft builder (excludes internal_notes) + service.
+- T136 ✓ — Draft endpoint.
+- T137 ✓ — Frontend types + API client.
+- T138 ✓ — Pinia store.
+- T139 ✓ — Flyout playbooks section.
+- T140 ✓ — Library page + nav.
+- T141 ✓ — spec/plan/tasks/CLAUDE invariant docs.
 
 ### [Phase 9 — Backlog](docs/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to webapp and extension.

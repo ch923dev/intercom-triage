@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 1.5 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 1.6 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v1.5:** backfilled definitions for two capabilities already shipped in code and traced in `tasks.md` but missing from this spec. Added the **non-actionable tickets** capability — US-019 / FR-037 let the operator (or AI ingest) mark spam / thank-you / out-of-scope tickets as a non-actionable sub-state of resolved, split out at the view layer. Also documented the **reusable playbooks** capability already present as US-020 / FR-038..FR-041.
 
 **Changes from v1.4:** added the **bulk actions** capability. US-018 lets the operator select multiple tickets at once and apply resolve / reopen / recategorize / set-follow-up / clear-follow-up / dismiss-chip as one action. FR-032..FR-036 cover the transient selection set, bulk endpoints with per-id result reporting, in-column range-select, bulk drag (dragging one selected card moves all selected), and the per-request id cap.
 
@@ -224,6 +226,24 @@ Acceptance:
   Selecting more than the cap surfaces a warning and asks me to split the
   action.
 
+### US-019 — Mark tickets non-actionable
+I can mark a ticket that needs no reply — spam, a thank-you, an auto-reply, an
+out-of-scope message — as non-actionable, so it leaves my active board without
+being counted as a real resolution. The AI can also flag obvious non-actionable
+tickets for me during ingest.
+
+Acceptance:
+- I can mark a ticket non-actionable from the flyout, and apply the same action
+  across a multi-ticket selection in one step.
+- A non-actionable ticket is a sub-state of resolved: it carries `resolved_at`
+  with `resolved_source = non_actionable`. Reopening it clears both.
+- Non-actionable tickets are split from genuinely resolved ones at the view
+  layer — their own Kanban column in the webapp and their own popup tab — while
+  storage stays unified under the resolution flag.
+- When the AI's verdict is non-actionable with confidence at or above the shared
+  resolution threshold, ingest auto-marks the ticket; a fallback verdict never
+  does.
+
 ### US-020 — Reusable playbooks per category
 As the operator, when I solve a ticket I can save a reusable
 "playbook" (a next-steps recipe) scoped to its category, optionally drafted
@@ -270,6 +290,7 @@ category so I handle repeat issues consistently.
 | FR-034 | Shift+click extends the selection across the contiguous range of cards in the same column (in displayed sort order). Shift+click in a different column toggles only the clicked card. | US-018 |
 | FR-035 | Dragging any selected card propagates the drop to every card in the selection set. Dropping into a category column reassigns all of them; dropping into the Resolved column resolves all of them. | US-018 |
 | FR-036 | A single bulk request is bounded by `MAX_BULK_IDS` (configurable, default 200). The webapp warns and refuses to submit a bulk action over the cap; the backend rejects oversize requests with 422. | US-018 |
+| FR-037 | A ticket may be marked non-actionable, a sub-state of resolved that sets `resolved_at` with `resolved_source = non_actionable` (XOR-constrained against the other resolution sources). The system exposes `POST /tickets/{id}/non-actionable` and `POST /tickets/bulk/non-actionable`; ingest auto-applies the verdict when the AI returns `non_actionable` at or above the shared resolution-confidence threshold, never on a fallback verdict. Non-actionable tickets are surfaced as their own view (Kanban column / popup tab) while storage stays unified; reopen clears the flag. | US-019 |
 | FR-038 | Playbooks are stored in a dedicated `playbooks` table (category_id, label, body, optional source_ticket_id, soft-archive). They are operator-owned and survive ingest / re-sync untouched (never content-keyed). | US-020 |
 | FR-039 | The flyout lists active playbooks for a ticket's *effective* category (override beats AI). Uncategorized tickets show none. | US-020 |
 | FR-040 | `POST /playbooks/draft` returns an ephemeral AI-drafted body from the ticket's customer-visible `parts` + operator notes. It MUST NOT read `internal_notes` (FR-005 / invariant #4). 503 when AI is unconfigured. | US-020 |
