@@ -57,10 +57,10 @@ def intercom_conv(
     }
 
 
-def existing_assignment(category_id: int) -> str:
+def existing_assignment(category_id: int, *, confidence: float = 0.82) -> str:
     return (
         f'{{"assignment":"existing","category_id":{category_id},'
-        f'"summary":"a summary","confidence":0.82}}'
+        f'"summary":"a summary","confidence":{confidence}}}'
     )
 
 
@@ -93,3 +93,31 @@ class FakeOpenRouter:
         if ticket_id is None or ticket_id not in self.by_ticket:
             raise OpenRouterError("no canned response")
         return self.by_ticket[ticket_id]
+
+
+class FakeCascadeOpenRouter:
+    """Stand-in for OpenRouterClient that routes on (model, ticket_id).
+
+    Roadmap 2.2 cascade tests: lets a single ticket return one canned answer
+    from the cheap model and a different one from the strong model, and records
+    how many times each model was called so the test can assert routing +
+    escalation accounting. A missing (model, ticket_id) entry raises
+    OpenRouterError, exercising the failed-cheap-call → escalate path.
+    """
+
+    def __init__(self, by_model_ticket: dict[tuple[str, str], str]) -> None:
+        self.by_model_ticket = by_model_ticket
+        self.calls_by_model: dict[str, int] = {}
+
+    async def complete(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, str]],
+        ticket_id: str | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> str:
+        self.calls_by_model[model] = self.calls_by_model.get(model, 0) + 1
+        if ticket_id is None or (model, ticket_id) not in self.by_model_ticket:
+            raise OpenRouterError("no canned response")
+        return self.by_model_ticket[(model, ticket_id)]

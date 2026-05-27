@@ -47,6 +47,26 @@ class AppConfig(BaseSettings):
     openrouter_referer: str = "http://localhost:4000"
     openrouter_title: str = "Intercom Triage"
 
+    # ── Model cascade (roadmap 2.2) ───────────────────────────────────────────
+    # Route easy tickets to a cheap model, escalate low-confidence ones to the
+    # strong `openrouter_model`. The cheap model is a current OpenRouter id —
+    # Claude 3.5 Haiku is ~3.75x cheaper per token than Sonnet 4.5 on both input
+    # and output (see app/pricing.py) and supports the strict JSON-schema output
+    # the categorization prompt requires. Set `openrouter_cheap_model` equal to
+    # `openrouter_model` (or leave the cascade disabled) to fall back to a single
+    # strong-model call.
+    openrouter_cheap_model: str = "anthropic/claude-3.5-haiku"
+    # When the cheap model's self-reported confidence is BELOW this threshold (or
+    # the cheap call fails / returns malformed output) the ticket escalates to the
+    # strong model. 0.7 keeps only confident cheap answers; raise it to escalate
+    # more aggressively (better accuracy, more double calls), lower it to trust
+    # the cheap model more.
+    cascade_escalate_below: float = Field(default=0.7, ge=0.0, le=1.0)
+    # Disabled by default: opt-in so out-of-the-box behavior is unchanged (a
+    # single strong-model call). The escalation rate must be measured on a real
+    # corpus before flipping this on — a >40% rate erases the cost savings.
+    cascade_enabled: bool = False
+
     # ── Database ──────────────────────────────────────────────────────────────
     database_url: str = "sqlite+aiosqlite:///./data/triage.db"
 

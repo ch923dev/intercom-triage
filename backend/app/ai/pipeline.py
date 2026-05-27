@@ -383,6 +383,8 @@ async def categorize_many(
     fallback_category_id: int,
     fewshot_examples: int = 0,
     operator_notes: dict[str, str] | None = None,
+    cheap_model: str | None = None,
+    escalate_below: float = 0.0,
 ) -> dict[str, CategorizationResult]:
     """Categorize a batch. Network calls run in parallel under a semaphore;
     resolution runs sequentially on the shared session. Any failure on a single
@@ -392,13 +394,30 @@ async def categorize_many(
     confirmed-override neighbours into each ticket's prompt as in-context
     examples. With 0 (or a cold corpus) the prompt is unchanged. The retrieval
     reads the separate embedding store + override/category/ticket rows ONLY —
-    never `ai_cache` / the content signature (invariant #6)."""
+    never `ai_cache` / the content signature (invariant #6).
+
+    Roadmap 2.2 — model cascade. When `cheap_model` is set (and differs from the
+    strong `model`), each ticket is first categorized with the CHEAP model. If
+    that parses cleanly AND the model's self-reported `confidence` is
+    `>= escalate_below`, the cheap result is kept. Otherwise (low confidence, a
+    failed cheap call, or malformed cheap output) the ticket ESCALATES: it is
+    re-run with the strong `model` and that result is used. Routing only changes
+    WHICH model runs — the prompt/input (invariant #4) and the eventual cache key
+    (invariant #6, owned by the caller via the unchanged content signature) are
+    untouched, and a malformed strong-model output still degrades to the
+    per-ticket fallback (invariant #7). `cheap_model=None` (or equal to `model`)
+    disables the cascade: behavior is exactly the single strong-model call."""
     if not tickets:
         return {}
 
     # No AI configured → every ticket degrades to fallback (still a complete batch).
     if client is None:
         return {t.id: _fallback(t, fallback_category_id) for t in tickets}
+
+    # Cascade is active only when a distinct cheap model is configured. Equal ids
+    # collapse to the single-call path so an accidental same-model config is a
+    # no-op rather than a wasteful double call.
+    cascade = cheap_model is not None and cheap_model != model
 
     categories = (await session.scalars(select(Category).where(Category.is_active.is_(True)))).all()
     proposals = (
@@ -428,24 +447,49 @@ async def categorize_many(
 
     semaphore = asyncio.Semaphore(concurrency)
 
+    async def _complete(ticket: HydratedTicket, use_model: str) -> str:
+        messages = build_messages(
+            ticket,
+            categories,
+            proposals,
+            rejected_names,
+            examples_by_ticket.get(ticket.id),
+        )
+        return await client.complete(
+            model=use_model,
+            messages=messages,
+            ticket_id=ticket.id,
+            # Strict JSON-schema enforcement (roadmap 2.1). An endpoint that
+            # rejects the schema raises OpenRouterError → per-ticket fallback
+            # below; parse_response stays as the defensive net for refusals.
+            response_format=CATEGORIZATION_RESPONSE_FORMAT,
+        )
+
     async def _call(ticket: HydratedTicket) -> str:
         async with semaphore:
-            messages = build_messages(
-                ticket,
-                categories,
-                proposals,
-                rejected_names,
-                examples_by_ticket.get(ticket.id),
-            )
-            return await client.complete(
-                model=model,
-                messages=messages,
-                ticket_id=ticket.id,
-                # Strict JSON-schema enforcement (roadmap 2.1). An endpoint that
-                # rejects the schema raises OpenRouterError → per-ticket fallback
-                # below; parse_response stays as the defensive net for refusals.
-                response_format=CATEGORIZATION_RESPONSE_FORMAT,
-            )
+            if not cascade:
+                return await _complete(ticket, model)
+
+            # Cascade: try the cheap model first. A clean parse with high enough
+            # self-reported confidence is kept; anything else escalates to the
+            # strong model. The escalation RATE is the key risk metric (roadmap
+            # 2.2: a >40% rate makes the double call cost more than it saves).
+            assert cheap_model is not None  # cascade ⇒ cheap_model set
+            metrics.incr("cascade_cheap_total")
+            try:
+                cheap_raw = await _complete(ticket, cheap_model)
+                cheap_confidence = parse_response(cheap_raw).confidence
+            except Exception:
+                # Failed/malformed cheap call → escalate (do not fabricate a
+                # result; the strong model gets a clean shot).
+                cheap_raw = None
+                cheap_confidence = -1.0
+
+            if cheap_raw is not None and cheap_confidence >= escalate_below:
+                return cheap_raw
+
+            metrics.incr("cascade_escalated_total")
+            return await _complete(ticket, model)
 
     raw_results = await asyncio.gather(
         *(_call(t) for t in tickets),

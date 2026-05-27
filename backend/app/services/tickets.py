@@ -379,6 +379,13 @@ async def ingest_tickets(
         ).all()
         fewshot_notes = {n.ticket_id: n.body for n in note_rows}
 
+    # Roadmap 2.2 — model cascade. When enabled, route via the cheap model first
+    # and escalate low-confidence tickets to the strong model. Disabled → pass
+    # cheap_model=None so categorize_many makes a single strong-model call (no
+    # behavior change). The FINAL (post-escalation) result is what gets cached
+    # below under the unchanged content signature (invariant #6); a fallback is
+    # still never cached (invariant #7).
+    cheap_model = config.openrouter_cheap_model if config.cascade_enabled else None
     fresh = await categorize_many(
         uncached,
         session=session,
@@ -388,6 +395,8 @@ async def ingest_tickets(
         fallback_category_id=fallback.id,
         fewshot_examples=fewshot_n,
         operator_notes=fewshot_notes,
+        cheap_model=cheap_model,
+        escalate_below=config.cascade_escalate_below,
     )
     for ticket in uncached:
         result = fresh[ticket.id]
