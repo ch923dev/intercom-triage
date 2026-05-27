@@ -78,6 +78,21 @@ class AppConfig(BaseSettings):
     # embeddings means no neighbours to retrieve.
     fewshot_examples: int = Field(default=3, ge=0, le=10)
 
+    # ── Recurring-issue clustering (roadmap 3.1) ─────────────────────────────
+    # Offline periodic background job that clusters RESOLVED tickets' existing
+    # embeddings (HDBSCAN) and labels each cluster with c-TF-IDF top terms drawn
+    # from `parts[]` + title ONLY (invariant #4). It reads `ticket_embeddings`
+    # and never touches `ai_cache` / the content signature (invariant #6).
+    # Gated on `embeddings_enabled` — no embeddings means nothing to cluster.
+    clustering_enabled: bool = True
+    # Cadence: once at startup, then every interval. Default 6h (clustering is
+    # cheap on a single operator's corpus but does not need to be fresh-to-the-
+    # minute; 3.2 consumes the persisted snapshot).
+    clustering_interval_seconds: int = Field(default=21_600, ge=60)
+    # Below this many resolved tickets with embeddings, skip the run (HDBSCAN
+    # needs a handful of points to find structure; fewer is just noise).
+    clustering_min_tickets: int = Field(default=5, ge=2)
+
     # ── Server ────────────────────────────────────────────────────────────────
     log_level: str = "INFO"
 

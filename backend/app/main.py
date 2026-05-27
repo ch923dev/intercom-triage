@@ -25,6 +25,7 @@ from app.models import init_db
 from app.observability import configure_logging, log_event
 from app.routers import attachments as attachments_router
 from app.routers import categories as categories_router
+from app.routers import clusters as clusters_router
 from app.routers import followups as followups_router
 from app.routers import health as health_router
 from app.routers import metrics as metrics_router
@@ -92,6 +93,42 @@ async def _attachment_sweep_loop(
         await asyncio.sleep(config.attachment_sweep_interval_seconds)
 
 
+async def _clustering_loop(
+    session_factory: async_sessionmaker[AsyncSession],
+    config: AppConfig,
+) -> None:
+    """Background loop: recompute recurring-issue clusters (roadmap 3.1) over
+    RESOLVED tickets' existing embeddings. Once at startup, then every
+    `config.clustering_interval_seconds`.
+
+    Reads `ticket_embeddings` + `tickets`; NEVER touches `ai_cache` / the content
+    signature (invariant #6). Gated on `embeddings_enabled` (no embeddings means
+    nothing to cluster). Catches broad `Exception` on purpose so a clustering
+    failure can never stop the loop ticking."""
+    from app.ai.clustering import recompute_clusters
+
+    while True:
+        try:
+            async with session_factory() as session:
+                outcome = await recompute_clusters(session, config.clustering_min_tickets)
+            log_event(
+                "clustering_run",
+                op="background",
+                clusters=outcome.clusters,
+                clustered_tickets=outcome.clustered_tickets,
+                outliers=outcome.outliers,
+                skipped=outcome.skipped_reason or "",
+            )
+        except Exception as exc:
+            log_event(
+                "clustering_error",
+                level=logging.WARNING,
+                op="background",
+                error=str(exc),
+            )
+        await asyncio.sleep(config.clustering_interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Boot: logging → DB (create_all + seed) → external clients. Reverse on shutdown."""
@@ -137,6 +174,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.attachment_sweep_task = attachment_sweep_task
 
+    # Roadmap 3.1 — recurring-issue clustering. Only spawned when enabled AND
+    # embeddings exist to cluster over.
+    clustering_task: asyncio.Task[None] | None = None
+    if config.clustering_enabled and config.embeddings_enabled:
+        clustering_task = asyncio.create_task(_clustering_loop(session_factory, config))
+    app.state.clustering_task = clustering_task
+
     try:
         yield
     finally:
@@ -150,6 +194,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await attachment_sweep_task
         except asyncio.CancelledError:
             pass
+        if clustering_task is not None:
+            clustering_task.cancel()
+            try:
+                await clustering_task
+            except asyncio.CancelledError:
+                pass
         if openrouter is not None:
             await openrouter.aclose()
         await engine.dispose()
@@ -184,6 +234,7 @@ def create_app() -> FastAPI:
     app.include_router(playbooks_router.router)
     app.include_router(snippets_router.router)
     app.include_router(attachments_router.router)
+    app.include_router(clusters_router.router)
     app.include_router(metrics_router.router)
 
     return app

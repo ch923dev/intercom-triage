@@ -325,6 +325,27 @@ class SnippetUpdate(BaseModel):
     body: str | None = Field(default=None, min_length=1, max_length=4000)
 
 
+# ── Recurring-issue clusters (roadmap 3.1) ────────────────────────────────────
+
+
+class ClusterRead(BaseModel):
+    """One recurring-issue cluster from the offline clustering job.
+
+    Read-only — clusters are recomputed periodically by the background job, not
+    mutated through the API. `top_terms` / `label` are c-TF-IDF over the
+    customer-visible `parts[]` + title only (invariant #4).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    label: str
+    top_terms: list[str]
+    size: int
+    ticket_ids: list[str]
+    computed_at: UTCDatetime
+
+
 # ── Tickets ───────────────────────────────────────────────────────────────────
 
 
