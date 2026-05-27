@@ -13,8 +13,10 @@
 //     console.warn carrying the code + conversation id (and nothing else —
 //     no message body, for privacy).
 //
-// The fixtures under __fixtures__/ are synthesized representative payloads,
-// not real captures (no Intercom Access Token exists). See __fixtures__/README.
+// The fixtures under fixtures/ are synthesized representative payloads,
+// not real captures (no Intercom Access Token exists). See fixtures/README.
+// (Dir is `fixtures`, not `__fixtures__`: Chrome reserves `_`-prefixed names
+// at the unpacked-extension root and refuses to load the folder otherwise.)
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,7 +30,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const APP_ID = 'j3dxf22l';
 
 function fixture(name) {
-  return JSON.parse(readFileSync(join(HERE, '__fixtures__', name), 'utf8'));
+  return JSON.parse(readFileSync(join(HERE, 'fixtures', name), 'utf8'));
 }
 
 /** Capture console.warn calls for the duration of `fn`, then restore. */
