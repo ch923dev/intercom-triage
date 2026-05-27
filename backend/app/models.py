@@ -636,6 +636,13 @@ class Ticket(Base):
     ai_resolve_enabled: Mapped[bool | None] = mapped_column(nullable=True)
     resolution_chip_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     resolution_cleared_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Roadmap 4.1 (T106) — operator "parked / snoozed" state: a deferred-action
+    # ticket. Orthogonal to resolution; the trio is all-set-or-all-null and a
+    # ticket is never both parked and resolved. "ready" (parked_until <= now) is
+    # derived on read, not stored.
+    parked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    parked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    parked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         Index("ix_tickets_updated_at", "updated_at"),
@@ -663,6 +670,20 @@ class Ticket(Base):
         CheckConstraint(
             "ai_sentiment IS NULL OR ai_sentiment IN ('negative','neutral','positive')",
             name="tickets_ai_sentiment_check",
+        ),
+        CheckConstraint(
+            "(parked_at IS NULL) = (parked_until IS NULL) "
+            "AND (parked_at IS NULL) = (parked_reason IS NULL)",
+            name="tickets_parked_trio_check",
+        ),
+        CheckConstraint(
+            "parked_reason IS NULL OR parked_reason "
+            "IN ('waiting_on_customer','waiting_on_third_party','waiting_internal','other')",
+            name="tickets_parked_reason_check",
+        ),
+        CheckConstraint(
+            "NOT (parked_at IS NOT NULL AND resolved_at IS NOT NULL)",
+            name="tickets_not_parked_and_resolved_check",
         ),
     )
 
