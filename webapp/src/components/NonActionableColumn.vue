@@ -17,7 +17,7 @@ const tickets = useTicketsStore();
 const view = useViewStore();
 const selection = useSelectionStore();
 
-const items = computed(() => tickets.nonActionableTickets);
+const items = computed(() => tickets.filteredNonActionableTickets);
 const selectedId = computed(() => view.selectedTicketId);
 
 const COLUMN_KEY = '__non_actionable__';
