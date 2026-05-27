@@ -30,6 +30,7 @@ from app.schemas import (
 )
 from app.services.cache import get_cached, set_cached
 from app.services.categories import get_fallback
+from app.services.resolution import clear_parked
 from app.services.settings import get_settings
 from app.util import naive_utcnow
 
@@ -189,6 +190,7 @@ def _maybe_auto_resolve_from_ai(
     row.resolved_source = (
         "ai_resolved" if result.ai_resolution_verdict == "resolved" else "non_actionable"
     )
+    clear_parked(row)
 
 
 async def _upsert_ticket(
@@ -248,6 +250,7 @@ async def _upsert_ticket(
     if hydrated.state == "closed" and row.state != "closed" and row.resolved_at is None:
         row.resolved_at = now
         row.resolved_source = "intercom_closed"
+        clear_parked(row)
     else:
         _maybe_auto_resolve_from_ai(row, result, settings, now, content_signature)
     if not row.title_user_edited:

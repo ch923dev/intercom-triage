@@ -14,6 +14,7 @@ from app.deps import get_app_config, get_openrouter
 from app.schemas import (
     AIResolveSet,
     BulkCategoryUpdate,
+    BulkParkRequest,
     BulkResult,
     BulkTicketIds,
     CategoryUpdate,
@@ -21,10 +22,13 @@ from app.schemas import (
     IngestResponse,
     OkResponse,
     OverrideResponse,
+    ParkRequest,
+    ParkResponse,
     ReopenResponse,
     ResolveResponse,
     TicketEdit,
     TicketSchema,
+    UnparkResponse,
 )
 from app.services import bulk as bulk_svc
 from app.services import resolution as resolution_svc
@@ -130,6 +134,24 @@ async def bulk_non_actionable(
     return await bulk_svc.bulk_mark_non_actionable(session, body.ticket_ids)
 
 
+@router.post("/bulk/park", response_model=BulkResult)
+async def bulk_park(
+    body: BulkParkRequest,
+    session: AsyncSession = Depends(get_session),
+) -> BulkResult:
+    """Park N tickets until `until_at`. Resolved/already-parked rows fail 409."""
+    return await bulk_svc.bulk_park(session, body.ticket_ids, body.until_at, body.reason)
+
+
+@router.post("/bulk/unpark", response_model=BulkResult)
+async def bulk_unpark(
+    body: BulkTicketIds,
+    session: AsyncSession = Depends(get_session),
+) -> BulkResult:
+    """Unpark N tickets. Non-parked rows fail 409."""
+    return await bulk_svc.bulk_unpark(session, body.ticket_ids)
+
+
 @router.patch("/{ticket_id}/category", response_model=OverrideResponse)
 async def override_category(
     ticket_id: str,
@@ -186,6 +208,29 @@ async def reopen_ticket(
     """Reopen a resolved ticket. 409 if already open, 404 if unknown."""
     await resolution_svc.reopen(session, ticket_id)
     return ReopenResponse()
+
+
+@router.post("/{ticket_id}/park", response_model=ParkResponse)
+async def park_ticket(
+    ticket_id: str,
+    body: ParkRequest,
+    session: AsyncSession = Depends(get_session),
+) -> ParkResponse:
+    """Park a ticket until `until_at`. 409 if resolved or already parked."""
+    out = await resolution_svc.park(session, ticket_id, body.until_at, body.reason)
+    return ParkResponse(
+        parked_at=out.parked_at, parked_until=out.parked_until, parked_reason=out.parked_reason
+    )
+
+
+@router.post("/{ticket_id}/unpark", response_model=UnparkResponse)
+async def unpark_ticket(
+    ticket_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> UnparkResponse:
+    """Unpark a ticket. 409 if not parked, 404 if unknown."""
+    await resolution_svc.unpark(session, ticket_id)
+    return UnparkResponse()
 
 
 @router.patch("/{ticket_id}/ai-resolve", response_model=OkResponse)

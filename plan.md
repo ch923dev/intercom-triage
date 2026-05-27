@@ -559,3 +559,25 @@ Design spec: `docs/superpowers/specs/2026-05-26-playbooks-design.md`.
   notes only — `internal_notes` is never read.
 - Webapp: `stores/playbooks.ts`, flyout section `TicketPlaybooks.vue`, library
   view `PlaybooksPage.vue` wired through the `view` store (no router).
+
+## §14 — Parked / snoozed state
+
+Design spec: `docs/superpowers/specs/2026-05-27-parked-snoozed-state-design.md`.
+Plan: `docs/superpowers/plans/2026-05-27-parked-snoozed-state.md`. Roadmap 4.1 / T106.
+
+- Parallel state mirroring resolution: `tickets.parked_at` / `parked_until` /
+  `parked_reason` (enum), three CheckConstraints — trio all-or-null, reason enum,
+  and `NOT (parked_at IS NOT NULL AND resolved_at IS NOT NULL)`. Migration 0018.
+  Park is orthogonal to resolution + category.
+- `clear_parked(row)` runs on every resolve path (`apply_resolve`,
+  `apply_mark_non_actionable`, `_maybe_auto_resolve_from_ai`, the `_upsert_ticket`
+  close-transition) so the not-parked-and-resolved constraint always holds.
+- "Ready to resume" (`parked_until <= now`) is derived on read — no background
+  job. Endpoints: `POST /tickets/{id}/park` + `/unpark` + `/tickets/bulk/park` +
+  `/bulk/unpark`. Parked is board-state on `TicketSchema`, NOT `HydratedTicket`
+  (extension `normalizeConversation` untouched); sticky across re-sync because
+  `_upsert_ticket` never writes the trio.
+- Webapp Layout B: parked tickets excluded from category columns; Topbar
+  `parkedOnly` filter chip + `★ ready` badge; `ParkMenu.vue` (duration presets +
+  reason) drives park; bulk park/unpark in `BulkActionBar`. Extension popup gains
+  a Parked tab + single-ticket park/unpark.

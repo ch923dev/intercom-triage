@@ -250,6 +250,12 @@ As the operator, when I solve a ticket I can save a reusable
 by AI from that ticket, and see it on every other ticket in the same
 category so I handle repeat issues consistently.
 
+### US-021 — Park / snooze a ticket
+As the operator, I can park a ticket I'm waiting on (customer, third party, or
+internal) until a chosen time with a reason, so it leaves my live queue without
+being lost; when the wake time passes it flags "ready to resume" and I unpark it
+in one click.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -295,6 +301,7 @@ category so I handle repeat issues consistently.
 | FR-039 | The flyout lists active playbooks for a ticket's *effective* category (override beats AI). Uncategorized tickets show none. | US-020 |
 | FR-040 | `POST /playbooks/draft` returns an ephemeral AI-drafted body from the ticket's customer-visible `parts` + operator notes. It MUST NOT read `internal_notes` (FR-005 / invariant #4). 503 when AI is unconfigured. | US-020 |
 | FR-041 | A library page lists playbooks grouped by category with edit, archive, and restore (including an archived view); new playbooks are captured from a ticket flyout (FR-039/FR-040). | US-020 |
+| FR-042 | A ticket may be parked: `parked_at` + `parked_until` + `parked_reason` (`waiting_on_customer` \| `waiting_on_third_party` \| `waiting_internal` \| `other`), the trio XOR-constrained (all-set or all-null) and never co-existing with `resolved_at`; every resolve path clears it. Park is orthogonal to resolution and category. The system exposes `POST /tickets/{id}/park`, `POST /tickets/{id}/unpark`, `POST /tickets/bulk/park`, `POST /tickets/bulk/unpark` (`until_at` must be future; bulk bounded by `MAX_BULK_IDS`). Parked tickets are excluded from the live category columns and surfaced via a parked-only filter chip; "ready to resume" (`parked_until ≤ now`) is derived on read, never stored. Parked state is operator-owned and survives ingest / re-sync untouched. | US-021 |
 
 ## 6. Non-functional requirements
 

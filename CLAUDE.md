@@ -60,6 +60,16 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     The AI drafter (`POST /playbooks/draft`) reads `parts` + operator notes
     only — never `internal_notes` (see #4). A ticket sees playbooks for its
     *effective* category (override beats AI).
+14. **Parked is board-state, not a conversation field.** `parked_at` /
+    `parked_until` / `parked_reason` live on `TicketSchema` (the board
+    response), never on `HydratedTicket` — so the extension's
+    `normalizeConversation` does not carry them (invariant #2 untouched). The
+    trio is XOR-locked (all-set or all-null) and a ticket is never both parked
+    and resolved; every resolve path calls `clear_parked`. "Ready to resume"
+    (`parked_until ≤ now`) is derived on read, never stored — no scheduler.
+    `_upsert_ticket` never writes the trio, so parked state survives re-sync by
+    construction (cf. #8). Parked tickets are excluded from the live category
+    columns and surfaced via a parked-only filter chip (roadmap 4.1 / T106).
 
 ## Subagent doctrine
 

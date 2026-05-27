@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.metrics import metrics
 from app.models import Ticket
-from app.schemas import ResolvedSource
+from app.schemas import ParkedReason, ResolvedSource
 from app.util import naive_utcnow
 
 
@@ -21,6 +21,13 @@ from app.util import naive_utcnow
 class ResolveOutcome:
     resolved_at: datetime
     resolved_source: ResolvedSource
+
+
+@dataclass
+class ParkOutcome:
+    parked_at: datetime
+    parked_until: datetime
+    parked_reason: ParkedReason
 
 
 async def get_or_404(session: AsyncSession, ticket_id: str) -> Ticket:
@@ -46,6 +53,7 @@ def apply_resolve(row: Ticket) -> ResolveOutcome:
     now = naive_utcnow()
     row.resolved_at = now
     row.resolved_source = "manual"
+    clear_parked(row)
     return ResolveOutcome(resolved_at=now, resolved_source="manual")
 
 
@@ -59,6 +67,36 @@ def apply_reopen(row: Ticket) -> None:
     row.resolution_cleared_at = naive_utcnow()
 
 
+def clear_parked(row: Ticket) -> None:
+    """Clear the parked trio. Does NOT commit. Safe on an unparked row.
+    Called by every resolve path so a parked ticket can never become resolved
+    while still parked (tickets_not_parked_and_resolved_check)."""
+    row.parked_at = None
+    row.parked_until = None
+    row.parked_reason = None
+
+
+def apply_park(row: Ticket, until_at: datetime, reason: ParkedReason) -> ParkOutcome:
+    """Mutate a Ticket row into the parked state. Does NOT commit.
+    409 if the row is resolved (reopen first) or already parked."""
+    if row.resolved_at is not None:
+        raise HTTPException(status_code=409, detail="ticket is resolved; reopen before parking")
+    if row.parked_at is not None:
+        raise HTTPException(status_code=409, detail="ticket is already parked")
+    now = naive_utcnow()
+    row.parked_at = now
+    row.parked_until = until_at
+    row.parked_reason = reason
+    return ParkOutcome(parked_at=now, parked_until=until_at, parked_reason=reason)
+
+
+def apply_unpark(row: Ticket) -> None:
+    """Clear the parked state. Does NOT commit. 409 if not parked."""
+    if row.parked_at is None:
+        raise HTTPException(status_code=409, detail="ticket is not parked")
+    clear_parked(row)
+
+
 def apply_mark_non_actionable(row: Ticket) -> ResolveOutcome:
     """Mutate a Ticket row to mark it non-actionable. Does NOT commit.
 
@@ -70,6 +108,7 @@ def apply_mark_non_actionable(row: Ticket) -> ResolveOutcome:
     now = naive_utcnow()
     row.resolved_at = now
     row.resolved_source = "non_actionable"
+    clear_parked(row)
     return ResolveOutcome(resolved_at=now, resolved_source="non_actionable")
 
 
@@ -97,6 +136,25 @@ async def mark_non_actionable(session: AsyncSession, ticket_id: str) -> ResolveO
     await session.commit()
     metrics.incr("tickets_resolved_total.non_actionable")
     return outcome
+
+
+async def park(
+    session: AsyncSession, ticket_id: str, until_at: datetime, reason: ParkedReason
+) -> ParkOutcome:
+    """Park a ticket until `until_at`. 409 if resolved or already parked."""
+    row = await get_or_404(session, ticket_id)
+    outcome = apply_park(row, until_at, reason)
+    await session.commit()
+    metrics.incr("tickets_parked_total")
+    return outcome
+
+
+async def unpark(session: AsyncSession, ticket_id: str) -> None:
+    """Unpark a ticket. 409 if not parked."""
+    row = await get_or_404(session, ticket_id)
+    apply_unpark(row)
+    await session.commit()
+    metrics.incr("tickets_unparked_total")
 
 
 async def set_ai_resolve(
