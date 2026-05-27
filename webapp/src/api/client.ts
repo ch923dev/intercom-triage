@@ -8,6 +8,7 @@ import type {
   BulkResult,
   CategoriesResponse,
   Category,
+  ClusterGap,
   DraftReply,
   FilterSettings,
   Followup,
@@ -303,6 +304,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ticket_id: ticketId }),
     }),
+
+  // ── cluster content gaps (roadmap 3.2) ────────────────────────────────────
+  /** Recurring-issue clusters whose dominant effective category has no active
+   *  playbook yet, ranked by cluster size (most-recurring first). */
+  listClusterGaps: (): Promise<ClusterGap[]> => request('/clusters/gaps'),
 
   // ── metrics (roadmap 1.4 — token / cost meter) ────────────────────────────
   /** Process-lifetime counters + per-day OpenRouter spend. */

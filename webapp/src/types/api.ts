@@ -106,6 +106,21 @@ export interface Playbook {
   archived_at: string | null;
 }
 
+// Recurring-issue cluster content gap (roadmap 3.2). A cluster of resolved
+// tickets describing the same recurring issue whose dominant EFFECTIVE category
+// (override beats AI) has no active playbook yet — i.e. a playbook the operator
+// should write next. `size` is the cluster size (ranking key, most-recurring
+// first); `member_count` is how many of its tickets resolved to `category_id`.
+export interface ClusterGap {
+  cluster_id: number;
+  label: string;
+  top_terms: string[];
+  size: number;
+  category_id: number;
+  category_name: string;
+  member_count: number;
+}
+
 // Snippet (roadmap 1.5). A short canned reply with `{{variable}}` placeholders.
 // Lighter than a Playbook: global (not category-scoped), no AI draft. The body
 // is stored verbatim with placeholders intact; substitution is done client-side
