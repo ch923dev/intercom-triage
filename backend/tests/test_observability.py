@@ -6,6 +6,7 @@ import logging
 
 import pytest
 
+from app.metrics import metrics
 from app.observability import logged_call
 
 
@@ -25,3 +26,23 @@ async def test_logged_call_reraises_and_marks_error() -> None:
     with pytest.raises(RuntimeError):
         async with logged_call("openrouter.complete"):
             raise RuntimeError("boom")
+
+
+@pytest.mark.asyncio
+async def test_logged_call_records_latency_sample() -> None:
+    metrics.reset()
+    async with logged_call("openrouter.complete", ticket_id="T1"):
+        pass
+    stat = metrics.histogram_snapshot()["latency_ms.openrouter.complete"]
+    assert stat["count"] == 1
+    assert stat["max"] >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_logged_call_records_sample_on_error() -> None:
+    metrics.reset()
+    with pytest.raises(RuntimeError):
+        async with logged_call("openrouter.complete"):
+            raise RuntimeError("boom")
+    # Latency is recorded even when the wrapped call fails.
+    assert metrics.histogram_snapshot()["latency_ms.openrouter.complete"]["count"] == 1
