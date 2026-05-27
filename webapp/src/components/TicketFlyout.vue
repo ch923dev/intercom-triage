@@ -12,6 +12,7 @@ import CollapsibleSection from './ticket/CollapsibleSection.vue';
 import TicketAttachmentBin from './ticket/TicketAttachmentBin.vue';
 import TicketCategoryPicker from './ticket/TicketCategoryPicker.vue';
 import TicketConversation from './ticket/TicketConversation.vue';
+import TicketDraftReply from './ticket/TicketDraftReply.vue';
 import TicketEntryForm from './ticket/TicketEntryForm.vue';
 import TicketEntryTimeline from './ticket/TicketEntryTimeline.vue';
 import TicketFollowup from './ticket/TicketFollowup.vue';
@@ -89,6 +90,8 @@ function close() {
             </CollapsibleSection>
 
             <TicketPlaybooks :ticket-id="ticket.id" :category-id="effectiveCategoryId" />
+
+            <TicketDraftReply :ticket-id="ticket.id" />
 
             <TicketResolution :ticket="ticket" />
           </aside>

@@ -8,6 +8,7 @@ import type {
   BulkResult,
   CategoriesResponse,
   Category,
+  DraftReply,
   FilterSettings,
   Followup,
   NoteAttachment,
@@ -291,4 +292,12 @@ export const api = {
 
   draftPlaybook: (ticketId: string): Promise<{ body: string }> =>
     request('/playbooks/draft', { method: 'POST', body: JSON.stringify({ ticket_id: ticketId }) }),
+
+  // RAG draft reply (roadmap 2.6): grounds an ephemeral customer reply in
+  // similar resolved tickets + effective-category playbooks.
+  draftReply: (ticketId: string): Promise<DraftReply> =>
+    request('/playbooks/draft-reply', {
+      method: 'POST',
+      body: JSON.stringify({ ticket_id: ticketId }),
+    }),
 };

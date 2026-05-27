@@ -103,6 +103,16 @@ export interface Playbook {
   archived_at: string | null;
 }
 
+// RAG draft reply (roadmap 2.6). An ephemeral, customer-visible draft reply
+// grounded in similar resolved tickets + effective-category playbooks. The
+// grounding ids are surfaced for operator transparency; no internal-note
+// content is ever exposed (backend invariant #4).
+export interface DraftReply {
+  body: string;
+  grounding_ticket_ids: string[];
+  playbook_ids: number[];
+}
+
 export interface NoteAttachment {
   id: number;
   owner_kind: 'entry' | 'ticket';

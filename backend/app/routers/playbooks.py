@@ -10,6 +10,7 @@ from app.config import AppConfig
 from app.db import get_session
 from app.deps import get_app_config, get_openrouter
 from app.schemas import (
+    DraftReplyResponse,
     OkResponse,
     PlaybookCreate,
     PlaybookDraftRequest,
@@ -66,6 +67,26 @@ async def draft_playbook(
         session, body.ticket_id, client=client, model=config.openrouter_model
     )
     return PlaybookDraftResponse(body=text)
+
+
+@router.post("/draft-reply", response_model=DraftReplyResponse)
+async def draft_reply(
+    body: PlaybookDraftRequest,
+    session: AsyncSession = Depends(get_session),
+    client: OpenRouterClient | None = Depends(get_openrouter),
+    config: AppConfig = Depends(get_app_config),
+) -> DraftReplyResponse:
+    """RAG draft reply: grounds an ephemeral customer reply in the k nearest
+    RESOLVED tickets (customer-visible parts only) + effective-category
+    playbooks. Not persisted."""
+    draft = await svc.draft_reply_from_ticket(
+        session, body.ticket_id, client=client, model=config.openrouter_model
+    )
+    return DraftReplyResponse(
+        body=draft.body,
+        grounding_ticket_ids=draft.grounding_ticket_ids,
+        playbook_ids=draft.playbook_ids,
+    )
 
 
 @router.patch("/{playbook_id}", response_model=PlaybookRead)

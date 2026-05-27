@@ -275,6 +275,23 @@ class PlaybookDraftResponse(BaseModel):
     body: str
 
 
+# ── RAG draft reply (roadmap 2.6) ─────────────────────────────────────────────
+# Kept in its own region (separate from the Tickets block below) so it does not
+# collide with concurrent edits to the HydratedTicket / TicketSchema shapes.
+
+
+class DraftReplyResponse(BaseModel):
+    """An ephemeral RAG-grounded draft reply to send to the customer.
+
+    `grounding_ticket_ids` / `playbook_ids` expose what the draft was grounded in
+    for operator transparency. Only customer-visible content reaches `body`
+    (invariant #4 — internal notes never leak into a draft)."""
+
+    body: str
+    grounding_ticket_ids: list[str] = Field(default_factory=list)
+    playbook_ids: list[int] = Field(default_factory=list)
+
+
 # ── Tickets ───────────────────────────────────────────────────────────────────
 
 
