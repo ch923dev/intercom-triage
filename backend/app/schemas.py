@@ -350,6 +350,27 @@ class ClusterRead(BaseModel):
     computed_at: UTCDatetime
 
 
+class ClusterGapRead(BaseModel):
+    """A recurring-issue cluster whose dominant effective category has no
+    playbook yet — roadmap 3.2 ("what should I build a playbook for").
+
+    Read-only ranking surface. `size` is the cluster's full size (the primary
+    rank key — most-recurring first); `member_count` is how many of its tickets
+    resolved to `category_id` (the support behind the suggestion). The operator
+    acts on `category_id` by writing a playbook for that category.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    cluster_id: int
+    label: str
+    top_terms: list[str]
+    size: int
+    category_id: int
+    category_name: str
+    member_count: int
+
+
 # ── Tickets ───────────────────────────────────────────────────────────────────
 
 

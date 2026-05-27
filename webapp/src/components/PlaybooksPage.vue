@@ -4,10 +4,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useCategoriesStore } from '@/stores/categories';
+import { useClusterGapsStore } from '@/stores/clusterGaps';
 import { usePlaybooksStore } from '@/stores/playbooks';
 
 const playbooks = usePlaybooksStore();
 const categories = useCategoriesStore();
+const clusterGaps = useClusterGapsStore();
 
 const showArchived = ref(false);
 const error = ref<string | null>(null);
@@ -16,8 +18,16 @@ const editingId = ref<number | null>(null);
 const editLabel = ref('');
 const editBody = ref('');
 
+// "Suggested playbooks to build" (roadmap 3.2): recurring-issue clusters whose
+// dominant effective category has no playbook yet. Each row offers an inline
+// form to start a playbook scoped to that exact category.
+const draftingClusterId = ref<number | null>(null);
+const draftLabel = ref('');
+const draftBody = ref('');
+
 onMounted(() => {
   void playbooks.loadAll();
+  void clusterGaps.load();
 });
 
 watch(showArchived, (on) => {
@@ -72,6 +82,33 @@ async function restore(id: number) {
     error.value = 'Restore failed.';
   }
 }
+
+function startDraft(clusterId: number, label: string) {
+  draftingClusterId.value = clusterId;
+  draftLabel.value = label;
+  draftBody.value = '';
+}
+
+function cancelDraft() {
+  draftingClusterId.value = null;
+}
+
+async function saveDraft(categoryId: number) {
+  if (!draftLabel.value.trim() || !draftBody.value.trim()) return;
+  error.value = null;
+  try {
+    await playbooks.create({
+      category_id: categoryId,
+      label: draftLabel.value.trim(),
+      body: draftBody.value.trim(),
+    });
+    draftingClusterId.value = null;
+    // The category now has a playbook → drop it from the suggestions.
+    await clusterGaps.load();
+  } catch {
+    error.value = 'Create failed.';
+  }
+}
 </script>
 
 <template>
@@ -85,6 +122,54 @@ async function restore(id: number) {
     </div>
 
     <p v-if="error" class="mono err">{{ error }}</p>
+
+    <!-- Suggested playbooks to build (roadmap 3.2): recurring resolved-ticket
+         clusters whose dominant category has no playbook yet, most-recurring
+         first. The standout content-gap view. -->
+    <section v-if="clusterGaps.gaps.length > 0" class="gaps">
+      <div class="gaps-head">
+        <h3 class="mono">Suggested playbooks to build</h3>
+        <span class="mono hint">Recurring issues with no playbook yet</span>
+      </div>
+      <div v-for="gap in clusterGaps.gaps" :key="gap.cluster_id" class="gap">
+        <div class="gap-main">
+          <div class="gap-label mono">{{ gap.label }}</div>
+          <div class="gap-meta mono">
+            <span class="pill">{{ gap.category_name }}</span>
+            <span>{{ gap.size }} recurring ticket{{ gap.size === 1 ? '' : 's' }}</span>
+            <span class="nogap">no playbook</span>
+          </div>
+          <div v-if="gap.top_terms.length > 0" class="gap-terms mono">
+            {{ gap.top_terms.join(' · ') }}
+          </div>
+        </div>
+        <template v-if="draftingClusterId === gap.cluster_id">
+          <input
+            v-model="draftLabel"
+            class="input mono"
+            maxlength="120"
+            placeholder="Playbook name"
+          />
+          <textarea v-model="draftBody" class="input area" rows="5" placeholder="Steps…" />
+          <div class="row">
+            <button
+              class="ghost"
+              :disabled="!draftLabel.trim() || !draftBody.trim()"
+              @click="saveDraft(gap.category_id)"
+            >
+              <span class="mono">Create</span>
+            </button>
+            <button class="ghost" @click="cancelDraft">
+              <span class="mono">Cancel</span>
+            </button>
+          </div>
+        </template>
+        <button v-else class="ghost" @click="startDraft(gap.cluster_id, gap.label)">
+          <span class="mono">Build playbook for {{ gap.category_name }}</span>
+        </button>
+      </div>
+    </section>
+
     <p v-if="groups.length === 0" class="mono empty">
       No playbooks yet. Save one from a ticket flyout.
     </p>
@@ -235,5 +320,65 @@ h2 {
 .ghost:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.gaps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 720px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  padding: 12px;
+}
+.gaps-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gaps-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+.hint {
+  color: var(--ink-3);
+  font-size: 10px;
+}
+.gap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: var(--hairline) solid var(--line);
+  padding-top: 8px;
+}
+.gap-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.gap-label {
+  color: var(--ink);
+  font-size: 12px;
+}
+.gap-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.gap-terms {
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.pill {
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  padding: 1px 6px;
+  color: var(--ink-2);
+}
+.nogap {
+  color: var(--accent);
 }
 </style>

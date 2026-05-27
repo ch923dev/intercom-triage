@@ -17,7 +17,8 @@ from app.ai import clustering
 from app.config import AppConfig, get_config
 from app.db import get_session
 from app.models import TicketCluster, TicketClusterMember
-from app.schemas import ClusterRead
+from app.schemas import ClusterGapRead, ClusterRead
+from app.services import clusters as clusters_svc
 
 router = APIRouter(prefix="/clusters", tags=["clusters"])
 
@@ -53,6 +54,17 @@ async def list_clusters(
     session: AsyncSession = Depends(get_session),
 ) -> list[ClusterRead]:
     return await _serialize(session)
+
+
+@router.get("/gaps", response_model=list[ClusterGapRead])
+async def list_cluster_gaps(
+    session: AsyncSession = Depends(get_session),
+) -> list[ClusterGapRead]:
+    """Roadmap 3.2 — recurring-issue clusters whose dominant EFFECTIVE category
+    (override beats AI, invariant #13) has no active playbook, ranked by cluster
+    size (most-recurring first). Read-only; never touches `ai_cache`."""
+    gaps = await clusters_svc.rank_gaps(session)
+    return [ClusterGapRead.model_validate(g) for g in gaps]
 
 
 @router.post("/recompute", response_model=list[ClusterRead])
