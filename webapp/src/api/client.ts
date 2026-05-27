@@ -18,6 +18,7 @@ import type {
   ProposalsResponse,
   ResolvedSource,
   Snippet,
+  StatsResponse,
   Ticket,
   TicketNote,
 } from '@/types/api';
@@ -306,6 +307,12 @@ export const api = {
   // ── metrics (roadmap 1.4 — token / cost meter) ────────────────────────────
   /** Process-lifetime counters + per-day OpenRouter spend. */
   getMetrics: (): Promise<MetricsResponse> => request('/metrics'),
+
+  // ── stats dashboard (roadmap 1.3) ─────────────────────────────────────────
+  /** The four success metrics rolled up over a trailing window of
+   *  `windowDays` days (default 30). */
+  getStats: (windowDays?: number): Promise<StatsResponse> =>
+    request(`/stats${windowDays === undefined ? '' : `?window_days=${windowDays}`}`),
 
   // ── snippets (roadmap 1.5) ──────────────────────────────────────────────────
   listSnippets: (opts: { includeArchived?: boolean } = {}): Promise<Snippet[]> => {

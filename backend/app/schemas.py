@@ -554,3 +554,69 @@ class BulkResult(BaseModel):
 
     ok_ids: list[str] = Field(default_factory=list)
     failed: list[BulkFailure] = Field(default_factory=list)
+
+
+# ── Stats dashboard (roadmap 1.3) ─────────────────────────────────────────────
+#
+# Read-only rollups over the existing `tickets` table — no migration, no new
+# columns. Four success metrics (spec §8) aggregated server-side and rendered
+# as a dependency-free dashboard. Resolution mix ties to `resolved_source`
+# (cross-package invariant #10: manual | intercom_closed | non_actionable |
+# ai_resolved, null = open).
+
+
+class CategoryCount(BaseModel):
+    """Ticket count for one category. `category_id` is null for tickets with no
+    effective category (rare — fallback usually catches these)."""
+
+    category_id: int | None
+    category_name: str
+    count: int
+
+
+class VolumePoint(BaseModel):
+    """Tickets created on one UTC calendar day. `date` is ISO `YYYY-MM-DD`.
+    Days with zero tickets in the window are emitted with `count: 0` so the
+    client can draw a continuous trend without gap-filling."""
+
+    date: str
+    count: int
+
+
+class ResolutionMix(BaseModel):
+    """Resolution-source breakdown over the window. Keyed by `resolved_source`
+    plus an `open` bucket for tickets with no `resolved_at`."""
+
+    open: int = 0
+    manual: int = 0
+    intercom_closed: int = 0
+    non_actionable: int = 0
+    ai_resolved: int = 0
+
+
+class ResolveTimeBucket(BaseModel):
+    """One bucket of the time-to-resolve histogram. `count` resolved tickets
+    fell in `[lower_hours, upper_hours)`; `upper_hours` is null for the final
+    open-ended bucket."""
+
+    label: str
+    lower_hours: float
+    upper_hours: float | None
+    count: int
+
+
+class StatsResponse(BaseModel):
+    """The four success metrics (spec §8), computed server-side.
+
+    `window_days` is the trailing window (by ticket `created_at`) the volume
+    trend + resolution mix + resolve-time distribution are computed over.
+    `category_breakdown` and `total_tickets` count every ticket in the window.
+    """
+
+    window_days: int
+    total_tickets: int
+    category_breakdown: list[CategoryCount]
+    volume_trend: list[VolumePoint]
+    resolution_mix: ResolutionMix
+    resolve_time_buckets: list[ResolveTimeBucket]
+    median_resolve_hours: float | None

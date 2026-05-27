@@ -6,7 +6,14 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 
-export type View = 'board' | 'categories' | 'proposals' | 'followups' | 'playbooks' | 'snippets';
+export type View =
+  | 'board'
+  | 'categories'
+  | 'proposals'
+  | 'followups'
+  | 'playbooks'
+  | 'snippets'
+  | 'stats';
 
 export const useViewStore = defineStore('view', () => {
   const view = ref<View>('board');
