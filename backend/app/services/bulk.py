@@ -158,6 +158,34 @@ async def bulk_recategorize(
     return result
 
 
+async def bulk_park(
+    session: AsyncSession, ticket_ids: list[str], until_at: datetime, reason: str
+) -> BulkResult:
+    """Park N tickets until `until_at`. Resolved/already-parked rows fail 409."""
+
+    async def per_id(tid: str) -> None:
+        row = await resolution_svc.get_or_404(session, tid)
+        resolution_svc.apply_park(row, until_at, reason)
+        metrics.incr("tickets_parked_total")
+
+    result = await _run_per_id(session, ticket_ids, per_id)
+    _record_outcome("park", result)
+    return result
+
+
+async def bulk_unpark(session: AsyncSession, ticket_ids: list[str]) -> BulkResult:
+    """Unpark N tickets. Non-parked rows fail 409."""
+
+    async def per_id(tid: str) -> None:
+        row = await resolution_svc.get_or_404(session, tid)
+        resolution_svc.apply_unpark(row)
+        metrics.incr("tickets_unparked_total")
+
+    result = await _run_per_id(session, ticket_ids, per_id)
+    _record_outcome("unpark", result)
+    return result
+
+
 async def bulk_dismiss_chip(session: AsyncSession, ticket_ids: list[str]) -> BulkResult:
     """Dismiss the resolution chip on N tickets."""
 
