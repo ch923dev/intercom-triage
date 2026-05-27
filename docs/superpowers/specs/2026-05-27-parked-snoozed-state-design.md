@@ -74,14 +74,20 @@ Routes (tickets router), registered before `/{ticket_id}/*` wildcards:
 
 Bulk mirrors bulk-resolve: validate `ids` against **`MAX_BULK_IDS`** (#9), loop, single end-of-loop commit, per-id outcome. Request validation: `parked_until > now` (no parking into the past); `reason` ∈ enum. API takes an **absolute `until_at`**; the webapp computes it from duration presets.
 
-## 3 · Cross-package contract (invariants #2, #8)
+## 3 · Cross-package contract — **corrected during planning (2026-05-27)**
 
-The `HydratedTicket` shape spans three packages — edit together or break ingest.
+> **Correction:** parked is **board-state**, not conversation-shape. It lives on
+> the **response** schema `TicketSchema`, exactly like `resolved_at` — which is
+> *not* on `HydratedTicket`. So **invariant #2 (`HydratedTicket` shape) is NOT
+> triggered**, and `extension/intercom.js` `normalizeConversation` is **untouched**.
+> The extension popup only *reads* parked from `GET /tickets` and *writes* it via
+> the new API. This simplifies the change and was confirmed by reading
+> `schemas.py:412-466`, `services/tickets.py:_upsert_ticket`, and `extension/api.js`.
 
-- **`backend/app/schemas.py`** — add `parked_at: UTCDatetime | None`, `parked_until: UTCDatetime | None`, `parked_reason: Literal[...] | None` to the ticket response schema.
-- **`extension/intercom.js` `normalizeConversation`** — emit `parked_at: null, parked_until: null, parked_reason: null`. Intercom has no parked concept; these are app-only and set via the API, never via ingest.
-- **Stickiness (#8 pattern):** `_upsert_ticket` must **not** overwrite the parked trio on re-sync. Ingest always sends null; parked is operator state and survives sync, exactly like `title_user_edited` / `summary_user_edited`.
-- **`webapp/src/types/api.ts`** — add the three fields to the `Ticket` interface.
+- **`backend/app/schemas.py`** — add `parked_at: UTCDatetime | None`, `parked_until: UTCDatetime | None`, `parked_reason: ParkedReason | None` to **`TicketSchema`** (the board response), NOT to `HydratedTicket`.
+- **`webapp/src/types/api.ts`** — add the three fields to the `Ticket` interface (which mirrors `TicketSchema`, already carrying `resolved_at` etc.).
+- **Stickiness is automatic (#8 spirit, by construction):** `_upsert_ticket` writes a **fixed field set** that excludes `resolved_at`/`resolved_source`; `parked_*` are likewise never in that write set, so a re-sync cannot clobber operator park state. No `_upsert_ticket` code change — a regression test locks the behavior.
+- **`extension/intercom.js` / `normalizeConversation` — NO change.** Parked is not a conversation field.
 
 ## 4 · Webapp UI (Layout B — filter chip)
 
@@ -99,7 +105,7 @@ View:
 
 ## 5 · Extension popup (parity)
 
-`popup.js`: a **Parked** tab (mirrors the resolved / non-actionable tab split, invariant #10) listing parked tickets with single-ticket Park / Unpark buttons. Carries the three null fields in its `HydratedTicket` shape. No bulk in the popup (see non-goals).
+`extension/api.js`: add `parkTicket(id, until_at, reason)` + `unparkTicket(id)` calling the new endpoints. `popup.js`: a **Parked** tab (mirrors the resolved / non-actionable tab split, invariant #10) over the already-fetched `getStoredTickets()` list (`parked_at != null && resolved_at == null`), with single-ticket Park / Unpark buttons. No bulk in the popup (see non-goals). `intercom.js` is untouched.
 
 ## 6 · Error handling
 
@@ -127,8 +133,8 @@ The implementation plan must include:
 
 | Package | Files |
 |---|---|
-| backend | `models.py` (+2 constraints), `alembic/versions/0018_add_parked_columns.py` (new), `schemas.py`, resolution service (`apply_park`/`apply_unpark` + resolve-clears-park), tickets router (+4 routes), bulk service, `_upsert_ticket` stickiness |
-| webapp | `types/api.ts`, `stores/tickets.ts` (getters + actions), parked-view component, toolbar chip + badge, `BulkActionBar` |
-| extension | `intercom.js` `normalizeConversation` (null fields), `popup.js` (Parked tab + park/unpark) |
+| backend | `models.py` (+2 constraints), `alembic/versions/0018_add_parked_columns.py` (new), `schemas.py` (`TicketSchema` + bulk-park body + `ParkedReason`/`ParkResponse`), resolution service (`apply_park`/`apply_unpark` + resolve-clears-park), tickets router (+4 routes), bulk service (`bulk_park`/`bulk_unpark`); `_upsert_ticket` **unchanged** (regression test only) |
+| webapp | `types/api.ts`, `api/client.ts` (4 methods), `stores/tickets.ts` (getters + park/unpark + bulk actions), `Topbar.vue` (parked chip + ready badge), park action UI (card menu: duration presets + reason), `BulkActionBar.vue` (Park/Unpark) |
+| extension | `api.js` (`parkTicket`/`unparkTicket`), `popup.js` (Parked tab + park/unpark buttons). `intercom.js` **unchanged** |
 
 This is a cross-package change → **ships as one PR** across all three packages (CLAUDE.md scope guardrails).
