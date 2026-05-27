@@ -14,7 +14,7 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.prompt import build_messages
+from app.ai.prompt import CATEGORIZATION_RESPONSE_FORMAT, build_messages
 from app.clients.openrouter import OpenRouterClient
 from app.metrics import metrics
 from app.models import Category, CategoryProposal, RejectedProposalSignature
@@ -338,6 +338,10 @@ async def categorize_many(
                 model=model,
                 messages=messages,
                 ticket_id=ticket.id,
+                # Strict JSON-schema enforcement (roadmap 2.1). An endpoint that
+                # rejects the schema raises OpenRouterError → per-ticket fallback
+                # below; parse_response stays as the defensive net for refusals.
+                response_format=CATEGORIZATION_RESPONSE_FORMAT,
             )
 
     raw_results = await asyncio.gather(

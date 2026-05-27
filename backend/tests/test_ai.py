@@ -7,7 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.pipeline import categorize_many, normalize_signature, parse_response
-from app.ai.prompt import build_messages
+from app.ai.prompt import (
+    CATEGORIZATION_RESPONSE_FORMAT,
+    build_messages,
+)
 from app.models import Category, CategoryProposal, RejectedProposalSignature
 from tests.helpers import (
     FakeOpenRouter,
@@ -224,3 +227,83 @@ def test_fallback_result_has_null_resolution_fields() -> None:
     assert result.ai_resolution_verdict is None
     assert result.ai_resolution_confidence is None
     assert result.ai_resolution_reason is None
+
+
+# ── 2.1 — strict structured outputs ────────────────────────────────────────────
+
+
+def test_categorization_response_format_is_strict_json_schema() -> None:
+    """The shared schema constant follows OpenRouter's strict json_schema convention."""
+    assert CATEGORIZATION_RESPONSE_FORMAT["type"] == "json_schema"
+    js = CATEGORIZATION_RESPONSE_FORMAT["json_schema"]
+    assert js["strict"] is True
+    assert js["name"] == "ticket_categorization"
+    branches = js["schema"]["oneOf"]
+    assert len(branches) == 3
+    for branch in branches:
+        # strict mode: every object closed + every property required.
+        assert branch["additionalProperties"] is False
+        assert set(branch["required"]) == set(branch["properties"].keys())
+    assignments = {b["properties"]["assignment"]["const"] for b in branches}
+    assert assignments == {"existing", "pending_proposal", "new_proposal"}
+
+
+def test_parse_schema_conforming_response() -> None:
+    """A response matching the strict schema parses into a full assignment."""
+    raw = (
+        '{"assignment":"existing","category_id":2,'
+        '"subject":"Refund request for invoice #44812",'
+        '"summary":"Customer wants a refund.","confidence":0.91,'
+        '"resolution_verdict":"not_resolved","resolution_confidence":0.7,'
+        '"resolution_reason":"awaiting refund confirmation"}'
+    )
+    p = parse_response(raw)
+    assert p.kind == "existing"
+    assert p.category_id == 2
+    assert p.subject == "Refund request for invoice #44812"
+    assert p.confidence == 0.91
+    assert p.resolution_verdict == "not_resolved"
+    assert p.resolution_confidence == 0.7
+    assert p.resolution_reason == "awaiting refund confirmation"
+
+
+@pytest.mark.asyncio
+async def test_categorize_sends_strict_schema(session: AsyncSession) -> None:
+    """The categorization call injects the strict json_schema response_format."""
+    fb = await _fallback_id(session)
+    fake = FakeOpenRouter({"X1": existing_assignment(1)})
+    await categorize_many(
+        [make_hydrated("X1")],
+        session=session,
+        client=fake,  # type: ignore[arg-type]
+        model="m",
+        concurrency=2,
+        fallback_category_id=fb,
+    )
+    assert fake.last_response_format == CATEGORIZATION_RESPONSE_FORMAT
+
+
+@pytest.mark.asyncio
+async def test_categorize_nonconforming_response_falls_back(session: AsyncSession) -> None:
+    """A schema-violating response (valid JSON, unknown assignment) degrades that
+    ticket to fallback without aborting the batch — the defensive parse path holds
+    even if a non-supporting endpoint ignores the strict schema."""
+    fb = await _fallback_id(session)
+    fake = FakeOpenRouter(
+        {
+            "X1": existing_assignment(1),
+            "X2": '{"assignment":"banana","summary":"x","confidence":0.5}',
+        },
+    )
+    out = await categorize_many(
+        [make_hydrated("X1"), make_hydrated("X2")],
+        session=session,
+        client=fake,  # type: ignore[arg-type]
+        model="m",
+        concurrency=2,
+        fallback_category_id=fb,
+    )
+    assert len(out) == 2
+    assert out["X1"].category_id == 1
+    assert out["X2"].category_id == fb
+    assert out["X2"].fallback is True

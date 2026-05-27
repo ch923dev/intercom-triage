@@ -78,6 +78,7 @@ class FakeOpenRouter:
     def __init__(self, by_ticket: dict[str, str]) -> None:
         self.by_ticket = by_ticket
         self.calls = 0
+        self.last_response_format: dict[str, Any] | None = None
 
     async def complete(
         self,
@@ -85,8 +86,10 @@ class FakeOpenRouter:
         model: str,
         messages: list[dict[str, str]],
         ticket_id: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> str:
         self.calls += 1
+        self.last_response_format = response_format
         if ticket_id is None or ticket_id not in self.by_ticket:
             raise OpenRouterError("no canned response")
         return self.by_ticket[ticket_id]
