@@ -21,14 +21,17 @@ import {
   markFollowupFired,
   markNonActionable,
   overrideCategory,
+  parkTicket,
   reopenTicket,
   resolveTicket,
+  unparkTicket,
   FULL_BOARD_URL,
 } from './api.js';
 import { fetchHydratedBatch, getAppId, IntercomSessionError, setAppId } from './intercom.js';
 
 const RESOLVED_TAB_KEY = 'resolved';
 const NON_ACTIONABLE_TAB_KEY = 'non-actionable';
+const PARKED_TAB_KEY = 'parked';
 
 const state = {
   categories: [],
@@ -87,14 +90,14 @@ function node(tag, className, text) {
 const sortedCategories = () =>
   [...state.categories].sort((a, b) => a.sort_order - b.sort_order);
 
-/** Tickets belonging to the active tab. */
+/** Tickets belonging to the active tab (parked tickets are excluded from category columns). */
 function ticketsForTab(key) {
   if (!key) return [];
   const [kind, rawId] = key.split('-');
   const id = Number(rawId);
   return kind === 'cat'
-    ? state.tickets.filter((t) => t.category_id === id)
-    : state.tickets.filter((t) => t.proposal_id === id);
+    ? state.tickets.filter((t) => t.category_id === id && t.parked_at === null)
+    : state.tickets.filter((t) => t.proposal_id === id && t.parked_at === null);
 }
 
 function isDue(followup) {
@@ -119,7 +122,7 @@ function renderTabs() {
       color: c.color,
       proposal: false,
       resolved: false,
-      count: state.tickets.filter((t) => t.category_id === c.id).length,
+      count: state.tickets.filter((t) => t.category_id === c.id && t.parked_at === null).length,
     })),
     ...state.proposals.map((p) => ({
       key: `prop-${p.id}`,
@@ -127,7 +130,7 @@ function renderTabs() {
       color: null,
       proposal: true,
       resolved: false,
-      count: state.tickets.filter((t) => t.proposal_id === p.id).length,
+      count: state.tickets.filter((t) => t.proposal_id === p.id && t.parked_at === null).length,
     })),
     {
       key: RESOLVED_TAB_KEY,
@@ -147,6 +150,20 @@ function renderTabs() {
       nonActionable: true,
       count: state.resolvedTickets.filter((t) => t.resolved_source === 'non_actionable').length,
     },
+    (() => {
+      const parkedList = state.tickets.filter((t) => t.parked_at !== null && t.resolved_at === null);
+      const readyCount = parkedList.filter((t) => t.parked_until && Date.parse(t.parked_until) <= state.now).length;
+      return {
+        key: PARKED_TAB_KEY,
+        name: readyCount > 0 ? `Parked ★ ready` : 'Parked',
+        color: null,
+        proposal: false,
+        resolved: false,
+        nonActionable: false,
+        parked: true,
+        count: parkedList.length,
+      };
+    })(),
   ];
 
   for (const tab of tabs) {
@@ -154,6 +171,7 @@ function renderTabs() {
     if (tab.proposal) btn.classList.add('proposal');
     if (tab.resolved) btn.classList.add('resolved-tab');
     if (tab.nonActionable) btn.classList.add('non-actionable-tab');
+    if (tab.parked) btn.classList.add('parked-tab');
     if (tab.key === state.activeTab) btn.classList.add('active');
 
     if (tab.color) {
@@ -219,7 +237,7 @@ function renderCard(ticket, { isResolved = false } = {}) {
     reopenBtn.addEventListener('click', () => void doReopen(ticket));
     meta.append(reopenBtn);
   } else {
-    // Open/category tabs: show ✓ Resolve + ⊘ Non-actionable + Move buttons.
+    // Open/category tabs: show ✓ Resolve + ⊘ Non-actionable + Park/Unpark + Move buttons.
     const resolveBtn = node('button', 'action-btn resolve-btn', '✓ Resolve');
     resolveBtn.addEventListener('click', () => void doResolve(ticket));
     meta.append(resolveBtn);
@@ -227,6 +245,35 @@ function renderCard(ticket, { isResolved = false } = {}) {
     const naBtn = node('button', 'action-btn non-actionable-btn', '⊘ Non-actionable');
     naBtn.addEventListener('click', () => void doMarkNonActionable(ticket));
     meta.append(naBtn);
+
+    if (ticket.parked_at !== null) {
+      // Already parked — show Unpark button.
+      const unparkBtn = node('button', 'action-btn unpark-btn', '▶ Unpark');
+      unparkBtn.addEventListener('click', () => void doUnpark(ticket));
+      meta.append(unparkBtn);
+    } else {
+      // Not parked — show Park control: reason select + default +1d button.
+      const parkWrap = node('div', 'park-wrap');
+      const reasonSelect = node('select', 'park-reason');
+      const reasons = [
+        { value: 'waiting_on_customer', label: 'Waiting on customer' },
+        { value: 'waiting_on_third_party', label: 'Waiting on third party' },
+        { value: 'waiting_internal', label: 'Waiting (internal)' },
+        { value: 'other', label: 'Other' },
+      ];
+      for (const r of reasons) {
+        const opt = document.createElement('option');
+        opt.value = r.value;
+        opt.textContent = r.label;
+        reasonSelect.append(opt);
+      }
+      const parkBtn = node('button', 'action-btn park-btn', '⏸ Park +1d');
+      parkBtn.addEventListener('click', () => {
+        void doPark(ticket, new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), reasonSelect.value);
+      });
+      parkWrap.append(reasonSelect, parkBtn);
+      meta.append(parkWrap);
+    }
 
     const moveBtn = node('button', 'move-btn', 'Move ▾');
     meta.append(moveBtn);
@@ -276,6 +323,25 @@ function renderList() {
   }
   if (state.error) {
     el.list.append(node('p', 'state error mono', state.error));
+    return;
+  }
+
+  if (state.activeTab === PARKED_TAB_KEY) {
+    const rows = state.tickets.filter((t) => t.parked_at !== null && t.resolved_at === null);
+    if (rows.length === 0) {
+      el.list.append(node('p', 'state mono', 'No parked tickets'));
+      return;
+    }
+    // Ready (wake time passed) tickets first, then most-recently-parked.
+    rows
+      .slice()
+      .sort((a, b) => {
+        const readyA = Number(a.parked_until !== null && Date.parse(a.parked_until) <= state.now);
+        const readyB = Number(b.parked_until !== null && Date.parse(b.parked_until) <= state.now);
+        if (readyA !== readyB) return readyB - readyA;
+        return new Date(b.parked_at ?? b.updated_at) - new Date(a.parked_at ?? a.updated_at);
+      })
+      .forEach((t) => el.list.append(renderCard(t)));
     return;
   }
 
@@ -456,6 +522,37 @@ async function doMarkNonActionable(ticket) {
   }
 }
 
+/** Park an open ticket until `untilAt` ISO — moves it out of category columns, into Parked tab. */
+async function doPark(ticket, untilAt, reason) {
+  try {
+    await parkTicket(ticket.id, untilAt, reason);
+    // Reflect parked state locally so the card leaves its column and shows in Parked.
+    ticket.parked_at = new Date().toISOString();
+    ticket.parked_until = untilAt;
+    ticket.parked_reason = reason;
+    renderTabs();
+    renderList();
+  } catch (e) {
+    state.error = e.message;
+    renderList();
+  }
+}
+
+/** Unpark a parked ticket — clears parked state, returns it to its category column. */
+async function doUnpark(ticket) {
+  try {
+    await unparkTicket(ticket.id);
+    ticket.parked_at = null;
+    ticket.parked_until = null;
+    ticket.parked_reason = null;
+    renderTabs();
+    renderList();
+  } catch (e) {
+    state.error = e.message;
+    renderList();
+  }
+}
+
 /** Reopen a resolved ticket — moves it back into its category tab. */
 async function doReopen(ticket) {
   try {
@@ -499,6 +596,7 @@ async function load() {
       ...state.proposals.map((p) => `prop-${p.id}`),
       RESOLVED_TAB_KEY,
       NON_ACTIONABLE_TAB_KEY,
+      PARKED_TAB_KEY,
     ];
     if (!keys.includes(state.activeTab)) state.activeTab = keys[0] ?? null;
   } catch (e) {
