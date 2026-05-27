@@ -6,11 +6,14 @@ inputs are the real SQLAlchemy rows + the hydrated-ticket schema.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from app.models import Category, CategoryProposal
 from app.schemas import HydratedTicket
+
+if TYPE_CHECKING:
+    from app.ai.fewshot import FewShotExample
 
 MAX_TRANSCRIPT_CHARS = 6_000
 TRUNCATION_MARKER = "\n\n…[truncated]…\n\n"
@@ -256,13 +259,44 @@ def build_transcript(ticket: HydratedTicket) -> str:
     return text[:half] + TRUNCATION_MARKER + text[-half:]
 
 
+def _format_fewshot(examples: Sequence[FewShotExample]) -> str:
+    """Render confirmed-override neighbours as a delimited examples block.
+
+    Each example is the neighbour's customer-visible text (title + parts, built
+    upstream — invariant #4, NEVER internal notes) plus the operator's confirmed
+    category. Returns "" when there are no examples so the caller can omit the
+    block entirely and match the cold-corpus prompt exactly.
+    """
+    if not examples:
+        return ""
+    blocks: list[str] = []
+    for i, ex in enumerate(examples, start=1):
+        blocks.append(
+            f'Example {i} — operator confirmed category: "{ex.category_name}"\n' f"{ex.text}"
+        )
+    body = "\n\n".join(blocks)
+    return (
+        "EXAMPLES OF HOW SIMILAR TICKETS WERE CATEGORIZED\n"
+        "(operator-confirmed labels on the nearest past tickets — strong "
+        "guidance for an EXISTING-category assignment, but judge this ticket on "
+        "its own content):\n"
+        f"{body}\n\n"
+    )
+
+
 def build_messages(
     ticket: HydratedTicket,
     active_categories: Iterable[Category],
     pending_proposals: Iterable[CategoryProposal],
     rejected_names: Iterable[str],
+    fewshot_examples: Sequence[FewShotExample] | None = None,
 ) -> list[dict[str, str]]:
-    """Return the `messages` array for OpenRouter chat.completions."""
+    """Return the `messages` array for OpenRouter chat.completions.
+
+    When `fewshot_examples` is non-empty, a clearly delimited examples block of
+    operator-confirmed neighbours is inserted ahead of the ticket. With no
+    examples (cold corpus) the prompt is byte-for-byte the prior behavior.
+    """
     user_prompt = (
         "ACTIVE CATEGORIES:\n"
         f"{_format_categories(active_categories)}\n\n"
@@ -270,6 +304,7 @@ def build_messages(
         f"{_format_proposals(pending_proposals)}\n\n"
         "PREVIOUSLY REJECTED (do not propose these names again):\n"
         f"{_format_rejected(rejected_names)}\n\n"
+        f"{_format_fewshot(fewshot_examples or [])}"
         "TICKET:\n"
         f'title: "{ticket.title or ""}"\n'
         f"state: {ticket.state or 'unknown'}\n"

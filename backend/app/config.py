@@ -70,6 +70,14 @@ class AppConfig(BaseSettings):
     # ingest hook is a no-op — no embeddings are computed or stored.
     embeddings_enabled: bool = True
 
+    # ── Few-shot categorization (roadmap 2.5) ────────────────────────────────
+    # When categorizing an uncached ticket, inject the nearest CONFIRMED-override
+    # neighbours (operator-confirmed gold labels) as in-context examples. Set to
+    # 0 to disable injection entirely (the prompt then matches the cold-corpus
+    # path exactly). The retrieval is gated on `embeddings_enabled` — no
+    # embeddings means no neighbours to retrieve.
+    fewshot_examples: int = Field(default=3, ge=0, le=10)
+
     # ── Server ────────────────────────────────────────────────────────────────
     log_level: str = "INFO"
 
