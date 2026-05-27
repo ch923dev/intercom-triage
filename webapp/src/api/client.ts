@@ -11,6 +11,7 @@ import type {
   DraftReply,
   FilterSettings,
   Followup,
+  MetricsResponse,
   NoteAttachment,
   NoteEntry,
   Playbook,
@@ -300,4 +301,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ticket_id: ticketId }),
     }),
+
+  // ── metrics (roadmap 1.4 — token / cost meter) ────────────────────────────
+  /** Process-lifetime counters + per-day OpenRouter spend. */
+  getMetrics: (): Promise<MetricsResponse> => request('/metrics'),
 };

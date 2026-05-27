@@ -6,6 +6,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.metrics import HISTOGRAM_CAPACITY, Metrics, metrics
+from app.pricing import FALLBACK_PRICE, estimate_cost_usd, price_for
 
 
 @pytest.mark.asyncio
@@ -122,3 +123,114 @@ async def test_metrics_endpoint_surfaces_histogram(client: AsyncClient) -> None:
     assert hist["count"] == 2
     assert hist["max"] == 34.0
     assert set(hist) == {"count", "p50", "p95", "max"}
+
+
+# ── 1.4: token usage + cost meter ─────────────────────────────────────────────
+
+
+def test_price_for_known_and_fallback() -> None:
+    # Configured default model has an explicit price.
+    assert price_for("anthropic/claude-sonnet-4.5").prompt_usd_per_mtok == 3.0
+    # Unknown model falls back rather than zero-pricing.
+    assert price_for("some/unknown-model") == FALLBACK_PRICE
+
+
+def test_estimate_cost_math() -> None:
+    # 1,000,000 prompt tokens at $3/M + 1,000,000 completion at $15/M = $18.
+    assert estimate_cost_usd("anthropic/claude-sonnet-4.5", 1_000_000, 1_000_000) == pytest.approx(
+        18.0
+    )
+    # Mixed small counts: 100/1M*3 + 50/1M*15 = 0.00105.
+    assert estimate_cost_usd("anthropic/claude-sonnet-4.5", 100, 50) == pytest.approx(0.00105)
+    # Zero tokens → zero cost.
+    assert estimate_cost_usd("anthropic/claude-sonnet-4.5", 0, 0) == 0.0
+
+
+def test_record_usage_accumulates_per_model_per_day() -> None:
+    m = Metrics()
+    m.record_usage("anthropic/claude-sonnet-4.5", 100, 50)
+    m.record_usage("anthropic/claude-sonnet-4.5", 200, 100)
+    m.record_usage("openai/gpt-4o-mini", 10, 5)
+
+    snap = m.usage_snapshot()
+    by_model = {u["model"]: u for u in snap}
+
+    sonnet = by_model["anthropic/claude-sonnet-4.5"]
+    assert sonnet["prompt_tokens"] == 300
+    assert sonnet["completion_tokens"] == 150
+    assert sonnet["total_tokens"] == 450
+    assert sonnet["calls"] == 2
+
+    mini = by_model["openai/gpt-4o-mini"]
+    assert mini["calls"] == 1
+    assert mini["total_tokens"] == 15
+
+
+def test_record_usage_keys_by_current_utc_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    import datetime as _dt
+
+    m = Metrics()
+
+    class _Day1:
+        @staticmethod
+        def date() -> _dt.date:
+            return _dt.date(2026, 5, 27)
+
+    class _Day2:
+        @staticmethod
+        def date() -> _dt.date:
+            return _dt.date(2026, 5, 28)
+
+    monkeypatch.setattr("app.metrics.naive_utcnow", lambda: _Day1)
+    m.record_usage("anthropic/claude-sonnet-4.5", 100, 50)
+    monkeypatch.setattr("app.metrics.naive_utcnow", lambda: _Day2)
+    m.record_usage("anthropic/claude-sonnet-4.5", 200, 100)
+
+    snap = m.usage_snapshot()
+    dates = {u["date"] for u in snap}
+    assert dates == {"2026-05-27", "2026-05-28"}
+    # Newest day leads (sorted descending).
+    assert snap[0]["date"] == "2026-05-28"
+
+
+def test_record_usage_coerces_negative_tokens() -> None:
+    m = Metrics()
+    m.record_usage("anthropic/claude-sonnet-4.5", -5, -10)
+    snap = m.usage_snapshot()
+    assert snap[0]["prompt_tokens"] == 0
+    assert snap[0]["completion_tokens"] == 0
+    assert snap[0]["calls"] == 1
+
+
+def test_reset_clears_usage() -> None:
+    m = Metrics()
+    m.record_usage("anthropic/claude-sonnet-4.5", 100, 50)
+    m.reset()
+    assert m.usage_snapshot() == []
+
+
+@pytest.mark.asyncio
+async def test_metrics_endpoint_surfaces_usage_and_today_cost(client: AsyncClient) -> None:
+    metrics.reset()
+    metrics.record_usage("anthropic/claude-sonnet-4.5", 100, 50)
+
+    resp = await client.get("/metrics")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert len(body["usage"]) == 1
+    bucket = body["usage"][0]
+    assert bucket["model"] == "anthropic/claude-sonnet-4.5"
+    assert bucket["total_tokens"] == 150
+    assert bucket["estimated_cost_usd"] == pytest.approx(0.00105)
+    # record_usage keys by today's UTC date, so today_cost_usd picks it up.
+    assert body["today_cost_usd"] == pytest.approx(0.00105)
+
+
+@pytest.mark.asyncio
+async def test_metrics_endpoint_usage_empty_by_default(client: AsyncClient) -> None:
+    metrics.reset()
+    resp = await client.get("/metrics")
+    assert resp.status_code == 200
+    assert resp.json()["usage"] == []
+    assert resp.json()["today_cost_usd"] == 0.0

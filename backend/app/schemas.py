@@ -457,14 +457,32 @@ class LatencyHistogram(BaseModel):
     max: float
 
 
+class UsageBucket(BaseModel):
+    """OpenRouter token usage + estimated USD cost for one (day, model) bucket
+    (roadmap 1.4). In-process only — resets when the backend restarts."""
+
+    date: str  # UTC calendar day, ISO `YYYY-MM-DD`.
+    model: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    calls: int
+    estimated_cost_usd: float
+
+
 class MetricsResponse(BaseModel):
     """Process-lifetime counters + latency histograms (plan §11). Counter keys
     with a `.` carry a label, e.g. `ai_calls_total.ok`,
     `proposals_resolved_total.rejected`. Histogram keys are namespaced per op,
-    e.g. `latency_ms.openrouter.complete`."""
+    e.g. `latency_ms.openrouter.complete`.
+
+    `usage` carries per-day OpenRouter token spend (roadmap 1.4), newest day
+    first; `today_cost_usd` is the summed estimate for the current UTC day."""
 
     counters: dict[str, int]
     histograms: dict[str, LatencyHistogram] = Field(default_factory=dict)
+    usage: list[UsageBucket] = Field(default_factory=list)
+    today_cost_usd: float = 0.0
 
 
 # ── Bulk actions ──────────────────────────────────────────────────────────────

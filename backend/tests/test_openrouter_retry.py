@@ -292,3 +292,86 @@ async def test_injected_response_format_is_forwarded() -> None:
         assert transport.body["response_format"] == schema
     finally:
         await client.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Cost meter: token usage capture (roadmap 1.4)
+# ---------------------------------------------------------------------------
+
+_BODY_WITH_USAGE: dict[str, Any] = {
+    "choices": [{"message": {"content": '{"result": "ok"}'}}],
+    "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+}
+
+
+@pytest.mark.asyncio
+async def test_usage_recorded_on_success() -> None:
+    """A 200 with a `usage` block records tokens into the metrics meter."""
+    from app.metrics import metrics
+
+    metrics.reset()
+    transport = _QueuedTransport([_make_response(200, _BODY_WITH_USAGE)])
+    client = _make_client(transport)
+    try:
+        await client.complete(
+            model="anthropic/claude-sonnet-4.5",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+    finally:
+        await client.aclose()
+
+    snap = metrics.usage_snapshot()
+    assert len(snap) == 1
+    bucket = snap[0]
+    assert bucket["model"] == "anthropic/claude-sonnet-4.5"
+    assert bucket["prompt_tokens"] == 100
+    assert bucket["completion_tokens"] == 50
+    assert bucket["total_tokens"] == 150
+    assert bucket["calls"] == 1
+    # 100/1M*3 + 50/1M*15 = 0.0003 + 0.00075 = 0.00105.
+    assert bucket["estimated_cost_usd"] == pytest.approx(0.00105)
+
+
+@pytest.mark.asyncio
+async def test_missing_usage_does_not_break_call() -> None:
+    """A 200 without a `usage` block still returns content; meter stays empty."""
+    from app.metrics import metrics
+
+    metrics.reset()
+    transport = _QueuedTransport([_make_response(200, _GOOD_BODY)])
+    client = _make_client(transport)
+    try:
+        result = await client.complete(
+            model="anthropic/claude-sonnet-4.5",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+        assert result == '{"result": "ok"}'
+    finally:
+        await client.aclose()
+
+    assert metrics.usage_snapshot() == []
+
+
+@pytest.mark.asyncio
+async def test_malformed_usage_is_ignored() -> None:
+    """Non-int / missing token fields are coerced to 0 and never break the call."""
+    from app.metrics import metrics
+
+    metrics.reset()
+    body = {
+        "choices": [{"message": {"content": "{}"}}],
+        "usage": {"prompt_tokens": "lots", "completion_tokens": None},
+    }
+    transport = _QueuedTransport([_make_response(200, body)])
+    client = _make_client(transport)
+    try:
+        result = await client.complete(
+            model="anthropic/claude-sonnet-4.5",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+        assert result == "{}"
+    finally:
+        await client.aclose()
+
+    # Both fields coerced to 0 → nothing meaningful recorded.
+    assert metrics.usage_snapshot() == []

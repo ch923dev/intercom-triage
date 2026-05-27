@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from app.metrics import metrics
 from app.observability import logged_call
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
@@ -42,6 +43,28 @@ def _backoff_with_jitter(attempt: int) -> float:
     base: float = _BASE_BACKOFF_SECONDS * (2**attempt)
     jitter: float = random.uniform(0.8, 1.2)  # noqa: S311 — non-crypto jitter
     return base * jitter
+
+
+def _record_usage(model: str, data: dict[str, Any]) -> None:
+    """Record token usage from an OpenRouter response into the cost meter.
+
+    Defensive by design: ``usage`` is absent on some responses/endpoints, and
+    individual token fields may be missing or non-int. Any such case is a no-op
+    (or skips the bad field) — capturing the meter must never break the call.
+    """
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return
+
+    def _as_int(value: object) -> int:
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+    prompt_tokens = _as_int(usage.get("prompt_tokens"))
+    completion_tokens = _as_int(usage.get("completion_tokens"))
+    if prompt_tokens == 0 and completion_tokens == 0:
+        # Nothing meaningful to record (e.g. usage present but empty).
+        return
+    metrics.record_usage(model, prompt_tokens, completion_tokens)
 
 
 def _parse_retry_after(header: str | None) -> float | None:
@@ -134,6 +157,13 @@ class OpenRouterClient:
                         raise OpenRouterError(f"unexpected response shape: {exc}") from exc
                     if not isinstance(content, str):
                         raise OpenRouterError("response content was not a string")
+                    # Cost meter (roadmap 1.4). Best-effort: a usage-capture
+                    # failure must never break a successful completion.
+                    try:
+                        if isinstance(data, dict):
+                            _record_usage(model, data)
+                    except Exception:
+                        logger.debug("openrouter usage capture failed", exc_info=True)
                     return content
 
                 if resp.status_code in _RETRY_STATUSES and attempt < _MAX_ATTEMPTS - 1:
