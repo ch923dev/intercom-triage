@@ -140,7 +140,7 @@ async def bulk_park(
     session: AsyncSession = Depends(get_session),
 ) -> BulkResult:
     """Park N tickets until `until_at`. Resolved/already-parked rows fail 409."""
-    return await bulk_svc.bulk_park(session, body.ticket_ids, body.until_at, body.reason)
+    return await bulk_svc.bulk_park(session, body.ticket_ids, body.until_at, body.reason, body.note)
 
 
 @router.post("/bulk/unpark", response_model=BulkResult)
@@ -217,9 +217,12 @@ async def park_ticket(
     session: AsyncSession = Depends(get_session),
 ) -> ParkResponse:
     """Park a ticket until `until_at`. 409 if resolved or already parked."""
-    out = await resolution_svc.park(session, ticket_id, body.until_at, body.reason)
+    out = await resolution_svc.park(session, ticket_id, body.until_at, body.reason, body.note)
     return ParkResponse(
-        parked_at=out.parked_at, parked_until=out.parked_until, parked_reason=out.parked_reason
+        parked_at=out.parked_at,
+        parked_until=out.parked_until,
+        parked_reason=out.parked_reason,
+        parked_note=out.parked_note,
     )
 
 

@@ -71,3 +71,14 @@ async def test_resolving_a_parked_ticket_clears_park(session: AsyncSession) -> N
     await session.commit()  # would raise if parked + resolved both set
     assert row.parked_at is None
     assert row.resolved_source == "manual"
+
+
+async def test_park_with_note_stored_and_cleared(session: AsyncSession) -> None:
+    row = await _open(session, "p6")
+    out = svc.apply_park(row, naive_utcnow() + timedelta(hours=1), "other", "vendor refund pending")
+    await session.commit()  # parked_note_check: note allowed while parked
+    assert out.parked_note == "vendor refund pending"
+    assert row.parked_note == "vendor refund pending"
+    svc.apply_unpark(row)
+    await session.commit()
+    assert row.parked_note is None

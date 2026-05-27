@@ -10,7 +10,7 @@ import type { ParkedReason } from '@/types/api';
 
 const props = defineProps<{ anchor?: HTMLElement | null }>();
 const emit = defineEmits<{
-  (e: 'park', untilAt: string, reason: ParkedReason): void;
+  (e: 'park', untilAt: string, reason: ParkedReason, note: string | null): void;
   (e: 'close'): void;
 }>();
 
@@ -29,7 +29,13 @@ const reasons: Array<{ value: ParkedReason; label: string }> = [
 ];
 
 const reason = ref<ParkedReason>('waiting_on_customer');
+const note = ref('');
 const customAt = ref('');
+
+/** Free-text note only applies to the 'other' reason; null otherwise. */
+function noteArg(): string | null {
+  return reason.value === 'other' ? note.value.trim() || null : null;
+}
 const panel = ref<HTMLElement | null>(null);
 const top = ref(0);
 const left = ref(0);
@@ -59,13 +65,13 @@ function onDocPointer(e: PointerEvent) {
 }
 
 function emitPreset(minutes: number) {
-  emit('park', new Date(Date.now() + minutes * 60_000).toISOString(), reason.value);
+  emit('park', new Date(Date.now() + minutes * 60_000).toISOString(), reason.value, noteArg());
 }
 function emitCustom() {
   if (!customAt.value) return;
   const iso = new Date(customAt.value).toISOString();
   if (Date.parse(iso) <= Date.now()) return; // backend also rejects past times (422)
-  emit('park', iso, reason.value);
+  emit('park', iso, reason.value, noteArg());
 }
 
 onMounted(async () => {
@@ -95,6 +101,14 @@ onBeforeUnmount(() => {
       <select v-model="reason" class="reason">
         <option v-for="r in reasons" :key="r.value" :value="r.value">{{ r.label }}</option>
       </select>
+      <input
+        v-if="reason === 'other'"
+        v-model="note"
+        type="text"
+        class="reason note-input"
+        maxlength="200"
+        placeholder="Reason (optional)"
+      />
       <label class="label">Until</label>
       <div class="presets">
         <button

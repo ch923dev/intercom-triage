@@ -643,6 +643,9 @@ class Ticket(Base):
     parked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     parked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     parked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Optional free-text elaboration (mainly for reason='other'); only set while
+    # parked, cleared with the trio by clear_parked.
+    parked_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         Index("ix_tickets_updated_at", "updated_at"),
@@ -684,6 +687,10 @@ class Ticket(Base):
         CheckConstraint(
             "NOT (parked_at IS NOT NULL AND resolved_at IS NOT NULL)",
             name="tickets_not_parked_and_resolved_check",
+        ),
+        CheckConstraint(
+            "parked_note IS NULL OR (parked_at IS NOT NULL AND length(parked_note) <= 200)",
+            name="tickets_parked_note_check",
         ),
     )
 

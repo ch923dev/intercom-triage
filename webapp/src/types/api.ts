@@ -217,6 +217,7 @@ export interface Ticket {
   parked_at: string | null;
   parked_until: string | null;
   parked_reason: ParkedReason | null;
+  parked_note: string | null;
 }
 
 // ── Bulk actions (plan §8d) ──────────────────────────────────────────────────
