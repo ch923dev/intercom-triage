@@ -11,6 +11,7 @@ import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
 import { useSelectionStore } from '@/stores/selection';
 import { useTicketsStore } from '@/stores/tickets';
+import { type BulkAction, bulkPreview, bulkPreviewLabel, MAX_BULK_IDS } from '@/utils/bulkPreview';
 
 const selection = useSelectionStore();
 const tickets = useTicketsStore();
@@ -44,6 +45,39 @@ const anyHasChip = computed(() =>
   selectedTickets.value.some((t) => t.resolution_chip_state !== null),
 );
 const anyHasFollowup = computed(() => selectedTickets.value.some((t) => t.followup !== null));
+
+// ── Pre-flight diff preview (roadmap 1.6) ──────────────────────────────────
+// On hover/focus of an action we surface "N will <action>, M skipped" computed
+// client-side from the already-loaded selected ticket states. `previewTarget`
+// carries the recategorize destination category id (null for the others).
+const preview = ref<{ action: BulkAction; targetCategoryId: number | null } | null>(null);
+
+/** True when the selection exceeds the per-request cap (invariant #9). The
+ *  backend rejects a request over the cap, so warn regardless of which action
+ *  is hovered. */
+const overCap = computed(() => selectedTickets.value.length > MAX_BULK_IDS);
+
+const previewLabel = computed(() => {
+  if (preview.value === null) {
+    if (overCap.value) {
+      return `${selectedTickets.value.length} selected — over ${MAX_BULK_IDS} cap, trim selection`;
+    }
+    return null;
+  }
+  const result = bulkPreview(
+    preview.value.action,
+    selectedTickets.value,
+    preview.value.targetCategoryId,
+  );
+  return bulkPreviewLabel(preview.value.action, result);
+});
+
+function showPreview(action: BulkAction, targetCategoryId: number | null = null) {
+  preview.value = { action, targetCategoryId };
+}
+function clearPreview() {
+  preview.value = null;
+}
 
 /** Drop the chip preset row, since following the same template as the flyout's
  *  preset picker keeps the operator's spatial model intact. */
@@ -130,6 +164,10 @@ function onClearSelection() {
         :disabled="busy || !noneResolved"
         :title="noneResolved ? 'Mark selected resolved' : 'Some selected are already resolved'"
         @click="onResolve"
+        @mouseenter="showPreview('resolve')"
+        @focus="showPreview('resolve')"
+        @mouseleave="clearPreview"
+        @blur="clearPreview"
       >
         Resolve
       </button>
@@ -141,6 +179,10 @@ function onClearSelection() {
           noneResolved ? 'Mark selected non-actionable' : 'Some selected are already resolved'
         "
         @click="onNonActionable"
+        @mouseenter="showPreview('non_actionable')"
+        @focus="showPreview('non_actionable')"
+        @mouseleave="clearPreview"
+        @blur="clearPreview"
       >
         Non-actionable
       </button>
@@ -150,6 +192,10 @@ function onClearSelection() {
         :disabled="busy || !allResolved"
         :title="allResolved ? 'Reopen selected' : 'All selected must be resolved'"
         @click="onReopen"
+        @mouseenter="showPreview('reopen')"
+        @focus="showPreview('reopen')"
+        @mouseleave="clearPreview"
+        @blur="clearPreview"
       >
         Reopen
       </button>
@@ -166,6 +212,10 @@ function onClearSelection() {
             class="menu-item"
             role="menuitem"
             @click="onMoveTo(cat.id)"
+            @mouseenter="showPreview('recategorize', cat.id)"
+            @focus="showPreview('recategorize', cat.id)"
+            @mouseleave="clearPreview"
+            @blur="clearPreview"
           >
             <CatDot :color="cat.color" :size="8" />
             <span>{{ cat.name }}</span>
@@ -196,6 +246,10 @@ function onClearSelection() {
         :disabled="busy || !anyHasFollowup"
         :title="anyHasFollowup ? 'Clear follow-ups on selected' : 'No follow-ups on selected'"
         @click="onClearFollowup"
+        @mouseenter="showPreview('clear_followup')"
+        @focus="showPreview('clear_followup')"
+        @mouseleave="clearPreview"
+        @blur="clearPreview"
       >
         Clear F/U
       </button>
@@ -207,9 +261,22 @@ function onClearSelection() {
         :disabled="busy || !anyHasChip"
         :title="anyHasChip ? 'Dismiss AI resolution chip' : 'No chips on selected'"
         @click="onDismissChip"
+        @mouseenter="showPreview('dismiss_chip')"
+        @focus="showPreview('dismiss_chip')"
+        @mouseleave="clearPreview"
+        @blur="clearPreview"
       >
         Dismiss chip
       </button>
+    </div>
+
+    <div
+      v-if="previewLabel"
+      class="preview mono"
+      :class="{ 'preview-warn': overCap }"
+      role="status"
+    >
+      {{ previewLabel }}
     </div>
 
     <div v-if="toast" class="toast mono">{{ toast }}</div>
@@ -322,6 +389,21 @@ function onClearSelection() {
 }
 .menu-item:hover {
   background: var(--hover);
+}
+.preview {
+  pointer-events: auto;
+  background: var(--panel);
+  color: var(--ink-2, var(--ink));
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  padding: 4px 12px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  box-shadow: var(--shadow);
+}
+.preview-warn {
+  color: var(--danger, var(--accent));
+  border-color: var(--danger, var(--accent));
 }
 .toast {
   pointer-events: auto;
