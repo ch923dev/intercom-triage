@@ -295,6 +295,36 @@ class DraftReplyResponse(BaseModel):
     playbook_ids: list[int] = Field(default_factory=list)
 
 
+# ── Snippets (roadmap 1.5) ────────────────────────────────────────────────────
+# Short canned replies with `{{variable}}` placeholders. Lighter than playbooks:
+# global (not category-scoped), no AI draft. Variable substitution is performed
+# client-side from the ticket the operator is viewing — the body is stored
+# verbatim with placeholders intact. Durable operator knowledge (invariant #13).
+
+
+class SnippetRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    body: str
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
+    archived_at: UTCDatetime | None
+
+
+class SnippetCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class SnippetUpdate(BaseModel):
+    """PATCH body. Omit a field to leave it unchanged."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    body: str | None = Field(default=None, min_length=1, max_length=4000)
+
+
 # ── Tickets ───────────────────────────────────────────────────────────────────
 
 

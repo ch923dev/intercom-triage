@@ -16,6 +16,7 @@ import type {
   Playbook,
   ProposalsResponse,
   ResolvedSource,
+  Snippet,
   Ticket,
   TicketNote,
 } from '@/types/api';
@@ -300,4 +301,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ticket_id: ticketId }),
     }),
+
+  // ── snippets (roadmap 1.5) ──────────────────────────────────────────────────
+  listSnippets: (opts: { includeArchived?: boolean } = {}): Promise<Snippet[]> => {
+    const qs = new URLSearchParams();
+    if (opts.includeArchived) qs.set('include_archived', 'true');
+    const suffix = qs.toString() ? `?${qs}` : '';
+    return request(`/snippets${suffix}`);
+  },
+
+  createSnippet: (body: { title: string; body: string }): Promise<Snippet> =>
+    request('/snippets', { method: 'POST', body: JSON.stringify(body) }),
+
+  updateSnippet: (id: number, body: { title?: string; body?: string }): Promise<Snippet> =>
+    request(`/snippets/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  archiveSnippet: (id: number): Promise<{ ok: true }> =>
+    request(`/snippets/${id}/archive`, { method: 'POST' }),
+
+  restoreSnippet: (id: number): Promise<{ ok: true }> =>
+    request(`/snippets/${id}/restore`, { method: 'POST' }),
 };

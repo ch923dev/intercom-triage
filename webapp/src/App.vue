@@ -14,6 +14,7 @@ import FollowupBoard from '@/components/FollowupBoard.vue';
 import PlaybooksPage from '@/components/PlaybooksPage.vue';
 import ProposalsPage from '@/components/ProposalsPage.vue';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
+import SnippetsPage from '@/components/SnippetsPage.vue';
 import TicketFlyout from '@/components/TicketFlyout.vue';
 import Topbar from '@/components/Topbar.vue';
 import { useKeyboardTriage } from '@/composables/useKeyboardTriage';
@@ -254,6 +255,7 @@ watch(
       <FollowupBoard v-else-if="view.view === 'followups'" />
       <CategoriesPage v-else-if="view.view === 'categories'" />
       <PlaybooksPage v-else-if="view.view === 'playbooks'" />
+      <SnippetsPage v-else-if="view.view === 'snippets'" />
       <ProposalsPage v-else />
     </template>
 

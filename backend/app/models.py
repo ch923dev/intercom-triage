@@ -469,6 +469,47 @@ class Playbook(Base):
     )
 
 
+class Snippet(Base):
+    """A short, reusable canned reply with `{{variable}}` placeholders.
+
+    Lighter than a `Playbook`: a snippet is a high-frequency short response
+    (e.g. a greeting or a stock answer) the operator drops into a reply, not a
+    durable investigation recipe. Global — not category-scoped. Durable,
+    operator-owned knowledge (invariant #13): never keyed by content signature,
+    survives ingest / re-sync untouched. Variable substitution is performed
+    client-side from the ticket the operator is viewing; the body is stored
+    verbatim with placeholders intact.
+    """
+
+    __tablename__ = "snippets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint("length(title) > 0", name="snippets_title_nonempty"),
+        CheckConstraint("length(body) > 0", name="snippets_body_nonempty"),
+        Index(
+            "ix_snippets_active",
+            "created_at",
+            sqlite_where=text("archived_at IS NULL"),
+            postgresql_where=text("archived_at IS NULL"),
+        ),
+    )
+
+
 class Ticket(Base):
     """An ingested + categorized conversation — the operator's board data.
 
