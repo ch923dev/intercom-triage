@@ -233,3 +233,5 @@ Every requirement maps to at least one task.
 | FR-039 | T132, T134, T139 |
 | FR-040 | T135, T136 |
 | FR-041 | T133, T134, T138, T140 |
+| US-021 | T106 |
+| FR-042 | T106 |
