@@ -252,13 +252,21 @@ function renderCard(ticket, { isResolved = false } = {}) {
       unparkBtn.addEventListener('click', () => void doUnpark(ticket));
       meta.append(unparkBtn);
     } else {
-      // Not parked — show Park control: reason select + default +1d button.
+      // Not parked — compact click-to-reveal Park menu (reason + duration).
       const parkWrap = node('div', 'park-wrap');
+      const parkToggle = node('button', 'action-btn park-btn', '⏸ Park ▾');
+      const menu = node('div', 'park-menu');
+      parkToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.classList.toggle('open');
+      });
+
+      const reasonRow = node('div', 'park-row');
       const reasonSelect = node('select', 'park-reason');
       const reasons = [
-        { value: 'waiting_on_customer', label: 'Waiting on customer' },
-        { value: 'waiting_on_third_party', label: 'Waiting on third party' },
-        { value: 'waiting_internal', label: 'Waiting (internal)' },
+        { value: 'waiting_on_customer', label: 'Customer' },
+        { value: 'waiting_on_third_party', label: 'Third party' },
+        { value: 'waiting_internal', label: 'Internal' },
         { value: 'other', label: 'Other' },
       ];
       for (const r of reasons) {
@@ -267,11 +275,29 @@ function renderCard(ticket, { isResolved = false } = {}) {
         opt.textContent = r.label;
         reasonSelect.append(opt);
       }
-      const parkBtn = node('button', 'action-btn park-btn', '⏸ Park +1d');
-      parkBtn.addEventListener('click', () => {
-        void doPark(ticket, new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), reasonSelect.value);
-      });
-      parkWrap.append(reasonSelect, parkBtn);
+      reasonRow.append(node('span', 'park-lbl', 'reason'), reasonSelect);
+
+      const presetRow = node('div', 'park-row');
+      const presets = [
+        { label: '1h', minutes: 60 },
+        { label: '4h', minutes: 240 },
+        { label: '1d', minutes: 24 * 60 },
+        { label: '3d', minutes: 3 * 24 * 60 },
+      ];
+      for (const p of presets) {
+        const presetBtn = node('button', 'park-preset', `+${p.label}`);
+        presetBtn.addEventListener('click', () => {
+          void doPark(
+            ticket,
+            new Date(Date.now() + p.minutes * 60 * 1000).toISOString(),
+            reasonSelect.value,
+          );
+        });
+        presetRow.append(presetBtn);
+      }
+
+      menu.append(node('span', 'park-menu-title', 'Park until'), reasonRow, presetRow);
+      parkWrap.append(parkToggle, menu);
       meta.append(parkWrap);
     }
 
