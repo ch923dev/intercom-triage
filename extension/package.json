@@ -1,0 +1,10 @@
+{
+  "name": "intercom-triage-extension",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Chrome MV3 extension (plain ES modules, no build step). package.json exists ONLY to (a) mark .js files as ESM for Node's test runner and (b) expose `npm test` -> `node --test`. It adds NO dependencies and NO bundler. Chrome ignores it; MV3 module type comes from manifest.json / <script type=module>.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

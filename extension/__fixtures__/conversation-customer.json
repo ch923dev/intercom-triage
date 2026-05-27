@@ -1,0 +1,57 @@
+{
+  "_comment": "SYNTHESIZED fixture, not a real capture. Replace with a scrubbed real payload when available. Covers renderable_type 1 (Messenger inbound) and 12 (email inbound) — both customer-visible, go to parts[] with is_admin=false.",
+  "id": "1001",
+  "title": "Cannot reset my password",
+  "state": "open",
+  "priority": false,
+  "created_at": 1716800000,
+  "last_updated": 1716800600,
+  "user_summary": {
+    "id": "internal-rec-aaa",
+    "user_id": "user-ext-123",
+    "name": "Dana Customer",
+    "email": "dana@example.com",
+    "role": "user",
+    "timezone": "America/New_York",
+    "phone": "+1-555-0100",
+    "geoip_data": {
+      "city_name": "New York",
+      "region_code": "NY",
+      "country_name": "United States",
+      "timezone": "America/New_York"
+    },
+    "first_company": { "name": "Acme Co" }
+  },
+  "renderable_parts": [
+    {
+      "renderable_type": 1,
+      "created_at": 1716800000,
+      "renderable_data": {
+        "user_summary": {
+          "user_id": "user-ext-123",
+          "name": "Dana Customer",
+          "email": "dana@example.com",
+          "role": "user"
+        },
+        "blocks": [
+          { "type": "paragraph", "text": "Hi, I can't reset my password." }
+        ]
+      }
+    },
+    {
+      "renderable_type": 12,
+      "created_at": 1716800300,
+      "renderable_data": {
+        "user_summary": {
+          "user_id": "user-ext-123",
+          "name": "Dana Customer",
+          "email": "dana@example.com",
+          "role": "user"
+        },
+        "blocks": [
+          { "type": "html", "content": "<p>Following up by email &mdash; still stuck.</p>" }
+        ]
+      }
+    }
+  ]
+}
