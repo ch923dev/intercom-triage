@@ -229,6 +229,11 @@ async def _upsert_ticket(
             proposal_id=result.proposal_id,
             summary=result.summary,
             ai_confidence=result.confidence,
+            # Roadmap 0.2 — triage facets (no extra AI call; carried via the
+            # same CategorizationResult, fallback gets neutral defaults).
+            ai_priority=result.ai_priority,
+            ai_sentiment=result.ai_sentiment,
+            ai_labels=result.ai_labels,
             ingested_at=now,
         )
         if hydrated.state == "closed":
@@ -260,6 +265,10 @@ async def _upsert_ticket(
     if not row.summary_user_edited:
         row.summary = result.summary
     row.ai_confidence = result.confidence
+    # Roadmap 0.2 — refresh triage facets on every re-sync (not operator-editable).
+    row.ai_priority = result.ai_priority
+    row.ai_sentiment = result.ai_sentiment
+    row.ai_labels = result.ai_labels
     row.ingested_at = now
 
 
@@ -571,6 +580,9 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
                 ai_resolution_confidence=verdict_confidence,
                 ai_resolution_reason=verdict_reason,
                 resolution_chip_state=chip,  # type: ignore[arg-type]
+                ai_priority=row.ai_priority,  # type: ignore[arg-type]
+                ai_sentiment=row.ai_sentiment,  # type: ignore[arg-type]
+                ai_labels=list(row.ai_labels or []),
             ),
         )
 

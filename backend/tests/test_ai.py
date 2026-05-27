@@ -283,6 +283,115 @@ async def test_categorize_sends_strict_schema(session: AsyncSession) -> None:
     assert fake.last_response_format == CATEGORIZATION_RESPONSE_FORMAT
 
 
+# ── 0.2 — priority / sentiment / multi-label triage facets ─────────────────────
+
+
+def test_parse_triage_facets() -> None:
+    """parse_response reads priority/sentiment/labels from the model JSON."""
+    raw = (
+        '{"assignment":"existing","category_id":2,"subject":"x","summary":"y",'
+        '"confidence":0.8,"priority":"urgent","sentiment":"negative",'
+        '"labels":["refund","billing"]}'
+    )
+    p = parse_response(raw)
+    assert p.priority == "urgent"
+    assert p.sentiment == "negative"
+    assert p.labels == ["refund", "billing"]
+
+
+def test_parse_triage_defaults_when_missing() -> None:
+    """Missing facets degrade to neutral defaults without failing the parse."""
+    raw = '{"assignment":"existing","category_id":1,"subject":"x","summary":"y","confidence":0.5}'
+    p = parse_response(raw)
+    assert p.priority == "normal"
+    assert p.sentiment == "neutral"
+    assert p.labels == []
+
+
+def test_parse_triage_clamps_invalid_enums() -> None:
+    """Out-of-set priority/sentiment fall back to the neutral default."""
+    raw = (
+        '{"assignment":"existing","category_id":1,"subject":"x","summary":"y",'
+        '"confidence":0.5,"priority":"catastrophic","sentiment":"furious"}'
+    )
+    p = parse_response(raw)
+    assert p.priority == "normal"
+    assert p.sentiment == "neutral"
+
+
+def test_parse_triage_labels_dedupe_and_cap() -> None:
+    """Labels are trimmed, '#'-stripped, deduped (case-insensitive), capped at 3."""
+    raw = (
+        '{"assignment":"existing","category_id":1,"subject":"x","summary":"y",'
+        '"confidence":0.5,"labels":["#Refund"," refund ","login","mobile","api"]}'
+    )
+    p = parse_response(raw)
+    assert p.labels == ["Refund", "login", "mobile"]
+
+
+def test_fallback_result_has_neutral_triage_facets() -> None:
+    from datetime import datetime
+
+    from app.ai.pipeline import _fallback
+    from app.schemas import HydratedTicket, TicketAuthorSchema
+
+    hydrated = HydratedTicket(
+        id="x",
+        title="t",
+        state="open",
+        priority=None,
+        created_at=datetime(2026, 5, 23),
+        updated_at=datetime(2026, 5, 23),
+        author=TicketAuthorSchema(),
+        url=None,
+        parts=[],
+    )
+    result = _fallback(hydrated, fallback_category_id=1)
+    assert result.ai_priority == "normal"
+    assert result.ai_sentiment == "neutral"
+    assert result.ai_labels == []
+
+
+def test_categorization_schema_includes_triage_fields() -> None:
+    """The strict json_schema requires priority/sentiment/labels on every branch."""
+    js = CATEGORIZATION_RESPONSE_FORMAT["json_schema"]
+    for branch in js["schema"]["oneOf"]:
+        props = branch["properties"]
+        assert props["priority"]["enum"] == ["low", "normal", "high", "urgent"]
+        assert props["sentiment"]["enum"] == ["negative", "neutral", "positive"]
+        assert props["labels"]["type"] == "array"
+        for facet in ("priority", "sentiment", "labels"):
+            assert facet in branch["required"]
+
+
+@pytest.mark.asyncio
+async def test_resolver_propagates_triage_facets(session: AsyncSession) -> None:
+    """resolve() carries priority/sentiment/labels into CategorizationResult."""
+    from app.ai.pipeline import ParsedAssignment, _ResolverState, resolve
+
+    fb = await _fallback_id(session)
+    state = _ResolverState(
+        active_category_ids={fb, 99},
+        pending_proposal_ids=set(),
+        pending_by_signature={},
+        rejected_signatures=set(),
+    )
+    parsed = ParsedAssignment(
+        "existing",
+        "summary",
+        0.8,
+        "subj",
+        category_id=99,
+        priority="high",
+        sentiment="negative",
+        labels=["refund"],
+    )
+    result = await resolve(parsed, session=session, state=state)
+    assert result.ai_priority == "high"
+    assert result.ai_sentiment == "negative"
+    assert result.ai_labels == ["refund"]
+
+
 @pytest.mark.asyncio
 async def test_categorize_nonconforming_response_falls_back(session: AsyncSession) -> None:
     """A schema-violating response (valid JSON, unknown assignment) degrades that

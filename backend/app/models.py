@@ -148,6 +148,17 @@ class AICacheEntry(Base):
     ai_resolution_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_resolution_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     ai_resolution_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Roadmap 0.2 — triage facets cached alongside the categorization result so a
+    # cache hit re-populates the ticket row without a fresh AI call. Nullable for
+    # legacy rows; `ai_labels` is a JSON string array (defaults to []).
+    ai_priority: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_sentiment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_labels: Mapped[list[str]] = mapped_column(
+        JSON,
+        default=list,
+        server_default=text("'[]'"),
+        nullable=False,
+    )
 
     __table_args__ = (
         # XOR: exactly one of category_id, proposal_id is set.
@@ -178,6 +189,15 @@ class AICacheEntry(Base):
         CheckConstraint(
             "ai_resolution_reason IS NULL OR length(ai_resolution_reason) <= 120",
             name="ai_cache_resolution_reason_len_check",
+        ),
+        # Roadmap 0.2 — triage enums (nullable; pre-0.2 cache rows carry NULL).
+        CheckConstraint(
+            "ai_priority IS NULL OR ai_priority IN ('low','normal','high','urgent')",
+            name="ai_cache_ai_priority_check",
+        ),
+        CheckConstraint(
+            "ai_sentiment IS NULL OR ai_sentiment IN ('negative','neutral','positive')",
+            name="ai_cache_ai_sentiment_check",
         ),
     )
 
@@ -484,6 +504,18 @@ class Ticket(Base):
     )
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
     ai_confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    # Roadmap 0.2 — triage facets from the SAME categorization call (no extra AI
+    # call). Nullable for pre-0.2 rows; ingest writes 'normal'/'neutral'/[] on a
+    # fallback. `ai_labels` stores secondary multi-label tags as a JSON string
+    # array (simplest durable option — no join table for a single-operator tool).
+    ai_priority: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_sentiment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_labels: Mapped[list[str]] = mapped_column(
+        JSON,
+        default=list,
+        server_default=text("'[]'"),
+        nullable=False,
+    )
     # When True, the operator manually edited the field via PATCH /tickets/{id}.
     # The ingest pipeline preserves edited values across re-syncs.
     title_user_edited: Mapped[bool] = mapped_column(
@@ -524,6 +556,15 @@ class Ticket(Base):
             "resolved_source IS NULL OR resolved_source "
             "IN ('manual','intercom_closed','non_actionable','ai_resolved')",
             name="tickets_resolved_source_check",
+        ),
+        # Roadmap 0.2 — triage enums (nullable; pre-0.2 rows carry NULL).
+        CheckConstraint(
+            "ai_priority IS NULL OR ai_priority IN ('low','normal','high','urgent')",
+            name="tickets_ai_priority_check",
+        ),
+        CheckConstraint(
+            "ai_sentiment IS NULL OR ai_sentiment IN ('negative','neutral','positive')",
+            name="tickets_ai_sentiment_check",
         ),
     )
 

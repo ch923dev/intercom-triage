@@ -34,6 +34,9 @@ A) Assign to an EXISTING active category:
      "subject":               "<see SUBJECT rules>",
      "summary":               "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":            <float 0..1>,
+     "priority":              "low" | "normal" | "high" | "urgent",
+     "sentiment":             "negative" | "neutral" | "positive",
+     "labels":                ["<secondary tag>", ...],
      "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
      "resolution_reason":     "<see RESOLUTION rules>"
@@ -46,6 +49,9 @@ B) Reuse an already-PENDING proposal:
      "subject":               "<see SUBJECT rules>",
      "summary":               "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":            <float 0..1>,
+     "priority":              "low" | "normal" | "high" | "urgent",
+     "sentiment":             "negative" | "neutral" | "positive",
+     "labels":                ["<secondary tag>", ...],
      "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
      "resolution_reason":     "<see RESOLUTION rules>"
@@ -60,6 +66,9 @@ C) Propose a NEW category (only when no existing category fits with reasonable
      "subject":               "<see SUBJECT rules>",
      "summary":               "<=600 chars, 2-3 sentences (see SUMMARY rules)",
      "confidence":            <float 0..1>,
+     "priority":              "low" | "normal" | "high" | "urgent",
+     "sentiment":             "negative" | "neutral" | "positive",
+     "labels":                ["<secondary tag>", ...],
      "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
      "resolution_reason":     "<see RESOLUTION rules>"
@@ -102,6 +111,20 @@ RESOLUTION rules (applies to every response):
     "resolution_confidence": <float 0..1>,
     "resolution_reason":     "<one short clause, <=120 chars, plain text>"
 
+TRIAGE rules (applies to every response; add these THREE fields to EVERY object):
+- "priority": how urgently the operator should pick this up.
+    "urgent"  — outage, data loss, security incident, blocking many users, or an
+                angry customer threatening churn now.
+    "high"    — broken for this customer, time-sensitive, or clearly frustrated.
+    "normal"  — a routine question, request, or report (the default).
+    "low"     — FYI, nice-to-have, or no real time pressure.
+- "sentiment": the customer's emotional tone in their most recent messages.
+    "negative" | "neutral" | "positive". Default "neutral" when tone is unclear.
+- "labels": 0 to 3 short secondary tags (lowercase, <=24 chars each) that
+    describe cross-cutting facets beyond the single category — e.g.
+    "refund", "login", "mobile", "api", "billing". Plain strings, no '#'.
+    Return an empty array when nothing extra applies.
+
 Rules:
 - Prefer existing categories. Propose new only when the existing set genuinely
   cannot accommodate the ticket.
@@ -123,11 +146,21 @@ Rules:
 # refusals / non-supporting endpoints (see pipeline.py).
 
 _RESOLUTION_VERDICT_VALUES = ["resolved", "non_actionable", "not_resolved"]
+# Roadmap 0.2 — triage enums on the SAME categorization call (no extra AI call).
+_PRIORITY_VALUES = ["low", "normal", "high", "urgent"]
+_SENTIMENT_VALUES = ["negative", "neutral", "positive"]
 
 _SHARED_PROPERTIES: dict[str, Any] = {
     "subject": {"type": "string", "description": "<=80 char scannable headline."},
     "summary": {"type": "string", "description": "2-3 sentences, <=600 chars."},
     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "priority": {"type": "string", "enum": _PRIORITY_VALUES},
+    "sentiment": {"type": "string", "enum": _SENTIMENT_VALUES},
+    "labels": {
+        "type": "array",
+        "items": {"type": "string", "maxLength": 24},
+        "description": "0-3 secondary tags beyond the single category.",
+    },
     "resolution_verdict": {"type": "string", "enum": _RESOLUTION_VERDICT_VALUES},
     "resolution_confidence": {"type": "number", "minimum": 0, "maximum": 1},
     "resolution_reason": {"type": "string", "description": "One clause, <=120 chars."},
@@ -136,6 +169,9 @@ _SHARED_REQUIRED = [
     "subject",
     "summary",
     "confidence",
+    "priority",
+    "sentiment",
+    "labels",
     "resolution_verdict",
     "resolution_confidence",
     "resolution_reason",

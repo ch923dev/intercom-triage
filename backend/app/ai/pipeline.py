@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from sqlalchemy import select
@@ -21,6 +21,16 @@ from app.models import Category, CategoryProposal, RejectedProposalSignature
 from app.schemas import HydratedTicket
 
 AssignmentKind = Literal["existing", "pending_proposal", "new_proposal"]
+
+# Roadmap 0.2 — triage facets emitted by the SAME categorization call.
+Priority = Literal["low", "normal", "high", "urgent"]
+Sentiment = Literal["negative", "neutral", "positive"]
+_PRIORITY_VALUES: frozenset[str] = frozenset(("low", "normal", "high", "urgent"))
+_SENTIMENT_VALUES: frozenset[str] = frozenset(("negative", "neutral", "positive"))
+# Defaults applied to a fallback result and to any malformed/missing facet — a
+# neutral baseline so a card never renders an empty / misleading badge.
+_DEFAULT_PRIORITY: Priority = "normal"
+_DEFAULT_SENTIMENT: Sentiment = "neutral"
 
 _FENCE_OPEN_RE = re.compile(r"^```[a-zA-Z]*\n?")
 _FENCE_CLOSE_RE = re.compile(r"\n?```$")
@@ -39,6 +49,10 @@ class ParsedAssignment:
     resolution_verdict: Literal["resolved", "non_actionable", "not_resolved"] | None = None
     resolution_confidence: float | None = None
     resolution_reason: str | None = None
+    # Roadmap 0.2 — priority/sentiment/multi-label triage facets.
+    priority: Priority = _DEFAULT_PRIORITY
+    sentiment: Sentiment = _DEFAULT_SENTIMENT
+    labels: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -57,6 +71,11 @@ class CategorizationResult:
     ai_resolution_verdict: Literal["resolved", "non_actionable", "not_resolved"] | None = None
     ai_resolution_confidence: float | None = None
     ai_resolution_reason: str | None = None
+    # Roadmap 0.2 — triage facets persisted on the ticket row + cache. A
+    # fallback result carries the neutral defaults (normal / neutral / []).
+    ai_priority: Priority = _DEFAULT_PRIORITY
+    ai_sentiment: Sentiment = _DEFAULT_SENTIMENT
+    ai_labels: list[str] = field(default_factory=list)
 
 
 # ── T014 — parser ─────────────────────────────────────────────────────────────
@@ -122,6 +141,38 @@ def _parse_resolution(
     return typed_verdict, confidence_f, reason
 
 
+def _parse_triage(obj: dict[str, Any]) -> tuple[Priority, Sentiment, list[str]]:
+    """Read the roadmap-0.2 triage facets, falling back to neutral defaults.
+
+    Tolerant on purpose: a missing or out-of-enum priority/sentiment degrades
+    to the neutral default rather than failing the whole parse (the assignment
+    discriminator + summary are what gate the fallback path). `labels` is
+    coerced to a clean list of <=3 short, non-empty strings.
+    """
+    priority_raw = obj.get("priority")
+    priority: Priority = priority_raw if priority_raw in _PRIORITY_VALUES else _DEFAULT_PRIORITY
+
+    sentiment_raw = obj.get("sentiment")
+    sentiment: Sentiment = (
+        sentiment_raw if sentiment_raw in _SENTIMENT_VALUES else _DEFAULT_SENTIMENT
+    )
+
+    labels_raw = obj.get("labels")
+    labels: list[str] = []
+    if isinstance(labels_raw, list):
+        seen: set[str] = set()
+        for item in labels_raw:
+            if not isinstance(item, str):
+                continue
+            tag = item.strip().lstrip("#").strip()[:24]
+            if tag and tag.lower() not in seen:
+                seen.add(tag.lower())
+                labels.append(tag)
+            if len(labels) >= 3:
+                break
+    return priority, sentiment, labels
+
+
 def parse_response(raw: str) -> ParsedAssignment:
     """Parse a model response into a typed assignment. Raises `ValueError` on any
     malformed shape — the caller treats that as a fallback trigger (FR-007)."""
@@ -133,6 +184,7 @@ def parse_response(raw: str) -> ParsedAssignment:
     subject = str(obj.get("subject") or "").strip()[:80]
     confidence = _clamp_confidence(obj.get("confidence"))
     verdict, res_conf, res_reason = _parse_resolution(obj)
+    priority, sentiment, labels = _parse_triage(obj)
 
     if assignment == "existing":
         category_id = _coerce_int(obj.get("category_id"))
@@ -147,6 +199,9 @@ def parse_response(raw: str) -> ParsedAssignment:
             resolution_verdict=verdict,
             resolution_confidence=res_conf,
             resolution_reason=res_reason,
+            priority=priority,
+            sentiment=sentiment,
+            labels=labels,
         )
 
     if assignment == "pending_proposal":
@@ -162,6 +217,9 @@ def parse_response(raw: str) -> ParsedAssignment:
             resolution_verdict=verdict,
             resolution_confidence=res_conf,
             resolution_reason=res_reason,
+            priority=priority,
+            sentiment=sentiment,
+            labels=labels,
         )
 
     if assignment == "new_proposal":
@@ -179,6 +237,9 @@ def parse_response(raw: str) -> ParsedAssignment:
             resolution_verdict=verdict,
             resolution_confidence=res_conf,
             resolution_reason=res_reason,
+            priority=priority,
+            sentiment=sentiment,
+            labels=labels,
         )
 
     raise ValueError(f"unknown assignment kind: {assignment!r}")
@@ -218,6 +279,9 @@ async def resolve(
             ai_resolution_verdict=parsed.resolution_verdict,
             ai_resolution_confidence=parsed.resolution_confidence,
             ai_resolution_reason=parsed.resolution_reason,
+            ai_priority=parsed.priority,
+            ai_sentiment=parsed.sentiment,
+            ai_labels=parsed.labels,
         )
 
     if parsed.kind == "pending_proposal":
@@ -232,6 +296,9 @@ async def resolve(
             ai_resolution_verdict=parsed.resolution_verdict,
             ai_resolution_confidence=parsed.resolution_confidence,
             ai_resolution_reason=parsed.resolution_reason,
+            ai_priority=parsed.priority,
+            ai_sentiment=parsed.sentiment,
+            ai_labels=parsed.labels,
         )
 
     # new_proposal
@@ -252,6 +319,9 @@ async def resolve(
             ai_resolution_verdict=parsed.resolution_verdict,
             ai_resolution_confidence=parsed.resolution_confidence,
             ai_resolution_reason=parsed.resolution_reason,
+            ai_priority=parsed.priority,
+            ai_sentiment=parsed.sentiment,
+            ai_labels=parsed.labels,
         )
 
     proposal = CategoryProposal(
@@ -274,6 +344,9 @@ async def resolve(
         ai_resolution_verdict=parsed.resolution_verdict,
         ai_resolution_confidence=parsed.resolution_confidence,
         ai_resolution_reason=parsed.resolution_reason,
+        ai_priority=parsed.priority,
+        ai_sentiment=parsed.sentiment,
+        ai_labels=parsed.labels,
     )
 
 
@@ -281,7 +354,12 @@ async def resolve(
 
 
 def _fallback(ticket: HydratedTicket, fallback_category_id: int) -> CategorizationResult:
-    """FR-007 — degrade to the fallback category, title summary, zero confidence."""
+    """FR-007 — degrade to the fallback category, title summary, zero confidence.
+
+    Triage facets (ai_priority / ai_sentiment / ai_labels) fall to the dataclass
+    defaults (normal / neutral / []) — a neutral baseline, never cached (see
+    `ingest_tickets`).
+    """
     return CategorizationResult(
         category_id=fallback_category_id,
         proposal_id=None,

@@ -47,6 +47,9 @@ async def get_cached(
         ai_resolution_verdict=row.ai_resolution_verdict,  # type: ignore[arg-type]
         ai_resolution_confidence=row.ai_resolution_confidence,
         ai_resolution_reason=row.ai_resolution_reason,
+        ai_priority=row.ai_priority or "normal",  # type: ignore[arg-type]
+        ai_sentiment=row.ai_sentiment or "neutral",  # type: ignore[arg-type]
+        ai_labels=list(row.ai_labels or []),
     )
 
 
@@ -73,6 +76,9 @@ async def set_cached(
                 ai_resolution_verdict=result.ai_resolution_verdict,
                 ai_resolution_confidence=result.ai_resolution_confidence,
                 ai_resolution_reason=result.ai_resolution_reason,
+                ai_priority=result.ai_priority,
+                ai_sentiment=result.ai_sentiment,
+                ai_labels=result.ai_labels,
             ),
         )
         return
@@ -85,6 +91,9 @@ async def set_cached(
     row.ai_resolution_verdict = result.ai_resolution_verdict
     row.ai_resolution_confidence = result.ai_resolution_confidence
     row.ai_resolution_reason = result.ai_resolution_reason
+    row.ai_priority = result.ai_priority
+    row.ai_sentiment = result.ai_sentiment
+    row.ai_labels = result.ai_labels
 
 
 async def sweep_expired(session: AsyncSession, ttl_seconds: int) -> int:

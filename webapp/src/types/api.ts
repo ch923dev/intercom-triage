@@ -20,6 +20,9 @@ export type ProposalStatus = 'pending' | 'approved' | 'merged' | 'rejected';
 export type ResolvedSource = 'manual' | 'intercom_closed' | 'non_actionable' | 'ai_resolved';
 export type ResolutionVerdict = 'resolved' | 'not_resolved' | 'non_actionable';
 export type ResolutionChipState = 'ai_resolved' | 'ai_reopened' | 'new_reply';
+// Roadmap 0.2 — triage facets from the categorization call.
+export type AIPriority = 'low' | 'normal' | 'high' | 'urgent';
+export type AISentiment = 'negative' | 'neutral' | 'positive';
 
 export interface CategoryProposal {
   id: number;
@@ -152,6 +155,12 @@ export interface Ticket {
   ai_resolution_confidence: number | null;
   ai_resolution_reason: string | null;
   resolution_chip_state: ResolutionChipState | null;
+  /** Roadmap 0.2 — AI-assessed urgency. null on pre-0.2 rows. */
+  ai_priority: AIPriority | null;
+  /** Roadmap 0.2 — AI-assessed customer sentiment. null on pre-0.2 rows. */
+  ai_sentiment: AISentiment | null;
+  /** Roadmap 0.2 — secondary multi-label tags beyond the single category. */
+  ai_labels: string[];
 }
 
 // ── Bulk actions (plan §8d) ──────────────────────────────────────────────────
