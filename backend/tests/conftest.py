@@ -5,7 +5,8 @@ References: tasks.md T005–T028.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import hashlib
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 import pytest_asyncio
@@ -13,10 +14,50 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai import embeddings
 from app.config import AppConfig, get_config
 from app.db import make_engine, make_session_factory
 from app.main import create_app
 from app.models import init_db
+
+
+class FakeEncoder:
+    """Deterministic, fully-offline stand-in for the sentence-transformers model.
+
+    Records every text it was asked to encode (so tests can assert which content
+    was/wasn't embedded — invariant #4) and returns a 384-dim vector derived from
+    a hash of the text. Identical text → identical vector (distance ~0 on a
+    nearest-neighbour query); the real ~80 MB model never loads.
+    """
+
+    def __init__(self) -> None:
+        self.encoded: list[str] = []
+
+    def encode_one(self, text: str) -> list[float]:
+        self.encoded.append(text)
+        # Expand a stable digest into EMBEDDING_DIM floats in [-1, 1].
+        out: list[float] = []
+        seed = 0
+        while len(out) < embeddings.EMBEDDING_DIM:
+            digest = hashlib.sha256(f"{seed}:{text}".encode()).digest()
+            for byte in digest:
+                out.append((byte / 127.5) - 1.0)
+                if len(out) >= embeddings.EMBEDDING_DIM:
+                    break
+            seed += 1
+        return out
+
+
+@pytest.fixture(autouse=True)
+def fake_encoder() -> Iterator[FakeEncoder]:
+    """Inject the deterministic fake encoder for EVERY test so the suite stays
+    offline and fast — the real model is never downloaded or loaded."""
+    encoder = FakeEncoder()
+    embeddings.set_encoder(encoder)
+    try:
+        yield encoder
+    finally:
+        embeddings.set_encoder(None)
 
 
 @pytest.fixture

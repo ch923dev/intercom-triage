@@ -19,6 +19,15 @@ alembic>=1.13,<2
 # Image thumbnailing for note attachments
 Pillow==12.2.0
 
+# Local embedding layer (roadmap 2.4) — fully offline, CPU-only.
+# sqlite-vec is PRE-v1 with breaking changes between releases: pin EXACT.
+sqlite-vec==0.1.9
+# sentence-transformers loads all-MiniLM-L6-v2 (384-dim) on CPU. torch is its
+# heavy transitive dep — pin the CPU build explicitly for a reproducible
+# install. (No CUDA: the single-operator local tool has no GPU assumption.)
+sentence-transformers==5.5.1
+torch==2.8.0
+
 # Multipart form parsing for /attachments uploads
 python-multipart==0.0.29
 
