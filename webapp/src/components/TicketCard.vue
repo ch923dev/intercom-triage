@@ -52,6 +52,7 @@ async function onResolveClick(e: Event) {
 }
 
 const parkOpen = ref(false);
+const parkBtnEl = ref<HTMLElement | null>(null);
 function onParkToggle(e: Event) {
   e.stopPropagation();
   parkOpen.value = !parkOpen.value;
@@ -152,8 +153,16 @@ const aging = computed(() =>
       <Mono>{{ updatedAgo }}</Mono>
       <template v-if="props.ticket.resolved_at === null">
         <div v-if="props.ticket.parked_at === null" class="park-wrap">
-          <button type="button" class="resolve-icon" title="Park ▾" @click="onParkToggle">⏸</button>
-          <ParkMenu v-if="parkOpen" class="park-menu-pop" @park="onPark" />
+          <button
+            ref="parkBtnEl"
+            type="button"
+            class="resolve-icon"
+            title="Park ▾"
+            @click="onParkToggle"
+          >
+            ⏸
+          </button>
+          <ParkMenu v-if="parkOpen" :anchor="parkBtnEl" @park="onPark" @close="parkOpen = false" />
         </div>
         <button v-else type="button" class="resolve-icon" title="Unpark" @click="onUnpark">
           ▶
@@ -303,12 +312,6 @@ header {
 .park-wrap {
   position: relative;
   display: inline-flex;
-}
-.park-menu-pop {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
 }
 .card.dense header {
   margin-bottom: 4px;

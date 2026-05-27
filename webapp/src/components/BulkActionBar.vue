@@ -23,6 +23,7 @@ const followups = useFollowupsStore();
 const moveOpen = ref(false);
 const followupOpen = ref(false);
 const parkOpen = ref(false);
+const parkBtnEl = ref<HTMLElement | null>(null);
 const busy = ref(false);
 const toast = ref<string | null>(null);
 let toastTimer = 0;
@@ -219,6 +220,7 @@ function onClearSelection() {
 
       <div class="dropdown">
         <button
+          ref="parkBtnEl"
           type="button"
           :disabled="busy || !noneResolved || !noneParked"
           :title="noneResolved ? 'Park selected' : 'Some selected are already resolved'"
@@ -226,9 +228,7 @@ function onClearSelection() {
         >
           Park ▾
         </button>
-        <div v-if="parkOpen" class="menu" role="menu">
-          <ParkMenu @park="onPark" />
-        </div>
+        <ParkMenu v-if="parkOpen" :anchor="parkBtnEl" @park="onPark" @close="parkOpen = false" />
       </div>
 
       <button

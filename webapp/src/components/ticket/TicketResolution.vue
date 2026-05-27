@@ -48,6 +48,7 @@ const PARK_REASON_LABELS: Record<ParkedReason, string> = {
 };
 
 const parkOpen = ref(false);
+const parkBtnEl = ref<HTMLElement | null>(null);
 
 const isReady = computed(
   () => !!ticket.parked_until && Date.parse(ticket.parked_until) <= Date.now(),
@@ -89,10 +90,15 @@ async function onUnpark() {
         <button class="chip" @click="onResolve">Mark resolved</button>
         <button class="chip" @click="onMarkNonActionable">Mark non-actionable</button>
         <div class="park-anchor">
-          <button class="chip" :class="{ active: parkOpen }" @click="parkOpen = !parkOpen">
+          <button
+            ref="parkBtnEl"
+            class="chip"
+            :class="{ active: parkOpen }"
+            @click="parkOpen = !parkOpen"
+          >
             Park ▾
           </button>
-          <ParkMenu v-if="parkOpen" class="park-pop" @park="onPark" />
+          <ParkMenu v-if="parkOpen" :anchor="parkBtnEl" @park="onPark" @close="parkOpen = false" />
         </div>
       </template>
     </div>
@@ -144,12 +150,6 @@ async function onUnpark() {
 .park-anchor {
   position: relative;
   display: inline-flex;
-}
-.park-pop {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
 }
 .chip.active {
   border-color: var(--accent);
