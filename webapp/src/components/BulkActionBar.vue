@@ -7,11 +7,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import CatDot from './CatDot.vue';
+import ParkMenu from './ParkMenu.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
 import { useSelectionStore } from '@/stores/selection';
 import { useTicketsStore } from '@/stores/tickets';
 import { type BulkAction, bulkPreview, bulkPreviewLabel, MAX_BULK_IDS } from '@/utils/bulkPreview';
+import type { ParkedReason } from '@/types/api';
 
 const selection = useSelectionStore();
 const tickets = useTicketsStore();
@@ -20,6 +22,7 @@ const followups = useFollowupsStore();
 
 const moveOpen = ref(false);
 const followupOpen = ref(false);
+const parkOpen = ref(false);
 const busy = ref(false);
 const toast = ref<string | null>(null);
 let toastTimer = 0;
@@ -41,6 +44,11 @@ const noneResolved = computed(
   () =>
     selectedTickets.value.length > 0 && selectedTickets.value.every((t) => t.resolved_at === null),
 );
+const noneParked = computed(
+  () =>
+    selectedTickets.value.length > 0 && selectedTickets.value.every((t) => t.parked_at === null),
+);
+const anyParked = computed(() => selectedTickets.value.some((t) => t.parked_at !== null));
 const anyHasChip = computed(() =>
   selectedTickets.value.some((t) => t.resolution_chip_state !== null),
 );
@@ -145,6 +153,13 @@ function onClearFollowup() {
 function onDismissChip() {
   void runBulk(() => tickets.bulkDismissChip(selection.asArray()), 'chips dismissed');
 }
+function onPark(untilAt: string, reason: ParkedReason) {
+  parkOpen.value = false;
+  void runBulk(() => tickets.bulkPark(selection.asArray(), untilAt, reason), 'parked');
+}
+function onUnpark() {
+  void runBulk(() => tickets.bulkUnpark(selection.asArray()), 'unparked');
+}
 function onClearSelection() {
   selection.clear();
 }
@@ -198,6 +213,31 @@ function onClearSelection() {
         @blur="clearPreview"
       >
         Reopen
+      </button>
+
+      <div class="divider" />
+
+      <div class="dropdown">
+        <button
+          type="button"
+          :disabled="busy || !noneResolved || !noneParked"
+          :title="noneResolved ? 'Park selected' : 'Some selected are already resolved'"
+          @click="parkOpen = !parkOpen"
+        >
+          Park ▾
+        </button>
+        <div v-if="parkOpen" class="menu" role="menu">
+          <ParkMenu @park="onPark" />
+        </div>
+      </div>
+
+      <button
+        type="button"
+        :disabled="busy || !anyParked"
+        :title="anyParked ? 'Unpark selected' : 'None of the selected are parked'"
+        @click="onUnpark"
+      >
+        Unpark
       </button>
 
       <div class="divider" />

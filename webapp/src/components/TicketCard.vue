@@ -2,8 +2,9 @@
      Renders id mono · ago, title (line-clamped), summary, meta row, optional
      follow-up + notes row. -->
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import Mono from './Mono.vue';
+import ParkMenu from './ParkMenu.vue';
 import ResolutionChip from './ResolutionChip.vue';
 import { useFollowupsStore } from '@/stores/followups';
 import { useNoteEntriesStore } from '@/stores/noteEntries';
@@ -13,7 +14,7 @@ import { useTweaksStore } from '@/stores/tweaks';
 import { agingTier } from '@/utils/aging';
 import { REVIEW_CONFIDENCE_THRESHOLD } from '@/utils/review';
 import { formatAgoFromDate } from '@/utils/time';
-import type { Ticket } from '@/types/api';
+import type { ParkedReason, Ticket } from '@/types/api';
 
 interface Props {
   ticket: Ticket;
@@ -48,6 +49,20 @@ async function onResolveClick(e: Event) {
   } else {
     await tickets.markResolved(props.ticket.id);
   }
+}
+
+const parkOpen = ref(false);
+function onParkToggle(e: Event) {
+  e.stopPropagation();
+  parkOpen.value = !parkOpen.value;
+}
+function onPark(untilAt: string, reason: ParkedReason) {
+  parkOpen.value = false;
+  void tickets.parkTicket(props.ticket.id, untilAt, reason);
+}
+function onUnpark(e: Event) {
+  e.stopPropagation();
+  void tickets.unparkTicket(props.ticket.id);
 }
 
 const dense = computed(() => tweaks.density === 'compact');
@@ -135,6 +150,15 @@ const aging = computed(() =>
     <header>
       <Mono>{{ props.ticket.id }}</Mono>
       <Mono>{{ updatedAgo }}</Mono>
+      <template v-if="props.ticket.resolved_at === null">
+        <div v-if="props.ticket.parked_at === null" class="park-wrap">
+          <button type="button" class="resolve-icon" title="Park ▾" @click="onParkToggle">⏸</button>
+          <ParkMenu v-if="parkOpen" class="park-menu-pop" @park="onPark" />
+        </div>
+        <button v-else type="button" class="resolve-icon" title="Unpark" @click="onUnpark">
+          ▶
+        </button>
+      </template>
       <button
         class="resolve-icon"
         :title="props.ticket.resolved_at ? 'Reopen' : 'Mark resolved'"
@@ -183,10 +207,14 @@ const aging = computed(() =>
         awaitingCustomer ||
         isClosed ||
         labels.length ||
-        props.ticket.resolution_chip_state
+        props.ticket.resolution_chip_state ||
+        props.ticket.parked_at !== null
       "
       class="tags"
     >
+      <span v-if="props.ticket.parked_at !== null" class="tag parked">
+        ⏸ {{ props.ticket.parked_reason ?? 'parked' }}
+      </span>
       <span v-if="isClosed" class="tag closed">Closed</span>
       <span v-for="label in labels" :key="label" class="tag label">{{ label }}</span>
       <span v-if="awaitingCustomer" class="tag awaiting">Awaiting customer</span>
@@ -271,6 +299,16 @@ header {
 .resolve-icon:hover {
   color: var(--accent);
   background: var(--hover);
+}
+.park-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.park-menu-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
 }
 .card.dense header {
   margin-bottom: 4px;
@@ -398,6 +436,13 @@ html[data-theme='dark'] .pri-chip.pri-high {
 }
 .tag.note {
   color: var(--ink-3);
+}
+.tag.parked {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--chip-bg);
+  text-transform: none;
+  letter-spacing: 0;
 }
 /* Roadmap 0.2 — secondary multi-label tags. Lowercase, no uppercasing. */
 .tag.label {
