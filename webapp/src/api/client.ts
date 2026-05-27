@@ -19,6 +19,7 @@ import type {
   ResolvedSource,
   Snippet,
   StatsResponse,
+  SuggestedPlaybook,
   Ticket,
   TicketNote,
 } from '@/types/api';
@@ -295,6 +296,11 @@ export const api = {
 
   draftPlaybook: (ticketId: string): Promise<{ body: string }> =>
     request('/playbooks/draft', { method: 'POST', body: JSON.stringify({ ticket_id: ticketId }) }),
+
+  // Semantic auto-match (roadmap 3.3): ranked in-category playbook suggestions
+  // for a ticket on open. Read-only / ephemeral — nothing is persisted.
+  suggestedPlaybooks: (ticketId: string): Promise<SuggestedPlaybook[]> =>
+    request(`/playbooks/suggested?ticket_id=${encodeURIComponent(ticketId)}`),
 
   // RAG draft reply (roadmap 2.6): grounds an ephemeral customer reply in
   // similar resolved tickets + effective-category playbooks.

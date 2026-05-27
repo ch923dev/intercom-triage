@@ -117,6 +117,28 @@ export const usePlaybooksStore = defineStore('playbooks', () => {
     return body;
   }
 
+  /** ticket_id → id of the top semantically-suggested playbook (roadmap 3.3),
+   * or null when there is no suggestion. Ephemeral, recomputed on open. */
+  const suggestedTopByTicket = ref<Record<string, number | null>>({});
+
+  function suggestedTopFor(ticketId: string): number | null {
+    return suggestedTopByTicket.value[ticketId] ?? null;
+  }
+
+  /** Fetch + cache the top playbook suggestion for a ticket. Best-effort: on
+   * failure the highlight is simply absent (never blocks the flyout). */
+  async function ensureSuggestion(ticketId: string): Promise<void> {
+    try {
+      const rows = await api.suggestedPlaybooks(ticketId);
+      suggestedTopByTicket.value = {
+        ...suggestedTopByTicket.value,
+        [ticketId]: rows.length > 0 ? rows[0].playbook.id : null,
+      };
+    } catch {
+      // Leave the highlight unset — a failed suggestion is non-fatal.
+    }
+  }
+
   function findBucket(
     map: Record<number, Playbook[]>,
     id: number,
@@ -140,5 +162,8 @@ export const usePlaybooksStore = defineStore('playbooks', () => {
     archive,
     restore,
     draft,
+    suggestedTopByTicket,
+    suggestedTopFor,
+    ensureSuggestion,
   };
 });

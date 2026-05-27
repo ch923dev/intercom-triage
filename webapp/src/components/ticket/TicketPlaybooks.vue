@@ -12,14 +12,32 @@ const props = defineProps<{
 
 const playbooks = usePlaybooksStore();
 
-const items = computed(() =>
-  props.categoryId === null ? [] : playbooks.forCategory(props.categoryId),
-);
+// Top semantic suggestion for this ticket (roadmap 3.3). Highlighted + floated
+// to the top of the list. Effective-category scoping is enforced server-side.
+const suggestedTopId = computed(() => playbooks.suggestedTopFor(props.ticketId));
+
+const items = computed(() => {
+  const list = props.categoryId === null ? [] : playbooks.forCategory(props.categoryId);
+  const topId = suggestedTopId.value;
+  if (topId === null) return list;
+  // Float the suggested playbook to the top without mutating the store array.
+  const suggested = list.filter((p) => p.id === topId);
+  const rest = list.filter((p) => p.id !== topId);
+  return [...suggested, ...rest];
+});
 
 watch(
   () => props.categoryId,
   (id) => {
     if (id !== null) void playbooks.ensureForCategory(id);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.ticketId,
+  (id) => {
+    if (id) void playbooks.ensureSuggestion(id);
   },
   { immediate: true },
 );
@@ -77,8 +95,17 @@ async function save() {
       No playbooks for this category yet.
     </p>
 
-    <details v-for="p in items" :key="p.id" class="playbook">
-      <summary class="mono">{{ p.label }}</summary>
+    <details
+      v-for="p in items"
+      :key="p.id"
+      class="playbook"
+      :class="{ suggested: p.id === suggestedTopId }"
+      :open="p.id === suggestedTopId"
+    >
+      <summary class="mono">
+        {{ p.label }}
+        <span v-if="p.id === suggestedTopId" class="badge mono">Suggested</span>
+      </summary>
       <pre class="body">{{ p.body }}</pre>
     </details>
 
@@ -115,6 +142,19 @@ async function save() {
 .playbook summary {
   cursor: pointer;
   color: var(--ink);
+}
+.playbook.suggested {
+  border-color: var(--accent);
+}
+.badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-chip);
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .body {
   margin: 6px 0 0;

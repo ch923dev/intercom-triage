@@ -282,6 +282,19 @@ class PlaybookDraftResponse(BaseModel):
     body: str
 
 
+class SuggestedPlaybook(BaseModel):
+    """A semantically-ranked playbook suggestion for a ticket (roadmap 3.3).
+
+    `score` is the cosine similarity in [-1, 1] between the ticket's
+    customer-visible text and the playbook's (label + body); higher is closer.
+    Ephemeral — computed on ticket open, never persisted as ticket state."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    playbook: PlaybookRead
+    score: float
+
+
 # ── RAG draft reply (roadmap 2.6) ─────────────────────────────────────────────
 # Kept in its own region (separate from the Tickets block below) so it does not
 # collide with concurrent edits to the HydratedTicket / TicketSchema shapes.

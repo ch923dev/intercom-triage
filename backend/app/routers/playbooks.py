@@ -17,6 +17,7 @@ from app.schemas import (
     PlaybookDraftResponse,
     PlaybookRead,
     PlaybookUpdate,
+    SuggestedPlaybook,
 )
 from app.services import playbooks as svc
 
@@ -39,6 +40,25 @@ async def list_playbooks(
     else:
         rows = await svc.list_all(session, include_archived)
     return [PlaybookRead.model_validate(r) for r in rows]
+
+
+@router.get("/suggested", response_model=list[SuggestedPlaybook])
+async def suggested_playbooks(
+    ticket_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> list[SuggestedPlaybook]:
+    """Semantic playbook suggestions for a ticket on open (roadmap 3.3).
+
+    Read-only: ranks the ticket's effective-category playbooks (invariant #13)
+    by embedding similarity to its customer-visible text (invariant #4); never
+    touches `ai_cache` (invariant #6). Ephemeral — nothing is persisted. Returns
+    the top matches ordered most-relevant-first (empty if there are no
+    in-category playbooks or no customer-visible text)."""
+    suggestions = await svc.suggest_playbooks(session, ticket_id)
+    return [
+        SuggestedPlaybook(playbook=PlaybookRead.model_validate(s.playbook), score=s.score)
+        for s in suggestions
+    ]
 
 
 @router.post("", response_model=PlaybookRead)

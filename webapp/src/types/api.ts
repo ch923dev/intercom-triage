@@ -106,6 +106,15 @@ export interface Playbook {
   archived_at: string | null;
 }
 
+// A semantically-ranked playbook suggestion for a ticket (roadmap 3.3). `score`
+// is the cosine similarity in [-1, 1] between the ticket's customer-visible text
+// and the playbook's (label + body); higher is closer. Ephemeral — computed on
+// ticket open, never persisted.
+export interface SuggestedPlaybook {
+  playbook: Playbook;
+  score: number;
+}
+
 // Snippet (roadmap 1.5). A short canned reply with `{{variable}}` placeholders.
 // Lighter than a Playbook: global (not category-scoped), no AI draft. The body
 // is stored verbatim with placeholders intact; substitution is done client-side
