@@ -1,6 +1,6 @@
 # Intercom Triage — Tasks
 
-**Status:** ready · **Version:** 1.5 · **Implements:** `spec.md` v1.5, `plan.md` v1.5
+**Status:** ready · **Version:** 1.6 · **Implements:** `spec.md` v1.7, `plan.md` v1.7
 
 Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/tasks/`](docs/tasks/).
 
@@ -14,6 +14,8 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - `✓` = shipped and live in `main`.
 - `⊘` = superseded. Detail file retains the original body and names the replacement.
 - No marker = still open / backlog.
+
+**Changes from v1.6 (reconciliation):** the forward roadmap (`docs/ROADMAP.md`) was executed in full through Phase 3 + 4.1, but the work shipped to `main` ahead of these docs. This revision backfills the source-of-truth tasks for it: new Phases 15–18 (T142–T160) cover roadmap 0.2–3.3 and R.4; T106 (parked, roadmap 4.1) and T102 (cost meter, realized by roadmap 1.4) are marked `✓`. Traceability matrix gains FR-043..FR-061, NFR-009, and US-022..US-039. Total task count ~160. Detail bodies are inline below + the acceptance criteria in `spec.md`; per-feature commit SHAs are cited for traceability.
 
 **Changes from v1.4:** added Phase 12 (bulk actions) — T074–T083. Covers Pydantic bulk schemas, six bulk endpoints (resolve / reopen / recategorize / dismiss-chip / followup set / followup clear), backend tests, Vitest harness, `selectionStore` + card/column wiring, `BulkActionBar` + category picker reuse, tickets-store bulk actions with per-id rollback, multi-drag wiring through Board + ResolvedColumn, and `/metrics` counters. Total task count ~83.
 
@@ -162,12 +164,43 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T140 ✓ — Library page + nav.
 - T141 ✓ — spec/plan/tasks/CLAUDE invariant docs.
 
+### Phase 4.1 — Parked / snoozed state (roadmap 4.1)
+- T106 ✓ — Parked state: `parked_at`/`parked_until`/`parked_reason`(+`parked_note`) trio (migrations 0018/0019), park/unpark + bulk routes, webapp Layout B + ParkMenu, extension Parked tab. Spec FR-042/US-021, plan §14, invariant #14. Commits `889c0f1`, `87522a2`.
+
+### Phase 15 — Operator throughput quick wins (roadmap 0.2–0.4)
+- T142 ✓ — Triage facets: `priority`/`sentiment`/`labels` on the categorization call; cached on `ai_cache`, surfaced on `TicketSchema`, priority badge. Cross-package (backend+webapp), cache key unchanged. FR-043/FR-044/US-022. Commit `784832f`.
+- T143 ✓ — Aging/SLA card stripes tiered by time since last customer message. FR-045/US-023. Commit `ee99ca5`.
+- T144 ✓ — Keyboard-driven triage (`j`/`k`/`e`/digit/`/`), input-guarded. FR-046/US-024/NFR-007. Commit `5630f47`.
+
+### Phase 16 — Throughput + first analytics (roadmap 1.1–1.6)
+- T145 ✓ — Saved views / smart filters (client-side, localStorage). FR-047/US-025. Commit `e93084c`.
+- T146 ✓ — Priority-sorted queue (optional within-column order). FR-048/US-026. Commit `fe4fa95`.
+- T147 ✓ — Stats dashboard: `GET /stats` rollup + `StatsPage`. FR-049/US-027. Commit `c3b9565`.
+- T148 ✓ — Token / cost meter: per-(date,model) tokens + USD on `/metrics` + webapp. FR-050/US-028 (realizes T102). Commit `a3074f5`.
+- T149 ✓ — Snippets / canned-response manager (`snippets` table + CRUD + `{{var}}`). FR-051/US-029. Commit `86125b1`.
+- T150 ✓ — Bulk pre-flight diff preview (client-side, respects `MAX_BULK_IDS`). FR-052/US-030. Commit `58d70a6`.
+
+### Phase 17 — AI reliability + embedding keystone (roadmap 2.1–2.6)
+- T151 ✓ — Strict structured (JSON-schema-enforced) categorization output. FR-053/US-031. Commit `d6a77cf`.
+- T152 ✓ — Model cascade (cheap→strong on low confidence), opt-in, off by default. FR-054/US-032. Commit `6892a31`.
+- T153 ✓ — Needs-review lane over `ai_confidence` (view-layer, calibrated threshold). FR-055/US-033. Commit `4c354c3`.
+- T154 ✓ — Local offline embedding layer (sentence-transformers + `ticket_embeddings`, migration 0017-era). Keystone. FR-056/US-034. Commit `d917ebd`.
+- T155 ✓ — Few-shot categorization from confirmed-override neighbours. FR-057/US-035. Commit `e7a2288`.
+- T156 ✓ — RAG draft replies grounded in resolved tickets + playbooks (`POST /playbooks/draft-reply`). FR-058/US-036. Commit `cd45ec7`.
+
+### Phase 18 — Insights harvested from embeddings (roadmap 3.1–3.3, R.4)
+- T157 ✓ — Offline HDBSCAN clustering of resolved tickets + c-TF-IDF labels (`/clusters`, background loop). FR-059/US-037. Commit `db8272d`.
+- T158 ✓ — Playbook-gap ranking (`GET /clusters/gaps`). FR-060/US-038. Commit `790cf59`.
+- T159 ✓ — Semantic playbook auto-match on ticket open (`GET /playbooks/suggested`). FR-061/US-039. Commit `a2de64f`.
+- T160 ✓ — Latency p50/p95/max histograms in `metrics.py` (robustness R.4). NFR-009. Commit `ffb28c5`.
+
 ### [Phase 9 — Backlog](docs/tasks/backlog.md)
-- T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to webapp and extension.
-- T102 — Token / cost meter surfacing OpenRouter spend per day.
-- T103 — Multi-user expansion: add a `users` table + simple session cookie auth + per-user overrides and settings.
+- T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to webapp and extension. *(roadmap 4.3 — open)*
+- T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
+- T103 — Multi-user expansion: add a `users` table + simple session cookie auth + per-user overrides and settings. *(out of scope — `CLAUDE.md`)*
 - T104 ✓ — Alembic migrations.
-- T105 — Bulk actions in the extension popup.
+- T105 — Bulk actions in the extension popup. *(roadmap 4.4 — open)*
+- T107 — Structured `non_actionable_kind` column. *(roadmap 4.2 — open, cross-package)*
 
 ---
 
@@ -235,3 +268,41 @@ Every requirement maps to at least one task.
 | FR-041 | T133, T134, T138, T140 |
 | US-021 | T106 |
 | FR-042 | T106 |
+| US-022 | T142 |
+| FR-043 | T142 |
+| FR-044 | T142, T146 |
+| US-023 | T143 |
+| FR-045 | T143 |
+| US-024 | T144 |
+| FR-046 | T144 |
+| US-025 | T145 |
+| FR-047 | T145 |
+| US-026 | T146 |
+| FR-048 | T146 |
+| US-027 | T147 |
+| FR-049 | T147 |
+| US-028 | T148 |
+| FR-050 | T148 |
+| US-029 | T149 |
+| FR-051 | T149 |
+| US-030 | T150 |
+| FR-052 | T150 |
+| US-031 | T151 |
+| FR-053 | T151 |
+| US-032 | T152 |
+| FR-054 | T152 |
+| US-033 | T153 |
+| FR-055 | T153 |
+| US-034 | T154 |
+| FR-056 | T154 |
+| US-035 | T155 |
+| FR-057 | T155 |
+| US-036 | T156 |
+| FR-058 | T156 |
+| US-037 | T157 |
+| FR-059 | T157 |
+| US-038 | T158 |
+| FR-060 | T158 |
+| US-039 | T159 |
+| FR-061 | T159 |
+| NFR-009 | T160 |

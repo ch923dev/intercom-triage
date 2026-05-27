@@ -1,8 +1,10 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 1.5 · **Implements:** `spec.md` v1.5 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 1.7 · **Implements:** `spec.md` v1.7 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
+
+**Changes from v1.5:** reconciliation backfill matching `spec.md` v1.7. Adds §15 (AI reliability — structured outputs, model cascade, needs-review lane), §16 (local embedding layer + few-shot + RAG draft replies), §17 (recurring-issue insights — clustering, playbook-gap, auto-match), §18 (operator throughput & analytics — triage facets, aging, keyboard, saved views, priority sort, stats, cost meter, snippets, bulk pre-flight). Also folds in the §13 (Playbooks) and §14 (Parked) sections that had been appended without a version bump, and **corrects three now-false facts** in §1/§5/§12: the project uses **Alembic** (forward-only migrations), not `metadata.create_all`, and the data model has grown well past six tables. The §11 observability note is updated to match the shipped stdlib-logging + latency-histogram + cost-meter reality.
 
 **Changes from v1.4:** added §8d (bulk actions): a transient client-side selection store, five `bulk` endpoints that loop per-id over the existing services and return per-id success/failure, an `<BulkActionBar>` surface in the webapp, range-select within column, bulk drag through `vuedraggable`'s multi-drag mode, and a `MAX_BULK_IDS` cap. No schema additions.
 
@@ -22,7 +24,7 @@ This document defines **how** the system is built. Each section maps back to one
 | HTTP client | `httpx` (async) | Standard async client |
 | Config | `pydantic-settings` reading `.env` | Existing pattern |
 | Database | SQLite (default), via SQLAlchemy 2.0 async (`aiosqlite` driver) | Zero-setup, single file, ships with Python. Postgres swap is a one-line URL change. |
-| Schema management | SQLAlchemy `metadata.create_all` + seeding on startup | Alembic is overkill at this scope; add later if/when schema needs versioned migrations |
+| Schema management | **Alembic** (forward-only migrations) + seeding on startup, run by `init_db` | Adopted once the schema started changing (see §12). `metadata.create_all` is used only for the in-memory test DB / schema smoke. |
 | Webapp | Vue 3 + Vite + TypeScript | Matches OnlySales frontend |
 | Client state | Pinia | Standard Vue 3 |
 | Drag-and-drop | `vuedraggable@next` (multi-drag for bulk) | Vue 3 compatible |
@@ -65,6 +67,10 @@ Ticket {                                  # server → client
   summary:        string                   # FR-005, ≤ 280 chars
   ai_confidence:  float                    # FR-006, [0, 1]
   user_override:  boolean                  # FR-009
+  ai_priority:    "low"|"normal"|"high"|"urgent" | null   # FR-043; null on pre-0.2 rows
+  ai_sentiment:   "negative"|"neutral"|"positive" | null  # FR-043
+  ai_labels:      string[]                 # FR-043; [] default
+  # resolution_* (§8c), parked_* (§14) also ride on this shape — see those sections.
 }
 
 Category {
@@ -172,12 +178,27 @@ No auth header. Backend listens on `127.0.0.1` only.
 | POST | `/tickets/bulk/dismiss-chip` | `BulkTicketIds` | `BulkResult` | FR-033, US-018 |
 | PUT | `/followups/bulk` | `BulkFollowupSet` | `BulkResult` | FR-033, US-018 |
 | DELETE | `/followups/bulk` | `BulkTicketIds` | `BulkResult` | FR-033, US-018 |
+| GET | `/stats` | `?window_days=N` | `StatsResponse` | FR-049 |
+| GET | `/snippets` | `?include_archived` | `SnippetRead[]` | FR-051 |
+| POST | `/snippets` | `SnippetCreate` | `SnippetRead` | FR-051 |
+| PATCH | `/snippets/{id}` | `SnippetUpdate` | `SnippetRead` | FR-051 |
+| POST | `/snippets/{id}/archive` · `/restore` | — | `{ok}` | FR-051 |
+| GET | `/clusters` | — | `ClusterRead[]` | FR-059 |
+| GET | `/clusters/gaps` | — | `ClusterGapRead[]` | FR-060 |
+| POST | `/clusters/recompute` | — | `ClusterRead[]` | FR-059 |
+| GET | `/playbooks/suggested` | `?ticket_id` | `SuggestedPlaybook[]` | FR-061 |
+| POST | `/playbooks/draft-reply` | `PlaybookDraftRequest` | `DraftReplyResponse` | FR-058 |
+
+> The table above is the contract spine, not the full surface — the playbooks
+> CRUD/draft, non-actionable, park/unpark, notes, note-entries, and attachments
+> endpoints are documented in their own plan sections (§13, §14) and the README
+> API table. `GET /health` also exposes `review_confidence_threshold` (FR-055).
 
 Error contract: `502` on upstream AI failure, `422` on schema violation (including bulk requests over `MAX_BULK_IDS`), `404` on unknown id, `409` on archive of fallback or other invalid state transition. Bulk endpoints never abort the batch on a per-id failure — they record `{id, reason}` in `failed[]` and return 200.
 
 ## 5. Data model
 
-Six tables. SQLAlchemy 2.0 declarative models; created via `metadata.create_all` on first run, then seeded if empty. Concrete models in `backend/app/models.py`.
+SQLAlchemy 2.0 declarative models in `backend/app/models.py`; the schema is created and migrated by **Alembic** (forward-only revisions in `backend/alembic/versions/`, run by `init_db` on boot — `upgrade head`, or `stamp head` on a pre-Alembic DB), then seeded if empty. The model has grown well past the original six tables (now ~16, including `followups`, `ticket_notes`, `note_entries`, `note_attachments`, `playbooks`, `snippets`, `ticket_embeddings`, `ticket_clusters` / `ticket_cluster_members`); the core tables below remain the contract spine, and §13–§18 document the additions. The `metadata.create_all` path survives only for the in-memory test DB and the `python -m app.models` schema smoke.
 
 ```text
 categories
@@ -528,16 +549,21 @@ Postgres swap: change `DATABASE_URL` in `.env` to a `postgresql+asyncpg://…` U
 
 ## 11. Observability
 
-Structured logging via Python's standard `logging` plus `structlog` (or the existing OnlySales `StructuredLogger` if you want consistency). Per external call: `op`, `duration_ms`, `outcome`, `ticket_id` where applicable. No ticket bodies in logs.
+Structured logging via Python's standard `logging` (stdlib only — no structlog). `observability.log_event` / `logged_call` emit per external call: `op`, `duration_ms`, `outcome`, `ticket_id` where applicable. No ticket bodies in logs.
 
-Lightweight counters in process memory for `tickets_fetched_total`, `ai_calls_total{result}`, `cache_hits_total`, `overrides_set_total`, `proposals_created_total`, `proposals_resolved_total{resolution}`. Exposed via `GET /metrics` returning JSON. Promote to OpenTelemetry / Logfire only if you start running this against a real workload.
+Lightweight counters in process memory (`tickets_fetched_total`, `ai_calls_total{result}`, `cache_hits_total`, `overrides_set_total`, `proposals_created_total`, `proposals_resolved_total{resolution}`, `bulk_actions_total{op,result}`, …), plus two additions surfaced via `GET /metrics`:
+
+- **Latency histograms (NFR-009):** external-call durations sampled into bounded per-key deques; `metrics.histogram_snapshot()` reports p50 / p95 / max. Nearest-rank percentiles over the retained window — single-operator scope, not a Prometheus exporter.
+- **Token / cost meter (FR-050):** OpenRouter token usage accumulated per (UTC-date, model) with an estimated USD cost (`app/pricing.py` × token counts). In-process, resets on restart.
+
+Promote to OpenTelemetry / Logfire only if you start running this against a real workload.
 
 ## 12. Decision log
 
 | Decision | Alternatives | Reason |
 |---|---|---|
 | SQLite default with portable schema | Postgres from day one | Local single-user tool; zero setup. Postgres remains a one-line swap. |
-| No Alembic for v1 | Alembic from day one | Schema is small and stable; `create_all` plus a seed function is simpler. Add Alembic when the first schema change happens. |
+| ~~No Alembic for v1~~ **(superseded)** | Alembic from day one | Originally `create_all` + seed for simplicity, "add Alembic when the first schema change happens." That happened — the project now runs **forward-only Alembic migrations** (see §1, §5). `create_all` is retained only for tests / schema smoke. |
 | No authentication | Shared header secret, OAuth, JWT | Backend listens on `localhost`; threat model is a single trusted user on their own machine. |
 | Integer PKs instead of UUIDs | UUIDs everywhere | No multi-system uniqueness requirement. Integers are smaller, faster, easier to read in dev. |
 | Reverted from multi-tenant | Keep multi-tenant from v1.1 | YAGNI for current scope. Reintroducing tenants later means adding a `tenant_id` column and a resolution layer; no other architectural rework. |
@@ -581,3 +607,108 @@ Plan: `docs/superpowers/plans/2026-05-27-parked-snoozed-state.md`. Roadmap 4.1 /
   `parkedOnly` filter chip + `★ ready` badge; `ParkMenu.vue` (duration presets +
   reason) drives park; bulk park/unpark in `BulkActionBar`. Extension popup gains
   a Parked tab + single-ticket park/unpark.
+
+## §15 — AI reliability (roadmap 2.1 / 2.2 / 2.3)
+
+Three independent reliability layers over the single categorization call. All
+preserve FR-007 (any failure → fallback for that ticket; batch never aborts) and
+the content-signature cache key (#6).
+
+- **Strict structured outputs (FR-053).** The categorization request uses
+  OpenRouter's JSON-schema-enforced `response_format` instead of relying on
+  `{...}` extraction from free text. A response that fails the schema is treated
+  as a parse failure → fallback for that one ticket. The fragile fence-stripping
+  path remains as a defensive fallback but is no longer the primary contract.
+- **Model cascade (FR-054), opt-in.** `cascade_enabled` (default off). When on,
+  the cheap model (`openrouter_cheap_model`, default `anthropic/claude-3.5-haiku`)
+  categorizes first; if its self-reported confidence `< cascade_escalate_below`
+  (default 0.7) — or the cheap call fails / returns malformed output — the ticket
+  escalates to the strong `openrouter_model`. Cost model in `app/pricing.py`.
+  **Measure escalation rate before enabling on a real corpus** — a >40% rate
+  erases the savings.
+- **Needs-review lane (FR-055).** Pure view-layer split, no migration, no stored
+  state — mirrors the non-actionable column pattern (#10). An open, non-overridden
+  ticket with `ai_confidence < review_confidence_threshold` (default **0.65**,
+  *calibrated* in `tests/test_review_calibration.py`, not guessed) surfaces in a
+  webapp review lane; writing an override clears it. The threshold is mirrored in
+  `webapp/src/utils/review.ts` as `REVIEW_CONFIDENCE_THRESHOLD` (keep in sync) and
+  surfaced on `GET /health` for auditability.
+
+## §16 — Local embedding layer + few-shot + RAG (roadmap 2.4 / 2.5 / 2.6)
+
+The keystone (2.4) plus its first two consumers.
+
+- **Embedding layer (FR-056).** Local `sentence-transformers` (`all-MiniLM-L6-v2`,
+  384-dim, CPU, ~80 MB, lazy-loaded) writing to a `ticket_embeddings` table in the
+  same SQLite DB. `embeddings_enabled` (default on) gates the whole layer; off =
+  the ingest hook is a no-op and the heavy import is skipped. Embeds customer-
+  visible `parts[]` + title (+ operator notes where applicable) **only** — never
+  `internal_notes[]` (#4). Computed on ingest; **never** reads or writes
+  `ai_cache` / the content signature (#6). `app/ai/embeddings.py`.
+- **Few-shot categorization (FR-057).** `app/ai/fewshot.py`. On an uncached
+  ticket, retrieve the nearest `fewshot_examples` (default 3, `0` disables)
+  confirmed-override neighbours by embedding similarity and inject them into the
+  prompt as gold-label examples. Gated on `embeddings_enabled`. With injection off
+  the prompt is byte-identical to the cold-corpus path.
+- **RAG draft replies (FR-058).** `POST /playbooks/draft-reply` →
+  `DraftReplyResponse {body, grounding_ticket_ids, playbook_ids}`. Grounds an
+  ephemeral customer reply in the k nearest RESOLVED tickets (customer-visible
+  parts only) + the ticket's effective-category playbooks. Reuses
+  `OpenRouterClient`; never reads `internal_notes[]` (#4); 503 when AI unconfigured.
+  Nothing persisted.
+
+## §17 — Recurring-issue insights (roadmap 3.1 / 3.2 / 3.3)
+
+All three ride on §16's embeddings. Read-only over a periodically-recomputed
+snapshot; none touch `ai_cache` (#6).
+
+- **Clustering (FR-059).** `app/ai/clustering.py` + a background loop in
+  `app/main.py` (`_clustering_loop`, spawned only when `clustering_enabled` AND
+  `embeddings_enabled`). HDBSCAN over RESOLVED tickets' embeddings; outliers
+  flagged, not force-fit; each cluster labelled with c-TF-IDF top terms over
+  customer-visible `parts[]` + title only (#4). Cadence `clustering_interval_seconds`
+  (default 6 h); skipped below `clustering_min_tickets` (default 5). Snapshot
+  written atomically to `ticket_clusters` + `ticket_cluster_members`. Reads:
+  `GET /clusters`; manual refresh: `POST /clusters/recompute`.
+- **Playbook-gap detection (FR-060).** `GET /clusters/gaps` →
+  `ClusterGapRead[]`. Ranks clusters whose dominant *effective* category (#13) has
+  no active playbook, most-recurring-first; names the `category_id` to write a
+  playbook for plus `member_count` support. Pure local join over the snapshot +
+  playbooks.
+- **Playbook auto-match (FR-061).** `GET /playbooks/suggested?ticket_id=` →
+  `SuggestedPlaybook[] {playbook, score}`. Ranks the ticket's effective-category
+  playbooks by cosine similarity to its customer-visible text (#4), most-relevant-
+  first. Ephemeral; empty when uncategorized / no in-category playbooks.
+
+## §18 — Operator throughput & analytics (roadmap 0.2–0.4, 1.1–1.6)
+
+UX + visibility. Mostly pure-stack; the one cross-package change is 0.2.
+
+- **Triage facets (FR-043/FR-044), cross-package.** The categorization structured
+  response gains `priority` (`low`\|`normal`\|`high`\|`urgent`), `sentiment`
+  (`negative`\|`neutral`\|`positive`), and `labels: string[]`. Stored on `ai_cache`
+  (`ai_priority` / `ai_sentiment` / `ai_labels`, null/empty on pre-0.2 rows),
+  surfaced on `TicketSchema`, consumed by the webapp (priority badge) — **one PR
+  across backend + webapp** (the extension/`HydratedTicket` shape is untouched,
+  so invariant #2 doesn't apply here). Same single AI call; cache key unchanged.
+- **Aging indicators (FR-045).** Pure webapp. Card stripe tiered by time since the
+  last customer-visible part; thresholds in one constant. Timestamps already on
+  the wire (#5).
+- **Keyboard triage (FR-046).** Pure webapp keybindings (`j`/`k`/`e`/digit/`/`),
+  guarded against firing inside text inputs. Satisfies NFR-007.
+- **Saved views (FR-047).** Pinia `savedViews` store, persisted to `localStorage`;
+  named presets over the facets the board already returns. Backend untouched.
+- **Priority-sorted queue (FR-048).** Optional within-column ordering by
+  `ai_priority`, remembered locally; off restores recency / follow-up-due order.
+- **Stats dashboard (FR-049).** `GET /stats?window_days=N` → `StatsResponse`
+  (`services/stats.py`): `total_tickets`, `category_breakdown`, `volume_trend`,
+  `resolution_mix`, `resolve_time_buckets`, `median_resolve_hours`. Group-by over
+  the local store; no migration. Renders spec §8's four success metrics.
+- **Cost meter (FR-050).** See §11 — per-(date, model) token + USD estimate on
+  `/metrics`; webapp surfaces today's spend.
+- **Snippets (FR-051).** `snippets` table + thin CRUD (`/snippets`,
+  archive/restore). Body stored verbatim with `{{variable}}` placeholders;
+  substitution client-side (`webapp/src/utils/snippets.ts`). Global (not category-
+  scoped), no AI draft — lighter than playbooks; durable (#13).
+- **Bulk pre-flight diff (FR-052).** Client-side preview of affected vs skipped
+  counts from loaded ticket state before a bulk apply; mirrors `MAX_BULK_IDS` (#9).
