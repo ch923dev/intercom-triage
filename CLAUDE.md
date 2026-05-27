@@ -100,3 +100,46 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 - Don't deploy this anywhere (no Dockerfile, no CI/CD, no production config).
 - Don't add user auth / RBAC / tenants.
 - Don't extend the surface area without `spec.md` / `plan.md` / `tasks.md` updates first — those three docs are the source of truth and the traceability matrix.
+
+## Parallel sessions & worktrees
+
+Multiple Claude sessions may run on this repo at once. Claude Code has NO
+cross-session file lock — two sessions on the same branch will silently
+clobber each other's edits. So **each concurrent feature/task gets its own
+git worktree**: isolated working dir, own branch, shared `.git`.
+
+**When to create one.** Before starting a distinct feature/bugfix that could
+run alongside another session — anything that earns its own feature branch.
+Use the `EnterWorktree` tool at the start of the task (or the user launches
+with `claude --worktree <slug>`); it creates `.claude/worktrees/<slug>/` on a
+branch off `origin/HEAD`, and clean worktrees auto-remove on exit. For parallel
+subagents doing real edits, set `isolation: worktree`. Skip worktrees for quick
+single-session edits, doc tweaks, or when no other session is active.
+
+**Worktrees isolate the filesystem, NOT git history.** These shared files still
+conflict at MERGE time — serialize or pre-assign them across sessions:
+
+- `backend/alembic/versions/` — linear Alembic revision chain with sequential
+  numeric prefixes (`0001_…` upward). Two sessions branching off the same head
+  create colliding revisions / multiple Alembic heads. Only ONE session adds a
+  migration at a time, or pre-assign the next number + `down_revision`.
+- `backend/app/main.py` (`include_router(...)` block) + `backend/app/routers/__init__.py`
+  — the router registry. Every new endpoint appends here; coordinate the inserts.
+- The 3-package `HydratedTicket` contract — `backend/app/schemas.py` ↔
+  `webapp/src/types/api.ts` ↔ `extension/intercom.js` (invariant #2). A shape
+  change touches all three; don't split it across parallel sessions.
+- `webapp/package-lock.json` — never hand-merge; re-run `npm install` (in
+  `webapp/`) after merge. Backend has no lockfile (pip `requirements.txt`).
+- Single-source docs — `spec.md`, `plan.md`, `tasks.md`, `docs/architecture.md`,
+  this `CLAUDE.md`. Append-heavy; coordinate or expect textual conflicts.
+
+**Keep branches short (<~2 days) and rebase on the default branch daily.**
+Divergence is what makes merges painful; short-lived branches are the biggest
+conflict reducer.
+
+Supporting setup: `.claude/worktrees/` is gitignored,
+`CLAUDE_CODE_GLOB_NO_IGNORE=false` keeps Glob from returning duplicate matches
+across nested worktrees, and `.worktreeinclude` copies the repo's gitignored
+config/secret files (`backend/.env`) into each new worktree. Each worktree
+still needs its own dependency install — `backend` venv + `npm install` in
+`webapp` — those are not copied (too heavy).

@@ -61,6 +61,8 @@ desktop.ini
 
 # ── Claude Code local ─────────────────────────────────────────────────────────
 .claude/settings.local.json
+.claude/worktrees/
+.worktrees/
 
 # ── Brainstorm visual companion ───────────────────────────────────────────────
 .superpowers/

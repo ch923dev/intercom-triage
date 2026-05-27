@@ -1,0 +1,5 @@
+# Gitignored config/secrets copied into every new worktree.
+# (--worktree, EnterWorktree, and subagents with isolation: worktree.)
+# Config/secrets ONLY — never node_modules / .venv / build dirs.
+# backend/.env.example is committed; the real backend/.env is not — copy it.
+backend/.env
