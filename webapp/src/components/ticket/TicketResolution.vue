@@ -148,7 +148,7 @@ async function onUnpark() {
 .park-pop {
   position: absolute;
   top: calc(100% + 4px);
-  left: 0;
+  right: 0;
   z-index: 20;
 }
 .chip.active {
