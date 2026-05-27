@@ -106,6 +106,19 @@ export interface Playbook {
   archived_at: string | null;
 }
 
+// Snippet (roadmap 1.5). A short canned reply with `{{variable}}` placeholders.
+// Lighter than a Playbook: global (not category-scoped), no AI draft. The body
+// is stored verbatim with placeholders intact; substitution is done client-side
+// from the open ticket (see utils/snippets.ts).
+export interface Snippet {
+  id: number;
+  title: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+}
+
 // RAG draft reply (roadmap 2.6). An ephemeral, customer-visible draft reply
 // grounded in similar resolved tickets + effective-category playbooks. The
 // grounding ids are surfaced for operator transparency; no internal-note

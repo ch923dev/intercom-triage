@@ -33,6 +33,7 @@ from app.routers import notes as notes_router
 from app.routers import playbooks as playbooks_router
 from app.routers import proposals as proposals_router
 from app.routers import settings as settings_router
+from app.routers import snippets as snippets_router
 from app.routers import tickets as tickets_router
 from app.services.cache import sweep_expired
 
@@ -181,6 +182,7 @@ def create_app() -> FastAPI:
     app.include_router(notes_router.router)
     app.include_router(note_entries_router.router)
     app.include_router(playbooks_router.router)
+    app.include_router(snippets_router.router)
     app.include_router(attachments_router.router)
     app.include_router(metrics_router.router)
 
