@@ -510,6 +510,63 @@ class Snippet(Base):
     )
 
 
+class TicketCluster(Base):
+    """One recurring-issue cluster, produced by the offline clustering job.
+
+    Roadmap 3.1. The job (see `app/ai/clustering.py` + the background loop in
+    `main.py`) periodically clusters RESOLVED tickets' EXISTING embeddings
+    (`ticket_embeddings`, built from `parts[]` + operator note only — invariant
+    #4) with HDBSCAN, then labels each cluster with c-TF-IDF top terms drawn
+    from `parts[]` + title ONLY (never `internal_notes`, #4). HDBSCAN noise
+    points (label -1) are NOT force-fit into a cluster — they are simply
+    excluded, so every row here is a genuine cluster.
+
+    Snapshot semantics: each run is atomic — the job deletes the prior rows and
+    inserts the fresh ones in one transaction. Reading `ticket_embeddings`
+    never touches `ai_cache` / the content signature (#6). Member ticket ids
+    live in the `ticket_cluster_members` join (cascade-deleted with the cluster).
+    """
+
+    __tablename__ = "ticket_clusters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Human-readable c-TF-IDF label, e.g. "login error password reset". Built
+    # from customer-visible text only (#4).
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    # Ordered top terms behind the label (JSON string array) for the UI / 3.2.
+    top_terms: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint("size >= 0", name="ticket_clusters_size_nonneg"),
+        Index("ix_ticket_clusters_size", "size"),
+    )
+
+
+class TicketClusterMember(Base):
+    """A resolved ticket's membership in a `TicketCluster` (roadmap 3.1).
+
+    No FK to `tickets` (ticket ids are owned by Intercom and rows can churn on
+    re-sync, mirroring `followups`); cascade-deleted with the parent cluster so
+    a fresh clustering run wipes the old membership cleanly.
+    """
+
+    __tablename__ = "ticket_cluster_members"
+
+    cluster_id: Mapped[int] = mapped_column(
+        ForeignKey("ticket_clusters.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    ticket_id: Mapped[str] = mapped_column(Text, primary_key=True)
+
+    __table_args__ = (Index("ix_ticket_cluster_members_ticket", "ticket_id"),)
+
+
 class Ticket(Base):
     """An ingested + categorized conversation — the operator's board data.
 

@@ -28,6 +28,12 @@ sqlite-vec==0.1.9
 sentence-transformers==5.5.1
 torch==2.8.0
 
+# Recurring-issue clustering (roadmap 3.1) — offline periodic job over the
+# resolved-ticket embeddings. scikit-learn only (no BERTopic/umap/standalone
+# hdbscan native build): sklearn.cluster.HDBSCAN (since 1.3) flags outliers as
+# label -1, and TfidfVectorizer drives c-TF-IDF cluster labels. PINNED.
+scikit-learn==1.6.1
+
 # Multipart form parsing for /attachments uploads
 python-multipart==0.0.29
 
