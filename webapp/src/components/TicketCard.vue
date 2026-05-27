@@ -10,6 +10,7 @@ import { useNoteEntriesStore } from '@/stores/noteEntries';
 import { countNoteLines, useNotesStore } from '@/stores/notes';
 import { useTicketsStore } from '@/stores/tickets';
 import { useTweaksStore } from '@/stores/tweaks';
+import { agingTier } from '@/utils/aging';
 import { formatAgoFromDate } from '@/utils/time';
 import type { Ticket } from '@/types/api';
 
@@ -93,20 +94,34 @@ const labels = computed(() => props.ticket.ai_labels ?? []);
 const sentimentGlyph = computed(() =>
   sentiment.value === 'positive' ? '☺' : sentiment.value === 'negative' ? '☹' : '',
 );
+
+// Roadmap 0.3 — personal-SLA aging stripe. Tier by time since the last
+// customer-visible message (not `updated_at`, which advances on team notes).
+// Resolved/non-actionable tickets (`resolved_at` set, invariant #10) and
+// tickets with no customer message get no tier → no stripe. Reuses the
+// followups store's once-per-second `now` so the tier stays live without a
+// second timer.
+const aging = computed(() =>
+  agingTier(props.ticket.parts, props.ticket.resolved_at !== null, followups.now),
+);
 </script>
 
 <template>
   <article
     class="card"
-    :class="{
-      dense,
-      rich,
-      selected: props.selected,
-      'multi-selected': props.multiSelected,
-      focused: props.focused,
-      overridden: props.overridden,
-    }"
+    :class="[
+      {
+        dense,
+        rich,
+        selected: props.selected,
+        'multi-selected': props.multiSelected,
+        focused: props.focused,
+        overridden: props.overridden,
+      },
+      aging ? `aging-${aging}` : null,
+    ]"
     :data-selected="props.multiSelected ? 'true' : undefined"
+    :data-aging="aging ?? undefined"
     draggable="true"
   >
     <div v-if="props.overridden" class="override-marker" title="Manually moved" />
@@ -418,5 +433,43 @@ html[data-theme='dark'] .tag.team-note {
   color: oklch(0.85 0.12 285);
   background: oklch(0.25 0.05 285);
   border-color: oklch(0.4 0.08 285);
+}
+
+/* Roadmap 0.3 — aging stripe. A left-edge bar keyed to time since the last
+ * customer message. Implemented as a ::before so it never touches the card
+ * `border` (selection / multi-select rings) or `outline` (keyboard focus).
+ * `fresh` is the calm baseline and shows no stripe; aging → stale → critical
+ * warm up in hue and weight. Thresholds live in @/utils/aging. */
+.card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-top-left-radius: var(--radius-card);
+  border-bottom-left-radius: var(--radius-card);
+  background: transparent;
+  pointer-events: none;
+}
+.card.aging-aging::before {
+  background: oklch(0.78 0.12 85); /* amber */
+}
+.card.aging-stale::before {
+  background: oklch(0.7 0.15 55); /* orange */
+  width: 4px;
+}
+.card.aging-critical::before {
+  background: oklch(0.6 0.19 25); /* red */
+  width: 4px;
+}
+html[data-theme='dark'] .card.aging-aging::before {
+  background: oklch(0.72 0.12 85);
+}
+html[data-theme='dark'] .card.aging-stale::before {
+  background: oklch(0.65 0.15 55);
+}
+html[data-theme='dark'] .card.aging-critical::before {
+  background: oklch(0.58 0.19 25);
 }
 </style>
