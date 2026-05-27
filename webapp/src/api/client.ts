@@ -15,6 +15,7 @@ import type {
   MetricsResponse,
   NoteAttachment,
   NoteEntry,
+  ParkedReason,
   Playbook,
   ProposalsResponse,
   ResolvedSource,
@@ -160,6 +161,21 @@ export const api = {
   ): Promise<{ resolved_at: string; resolved_source: ResolvedSource }> =>
     request(`/tickets/${ticketId}/non-actionable`, { method: 'POST', body: '{}' }),
 
+  /** Park a ticket until `untilAt` (ISO with Z) with a structured reason. */
+  parkTicket: (
+    ticketId: string,
+    untilAt: string,
+    reason: ParkedReason,
+  ): Promise<{ parked_at: string; parked_until: string; parked_reason: ParkedReason }> =>
+    request(`/tickets/${ticketId}/park`, {
+      method: 'POST',
+      body: JSON.stringify({ until_at: untilAt, reason }),
+    }),
+
+  /** Unpark a ticket. */
+  unparkTicket: (ticketId: string): Promise<void> =>
+    request(`/tickets/${ticketId}/unpark`, { method: 'POST', body: '{}' }),
+
   // ── notes (T047) ──────────────────────────────────────────────────────────
   listNotes: (): Promise<TicketNote[]> => request('/notes'),
   putNote: (ticketId: string, body: string) =>
@@ -246,6 +262,20 @@ export const api = {
   /** Mark N tickets non-actionable. Per-id ok/failed in the response. */
   bulkMarkNonActionable: (ticketIds: string[]): Promise<BulkResult> =>
     request('/tickets/bulk/non-actionable', {
+      method: 'POST',
+      body: JSON.stringify({ ticket_ids: ticketIds }),
+    }),
+
+  /** Park N tickets until `untilAt` with one reason. Per-id ok/failed. */
+  bulkPark: (ticketIds: string[], untilAt: string, reason: ParkedReason): Promise<BulkResult> =>
+    request('/tickets/bulk/park', {
+      method: 'POST',
+      body: JSON.stringify({ ticket_ids: ticketIds, until_at: untilAt, reason }),
+    }),
+
+  /** Unpark N tickets. Per-id ok/failed. */
+  bulkUnpark: (ticketIds: string[]): Promise<BulkResult> =>
+    request('/tickets/bulk/unpark', {
       method: 'POST',
       body: JSON.stringify({ ticket_ids: ticketIds }),
     }),
