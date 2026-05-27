@@ -155,7 +155,9 @@ const aging = computed(() =>
           <button type="button" class="resolve-icon" title="Park ▾" @click="onParkToggle">⏸</button>
           <ParkMenu v-if="parkOpen" class="park-menu-pop" @park="onPark" />
         </div>
-        <button v-else type="button" class="resolve-icon" title="Unpark" @click="onUnpark">▶</button>
+        <button v-else type="button" class="resolve-icon" title="Unpark" @click="onUnpark">
+          ▶
+        </button>
       </template>
       <button
         class="resolve-icon"

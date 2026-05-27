@@ -45,7 +45,8 @@ const noneResolved = computed(
     selectedTickets.value.length > 0 && selectedTickets.value.every((t) => t.resolved_at === null),
 );
 const noneParked = computed(
-  () => selectedTickets.value.length > 0 && selectedTickets.value.every((t) => t.parked_at === null),
+  () =>
+    selectedTickets.value.length > 0 && selectedTickets.value.every((t) => t.parked_at === null),
 );
 const anyParked = computed(() => selectedTickets.value.some((t) => t.parked_at !== null));
 const anyHasChip = computed(() =>

@@ -120,7 +120,9 @@ export const useTicketsStore = defineStore('tickets', () => {
    *  the raw open list so the count is stable regardless of the active search /
    *  saved-view filter. */
   const needsReviewTickets = computed(() =>
-    state.value.tickets.filter((t) => t.parked_at === null && needsReview(t, effectiveOverridden(t))),
+    state.value.tickets.filter(
+      (t) => t.parked_at === null && needsReview(t, effectiveOverridden(t)),
+    ),
   );
 
   /** When true, the board narrows every category column to needs-review tickets
@@ -740,7 +742,11 @@ export const useTicketsStore = defineStore('tickets', () => {
   }
 
   /** Bulk park — sets the trio on every ok id the server confirms. */
-  async function bulkPark(ids: string[], untilAt: string, reason: ParkedReason): Promise<BulkResult> {
+  async function bulkPark(
+    ids: string[],
+    untilAt: string,
+    reason: ParkedReason,
+  ): Promise<BulkResult> {
     mutating.value++;
     try {
       const result = await api.bulkPark(ids, untilAt, reason);
