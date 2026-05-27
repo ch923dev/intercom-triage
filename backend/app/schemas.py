@@ -70,6 +70,10 @@ class HealthResponse(BaseModel):
     model: str
     openrouter_configured: bool
     missing_secrets: list[str]
+    # Roadmap 2.3 — the AppConfig needs-review threshold, surfaced so the webapp
+    # can read the calibrated default instead of hardcoding it blind. An open,
+    # non-overridden ticket with ai_confidence < this surfaces in the review lane.
+    review_confidence_threshold: float
 
 
 # ── Category ──────────────────────────────────────────────────────────────────

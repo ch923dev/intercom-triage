@@ -90,6 +90,26 @@ class AppConfig(BaseSettings):
     # ingest hook is a no-op — no embeddings are computed or stored.
     embeddings_enabled: bool = True
 
+    # ── Needs-review lane (roadmap 2.3) ───────────────────────────────────────
+    # An OPEN, non-overridden ticket whose categorization self-confidence is
+    # BELOW this threshold surfaces in the webapp "needs review" lane — a
+    # view-layer split over the existing `ai_confidence`, NOT a stored state
+    # (mirrors invariant #10 / the non-actionable column). The operator reviews
+    # the lane and confirming a ticket (writing an override) clears it.
+    #
+    # Default 0.65 is CALIBRATED, not guessed — see
+    # `backend/tests/test_review_calibration.py`. On a representative spread of
+    # categorization confidences (fallbacks at 0.0; genuine answers across the
+    # 0.3–0.95 band) labelled by whether the operator later overrode them, 0.65
+    # is the threshold that catches the large majority of would-be-overridden
+    # tickets while leaving most correct ones off the lane (it sits above the
+    # card's 0.5 "low confidence" tint and just under the cascade's 0.7
+    # trust-the-cheap-model bar — the zone where the AI is unsure enough to be
+    # worth a human glance). The webapp mirrors this default as
+    # `REVIEW_CONFIDENCE_THRESHOLD` (webapp/src/utils/review.ts); keep them in
+    # sync. The value is also surfaced on `GET /health` for auditability.
+    review_confidence_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+
     # ── Few-shot categorization (roadmap 2.5) ────────────────────────────────
     # When categorizing an uncached ticket, inject the nearest CONFIRMED-override
     # neighbours (operator-confirmed gold labels) as in-context examples. Set to

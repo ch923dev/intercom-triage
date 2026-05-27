@@ -11,6 +11,7 @@ import { countNoteLines, useNotesStore } from '@/stores/notes';
 import { useTicketsStore } from '@/stores/tickets';
 import { useTweaksStore } from '@/stores/tweaks';
 import { agingTier } from '@/utils/aging';
+import { REVIEW_CONFIDENCE_THRESHOLD } from '@/utils/review';
 import { formatAgoFromDate } from '@/utils/time';
 import type { Ticket } from '@/types/api';
 
@@ -52,7 +53,12 @@ async function onResolveClick(e: Event) {
 const dense = computed(() => tweaks.density === 'compact');
 const rich = computed(() => tweaks.density === 'comfy');
 const showSummary = computed(() => tweaks.showSummary && !dense.value);
-const confColor = computed(() => (props.ticket.ai_confidence < 0.5 ? '#c34a2b' : 'var(--ink-3)'));
+// Tint the confidence chip warm when the ticket would land in the needs-review
+// lane (roadmap 2.3) — below the calibrated threshold — so a flagged card reads
+// consistently with the lane toggle.
+const confColor = computed(() =>
+  props.ticket.ai_confidence < REVIEW_CONFIDENCE_THRESHOLD ? '#c34a2b' : 'var(--ink-3)',
+);
 const updatedAgo = computed(() => formatAgoFromDate(props.ticket.updated_at));
 
 // Follow-up chip (T050): `F/U in 15m` while pending, `due now` once due.
