@@ -8,6 +8,7 @@ import { computed } from 'vue';
 import Mono from './Mono.vue';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
+import { useSavedViewsStore } from '@/stores/savedViews';
 import { useTicketsStore } from '@/stores/tickets';
 import { useTweaksStore } from '@/stores/tweaks';
 import { useViewStore } from '@/stores/view';
@@ -17,6 +18,7 @@ const tickets = useTicketsStore();
 const tweaks = useTweaksStore();
 const categories = useCategoriesStore();
 const followups = useFollowupsStore();
+const savedViews = useSavedViewsStore();
 const view = useViewStore();
 
 const NAV: { id: View; label: string }[] = [
@@ -62,6 +64,18 @@ function refresh() {
 function onSearchInput(e: Event) {
   tickets.setQuery((e.target as HTMLInputElement).value);
 }
+
+/** One-click saved-view apply (roadmap 1.1). `__clear__` resets to no filter;
+ *  any other value applies that preset to the board. */
+function onViewPick(e: Event) {
+  const value = (e.target as HTMLSelectElement).value;
+  if (value === '__clear__') {
+    tickets.clearFilter();
+    savedViews.clearActiveView();
+    return;
+  }
+  if (value) savedViews.applyView(value);
+}
 </script>
 
 <template>
@@ -105,6 +119,23 @@ function onSearchInput(e: Event) {
         @input="onSearchInput"
       />
       <span v-if="!tickets.query" class="search-kbd" aria-hidden="true">/</span>
+    </label>
+
+    <!-- Saved views quick-apply (roadmap 1.1) — one-click preset apply. The
+         full editor (build / save / delete) lives in the Settings drawer. -->
+    <label class="views-pick" :class="{ active: tickets.isFilterActive }">
+      <select
+        class="views-select"
+        :value="savedViews.activeViewId ?? (tickets.isFilterActive ? '' : '__clear__')"
+        title="Saved views"
+        @change="onViewPick"
+      >
+        <option value="__clear__">All tickets</option>
+        <option v-if="tickets.isFilterActive && !savedViews.activeViewId" value="" disabled>
+          Custom filter…
+        </option>
+        <option v-for="v in savedViews.views" :key="v.id" :value="v.id">{{ v.name }}</option>
+      </select>
     </label>
 
     <Mono>{{ ticketCountLabel }}</Mono>
@@ -292,5 +323,30 @@ function onSearchInput(e: Event) {
 .auto-label {
   opacity: 0.55;
   margin-left: 2px;
+}
+/* Saved-views quick-apply select — styled as a chip to match the topbar. */
+.views-pick {
+  display: inline-flex;
+  align-items: center;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--panel);
+}
+.views-pick.active {
+  border-color: var(--accent);
+}
+.views-select {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  outline: none;
+  max-width: 160px;
+}
+.views-pick.active .views-select {
+  color: var(--accent);
 }
 </style>

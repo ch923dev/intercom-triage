@@ -8,6 +8,7 @@ import DrawerAiSection from './settings/DrawerAiSection.vue';
 import DrawerDisplaySection from './settings/DrawerDisplaySection.vue';
 import DrawerFiltersSection from './settings/DrawerFiltersSection.vue';
 import DrawerNotificationsSection from './settings/DrawerNotificationsSection.vue';
+import DrawerSavedViewsSection from './settings/DrawerSavedViewsSection.vue';
 import DrawerSyncSection from './settings/DrawerSyncSection.vue';
 
 const view = useViewStore();
@@ -24,6 +25,7 @@ const view = useViewStore();
       <div class="body">
         <DrawerDisplaySection />
         <DrawerFiltersSection />
+        <DrawerSavedViewsSection />
         <DrawerAiSection />
         <DrawerNotificationsSection />
         <DrawerSyncSection />

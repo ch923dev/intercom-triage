@@ -9,6 +9,13 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
 import type { BulkResult, Ticket } from '@/types/api';
+import {
+  cloneFilter,
+  EMPTY_FILTER,
+  isEmptyFilter,
+  ticketMatchesFilter,
+  type SavedFilter,
+} from '@/utils/savedViews';
 
 interface TicketsState {
   tickets: Ticket[];
@@ -49,6 +56,16 @@ export const useTicketsStore = defineStore('tickets', () => {
   /** Active search query. Empty string means no filter. */
   const query = ref('');
 
+  /** Active saved-view / smart filter (roadmap 1.1). The ad-hoc facet filter
+   *  the board reacts to — layered ON TOP of the server-side lookback/state
+   *  filter and the live `query`. `EMPTY_FILTER` (every facet inactive) is the
+   *  pass-through default. Named presets live in the `savedViews` store and
+   *  drive this via `setFilter`. */
+  const activeFilter = ref<SavedFilter>(cloneFilter(EMPTY_FILTER));
+
+  /** True when the active filter narrows anything (drives a "filtered" badge). */
+  const isFilterActive = computed(() => !isEmptyFilter(activeFilter.value));
+
   /** Count of optimistic mutations currently awaiting their server call. While
    *  this is > 0 the board holds optimistic state the server doesn't yet
    *  reflect, so `silentRefresh` must not overwrite it (auto-sync race). Each
@@ -79,12 +96,31 @@ export const useTicketsStore = defineStore('tickets', () => {
     });
   });
 
-  /** Group visible tickets by `category_id` (applying optimistic overrides).
-   *  Derives from visibleTickets so search filters the board columns. */
+  /** Effective category for a ticket — optimistic override beats AI/stored
+   *  value (mirrors the byCategory grouping + invariant #13 "override beats
+   *  AI"). Shared by the column grouping and the saved-view category facet. */
+  function effectiveCategoryId(t: Ticket): number | null {
+    return state.value.pendingOverrides[t.id] ?? t.category_id;
+  }
+
+  /** `visibleTickets` further narrowed by the active saved-view filter
+   *  (roadmap 1.1). Pass-through when no facet is active. A single `Date.now()`
+   *  is sampled per recompute so every card in one pass shares an age clock. */
+  const facetVisibleTickets = computed(() => {
+    if (!isFilterActive.value) return visibleTickets.value;
+    const now = Date.now();
+    return visibleTickets.value.filter((t) =>
+      ticketMatchesFilter(t, activeFilter.value, effectiveCategoryId(t), now),
+    );
+  });
+
+  /** Group facet-filtered visible tickets by `category_id` (applying optimistic
+   *  overrides). Derives from facetVisibleTickets so search AND the active
+   *  saved-view filter both narrow the board columns. */
   const byCategory = computed(() => {
     const map = new Map<number, Ticket[]>();
-    for (const t of visibleTickets.value) {
-      const catId = state.value.pendingOverrides[t.id] ?? t.category_id;
+    for (const t of facetVisibleTickets.value) {
+      const catId = effectiveCategoryId(t);
       if (catId === null) continue; // pending proposal — keyed by proposal_id elsewhere
       if (!map.has(catId)) map.set(catId, []);
       map.get(catId)!.push(t);
@@ -92,15 +128,37 @@ export const useTicketsStore = defineStore('tickets', () => {
     return map;
   });
 
-  /** Derives from visibleTickets so search filters proposal columns too. */
+  /** Derives from facetVisibleTickets so search + saved-view filter the
+   *  proposal columns too. */
   const byProposal = computed(() => {
     const map = new Map<number, Ticket[]>();
-    for (const t of visibleTickets.value) {
+    for (const t of facetVisibleTickets.value) {
       if (t.proposal_id === null) continue;
       if (!map.has(t.proposal_id)) map.set(t.proposal_id, []);
       map.get(t.proposal_id)!.push(t);
     }
     return map;
+  });
+
+  /** Resolved column list with the active saved-view filter applied (roadmap
+   *  1.1). The resolution facet decides whether resolved buckets show at all;
+   *  the category/urgency/age facets narrow within. Pass-through when no facet
+   *  is active. (Resolved lists intentionally ignore the live search `query`,
+   *  preserving the pre-1.1 behavior of the Resolved/Non-actionable columns.) */
+  const filteredPureResolvedTickets = computed(() => {
+    if (!isFilterActive.value) return pureResolvedTickets.value;
+    const now = Date.now();
+    return pureResolvedTickets.value.filter((t) =>
+      ticketMatchesFilter(t, activeFilter.value, effectiveCategoryId(t), now),
+    );
+  });
+
+  const filteredNonActionableTickets = computed(() => {
+    if (!isFilterActive.value) return nonActionableTickets.value;
+    const now = Date.now();
+    return nonActionableTickets.value.filter((t) =>
+      ticketMatchesFilter(t, activeFilter.value, effectiveCategoryId(t), now),
+    );
   });
 
   /** Every ticket keyed by id — intentionally walks the raw list, NOT
@@ -174,6 +232,17 @@ export const useTicketsStore = defineStore('tickets', () => {
   /** Set the live search query that filters the board. */
   function setQuery(q: string) {
     query.value = q;
+  }
+
+  /** Set the active saved-view / smart filter (roadmap 1.1). Stores a defensive
+   *  copy so the caller's object can mutate without leaking into the board. */
+  function setFilter(filter: SavedFilter) {
+    activeFilter.value = cloneFilter(filter);
+  }
+
+  /** Clear the active saved-view filter back to the pass-through default. */
+  function clearFilter() {
+    activeFilter.value = cloneFilter(EMPTY_FILTER);
   }
 
   /** Edit the AI-supplied title / summary. Optimistic local update; rolls back
@@ -595,12 +664,20 @@ export const useTicketsStore = defineStore('tickets', () => {
     lastRefresh,
     query,
     visibleTickets,
+    facetVisibleTickets,
     byCategory,
     byProposal,
     byId,
     refresh,
     silentRefresh,
     setQuery,
+    // Saved views / smart filters (roadmap 1.1)
+    activeFilter,
+    isFilterActive,
+    setFilter,
+    clearFilter,
+    filteredPureResolvedTickets,
+    filteredNonActionableTickets,
     applyOverride,
     editTicket,
     isEmpty: computed(() => !state.value.loading && state.value.tickets.length === 0),

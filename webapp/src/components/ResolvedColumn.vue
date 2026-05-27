@@ -15,7 +15,7 @@ const tickets = useTicketsStore();
 const view = useViewStore();
 const selection = useSelectionStore();
 
-const items = computed(() => tickets.pureResolvedTickets);
+const items = computed(() => tickets.filteredPureResolvedTickets);
 const selectedId = computed(() => view.selectedTicketId);
 
 /** Stable column key — shared by every card here so selection range-checks
