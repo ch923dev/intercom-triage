@@ -1,0 +1,37 @@
+{
+  "id": "1005",
+  "title": "Conversation with a novel message type",
+  "state": "open",
+  "priority": null,
+  "created_at": "2024-05-27T20:00:00.000Z",
+  "updated_at": "2024-05-27T20:15:00.000Z",
+  "author": {
+    "id": "user-ext-654",
+    "name": "Morgan New",
+    "email": "morgan@example.com",
+    "type": "user",
+    "location": null,
+    "timezone": null,
+    "phone": null,
+    "company": null
+  },
+  "url": "https://app.intercom.com/a/inbox/j3dxf22l/inbox/conversation/1005",
+  "parts": [
+    {
+      "author": {
+        "id": "user-ext-654",
+        "name": "Morgan New",
+        "email": "morgan@example.com",
+        "type": "user",
+        "location": null,
+        "timezone": null,
+        "phone": null,
+        "company": null
+      },
+      "body": "Hello, testing a new thing.",
+      "created_at": "2024-05-27T20:00:00.000Z",
+      "is_admin": false
+    }
+  ],
+  "internal_notes": []
+}
