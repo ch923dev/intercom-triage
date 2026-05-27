@@ -60,6 +60,9 @@ function fake(id: string, overrides: Partial<Ticket> = {}): Ticket {
     ai_priority: null,
     ai_sentiment: null,
     ai_labels: [],
+    parked_at: null,
+    parked_until: null,
+    parked_reason: null,
     ...overrides,
   };
 }

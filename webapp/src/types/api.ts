@@ -18,6 +18,12 @@ export interface Category {
 export type ProposalStatus = 'pending' | 'approved' | 'merged' | 'rejected';
 
 export type ResolvedSource = 'manual' | 'intercom_closed' | 'non_actionable' | 'ai_resolved';
+
+export type ParkedReason =
+  | 'waiting_on_customer'
+  | 'waiting_on_third_party'
+  | 'waiting_internal'
+  | 'other';
 export type ResolutionVerdict = 'resolved' | 'not_resolved' | 'non_actionable';
 export type ResolutionChipState = 'ai_resolved' | 'ai_reopened' | 'new_reply';
 // Roadmap 0.2 — triage facets from the categorization call.
@@ -208,6 +214,9 @@ export interface Ticket {
   ai_sentiment: AISentiment | null;
   /** Roadmap 0.2 — secondary multi-label tags beyond the single category. */
   ai_labels: string[];
+  parked_at: string | null;
+  parked_until: string | null;
+  parked_reason: ParkedReason | null;
 }
 
 // ── Bulk actions (plan §8d) ──────────────────────────────────────────────────
