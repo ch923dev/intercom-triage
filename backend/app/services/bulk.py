@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.metrics import metrics
 from app.models import Category, Override, Ticket
-from app.schemas import BulkFailure, BulkResult
+from app.schemas import BulkFailure, BulkResult, ParkedReason
 from app.services import followups as followups_svc
 from app.services import resolution as resolution_svc
 from app.util import naive_utcnow
@@ -155,6 +155,34 @@ async def bulk_recategorize(
 
     result = await _run_per_id(session, ticket_ids, per_id)
     _record_outcome("recategorize", result)
+    return result
+
+
+async def bulk_park(
+    session: AsyncSession, ticket_ids: list[str], until_at: datetime, reason: ParkedReason
+) -> BulkResult:
+    """Park N tickets until `until_at`. Resolved/already-parked rows fail 409."""
+
+    async def per_id(tid: str) -> None:
+        row = await resolution_svc.get_or_404(session, tid)
+        resolution_svc.apply_park(row, until_at, reason)
+        metrics.incr("tickets_parked_total")
+
+    result = await _run_per_id(session, ticket_ids, per_id)
+    _record_outcome("park", result)
+    return result
+
+
+async def bulk_unpark(session: AsyncSession, ticket_ids: list[str]) -> BulkResult:
+    """Unpark N tickets. Non-parked rows fail 409."""
+
+    async def per_id(tid: str) -> None:
+        row = await resolution_svc.get_or_404(session, tid)
+        resolution_svc.apply_unpark(row)
+        metrics.incr("tickets_unparked_total")
+
+    result = await _run_per_id(session, ticket_ids, per_id)
+    _record_outcome("unpark", result)
     return result
 
 
