@@ -9,6 +9,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
 import type { BulkResult, Ticket } from '@/types/api';
+import { needsReview } from '@/utils/review';
 import {
   cloneFilter,
   EMPTY_FILTER,
@@ -103,13 +104,48 @@ export const useTicketsStore = defineStore('tickets', () => {
     return state.value.pendingOverrides[t.id] ?? t.category_id;
   }
 
+  /** Effective override state — true when the operator has confirmed the
+   *  category, folding in any optimistic pending override so a just-confirmed
+   *  ticket drops out of the needs-review lane before the server round-trips
+   *  (mirrors effectiveCategoryId). */
+  function effectiveOverridden(t: Ticket): boolean {
+    return t.id in state.value.pendingOverrides || t.user_override;
+  }
+
+  /** Needs-review lane (roadmap 2.3). OPEN, non-overridden tickets whose
+   *  categorization self-confidence is below the threshold — a derived
+   *  view-layer split over `ai_confidence`, NOT a stored state (mirrors the
+   *  non-actionable column, invariant #10). Confirming a ticket (writing an
+   *  override) flips `effectiveOverridden` and removes it from the lane. Walks
+   *  the raw open list so the count is stable regardless of the active search /
+   *  saved-view filter. */
+  const needsReviewTickets = computed(() =>
+    state.value.tickets.filter((t) => needsReview(t, effectiveOverridden(t))),
+  );
+
+  /** When true, the board narrows every category column to needs-review tickets
+   *  (roadmap 2.3). A board-level lane toggle, layered on top of search + the
+   *  saved-view filter. Toggled from the Topbar. */
+  const reviewOnly = ref(false);
+  function setReviewOnly(v: boolean) {
+    reviewOnly.value = v;
+  }
+  function toggleReviewOnly() {
+    reviewOnly.value = !reviewOnly.value;
+  }
+
   /** `visibleTickets` further narrowed by the active saved-view filter
    *  (roadmap 1.1). Pass-through when no facet is active. A single `Date.now()`
    *  is sampled per recompute so every card in one pass shares an age clock. */
   const facetVisibleTickets = computed(() => {
-    if (!isFilterActive.value) return visibleTickets.value;
+    // The needs-review lane toggle (roadmap 2.3) narrows the board to OPEN,
+    // non-overridden, low-confidence tickets — layered on top of the saved-view
+    // filter, so it applies even when no facet is active.
+    let base = visibleTickets.value;
+    if (reviewOnly.value) base = base.filter((t) => needsReview(t, effectiveOverridden(t)));
+    if (!isFilterActive.value) return base;
     const now = Date.now();
-    return visibleTickets.value.filter((t) =>
+    return base.filter((t) =>
       ticketMatchesFilter(t, activeFilter.value, effectiveCategoryId(t), now),
     );
   });
@@ -678,6 +714,11 @@ export const useTicketsStore = defineStore('tickets', () => {
     clearFilter,
     filteredPureResolvedTickets,
     filteredNonActionableTickets,
+    // Needs-review lane (roadmap 2.3)
+    needsReviewTickets,
+    reviewOnly,
+    setReviewOnly,
+    toggleReviewOnly,
     applyOverride,
     editTicket,
     isEmpty: computed(() => !state.value.loading && state.value.tickets.length === 0),

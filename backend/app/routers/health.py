@@ -24,4 +24,5 @@ async def health(config: AppConfig = Depends(get_app_config)) -> HealthResponse:
         model=config.openrouter_model,
         openrouter_configured=config.openrouter_configured,
         missing_secrets=missing,
+        review_confidence_threshold=config.review_confidence_threshold,
     )

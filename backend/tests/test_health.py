@@ -14,3 +14,5 @@ async def test_health_ok_when_creds_present(client: AsyncClient) -> None:
     assert data["missing_secrets"] == []
     assert data["model"] == "anthropic/claude-sonnet-4.5"
     assert "version" in data
+    # Roadmap 2.3 — the needs-review threshold is surfaced for the webapp.
+    assert data["review_confidence_threshold"] == 0.65

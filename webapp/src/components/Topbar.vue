@@ -58,6 +58,9 @@ const ticketCountLabel = computed(() => {
 
 const proposalCount = computed(() => categories.pendingProposals.length);
 
+// Needs-review lane count (roadmap 2.3) — open, non-overridden, low-confidence.
+const reviewCount = computed(() => tickets.needsReviewTickets.length);
+
 function refresh() {
   void tickets.refresh();
 }
@@ -140,6 +143,25 @@ function onViewPick(e: Event) {
     </label>
 
     <Mono>{{ ticketCountLabel }}</Mono>
+
+    <!-- Needs-review lane toggle (roadmap 2.3) — narrows the board to OPEN,
+         non-overridden, low-confidence tickets. Shows the lane count; active
+         state mirrors the saved-views chip. Hidden when the lane is empty AND
+         not active, so it stays out of the way until there's something to
+         review. -->
+    <button
+      v-if="reviewCount > 0 || tickets.reviewOnly"
+      class="pill review"
+      :class="{ active: tickets.reviewOnly }"
+      :title="
+        tickets.reviewOnly
+          ? 'Showing needs-review tickets — click to clear'
+          : 'Show low-confidence tickets needing review'
+      "
+      @click="tickets.toggleReviewOnly()"
+    >
+      <span class="mono">{{ reviewCount }} review</span>
+    </button>
 
     <!-- Follow-up status pill (T051) — accent-pulse while an alarm is firing. -->
     <button
@@ -267,6 +289,20 @@ function onViewPick(e: Event) {
   border-color: var(--accent);
   color: #fff;
   animation: triagePulse 1.4s ease-in-out infinite;
+}
+/* Needs-review lane toggle (roadmap 2.3) — clickable, so cursor + hover unlike
+ * the static follow-up pill. Active state fills like the saved-views chip. */
+.pill.review {
+  cursor: pointer;
+}
+.pill.review:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.pill.review.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
 }
 /* Search — the label is the visual chip; the input inside is borderless. */
 .search {
