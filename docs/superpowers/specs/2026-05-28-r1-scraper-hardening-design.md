@@ -90,20 +90,28 @@ with code + conversation id, no body, then skip) is unchanged.
 
 ### D2 — Fixtures (`extension/fixtures/`)
 
-Synthetic payloads, real structure, fake PII. Correct the existing five to the
-confirmed shapes, then add two. Every `user_summary` carries the real key set
-(`pseudonym`, `company_ids: [...]`, `companies: []`, `first_company: null`,
-`geoip_data`, `user_id`, `id`, `role`, `timezone`, `phone`).
+Synthetic payloads, real structure, fake PII. **One new fixture** — the existing
+five already cover their cases (verified while planning):
 
-| fixture | covers |
-|---------|--------|
-| `conversation-customer.json` | type 1 messenger paragraph blocks (existing, shape-corrected) |
-| `conversation-admin-reply.json` | type 2 (`admin_summary`) + type 24 (`entity`) (existing) |
-| `conversation-internal-note.json` | type 3 → `internal_notes[]`, customer-visible split (existing) |
-| `conversation-mixed.json` | 1 + 24 + 3 + a skipped `5` (existing) |
-| `conversation-unknown-type.json` | genuinely unknown code (e.g. `999`) → warn + skip (existing) |
-| `conversation-email.json` | **NEW** — type 12 `{type:'html',content}` block → plain text in `parts[]` |
-| `conversation-events.json` | **NEW** — types `21,26,31` (+ a `5`) with real event data shapes, no text blocks → **silent** skip |
+- type 12 `{type:'html',content}` email is **already** exercised by
+  `conversation-customer.json` (part 2) + its existing test — no new email
+  fixture needed.
+- Adding the live-only-but-**ignored** `user_summary` keys (`pseudonym`,
+  `company_ids`, `phone_country`) to fixtures would not change
+  `normalizeConversation` output, so it adds no value to output snapshots (YAGNI).
+  Existing fixtures are left as-is.
+
+| fixture | covers | status |
+|---------|--------|--------|
+| `conversation-customer.json` | type 1 messenger + type 12 html email | existing, unchanged |
+| `conversation-admin-reply.json` | type 2 (`admin_summary`) + type 24 (`entity`) | existing, unchanged |
+| `conversation-internal-note.json` | type 3 → `internal_notes[]` split | existing, unchanged |
+| `conversation-mixed.json` | 1 + 24 + 3 + skipped `5` | existing, unchanged |
+| `conversation-unknown-type.json` | unknown `999` → warn + skip | existing, unchanged |
+| `conversation-events.json` | **NEW** — types `21,26,31` (+ a `5`) with real event data shapes (`priority/previous_priority`, `adding_entity`, `bot_id/rule_id`), no text blocks → **silent** skip | new |
+
+The new fixture's `user_summary` carries `companies: []` + `first_company: null`
+(the confirmed live reality) so it also anchors the company-null assertion.
 
 ### D3 — Snapshot harness (`extension/snapshot.test.js`)
 
@@ -127,14 +135,13 @@ function snapshot(name, value) {
 
 ### D4 — Behavioral tests (`extension/intercom.test.js`)
 
-Keep existing invariant/privacy asserts. Add three:
+Keep existing invariant/privacy asserts (type 12 html → plain text is already
+asserted in the existing customer test). Add two:
 
 - **`21/26/31 events skip SILENTLY`** — `conversation-events.json` → `parts`
   and `internal_notes` empty, `console.warn` call count === 0. Locks D1.
-- **`email (type 12) html block → plain text`** — `conversation-email.json` →
-  one `parts[]` entry, HTML stripped + entities decoded, `is_admin=false`.
-- **`author.company is null when companies empty`** — any fixture →
-  `author.company === null`. Locks the confirmed company reality.
+- **`author.company is null when companies empty`** — `conversation-events.json`
+  → `author.company === null`. Locks the confirmed company reality.
 
 ### D5 — Docs / memory
 
