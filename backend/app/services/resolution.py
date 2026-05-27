@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.metrics import metrics
 from app.models import Ticket
-from app.schemas import ResolvedSource
+from app.schemas import ParkedReason, ResolvedSource
 from app.util import naive_utcnow
 
 
@@ -27,7 +27,7 @@ class ResolveOutcome:
 class ParkOutcome:
     parked_at: datetime
     parked_until: datetime
-    parked_reason: str
+    parked_reason: ParkedReason
 
 
 async def get_or_404(session: AsyncSession, ticket_id: str) -> Ticket:
@@ -76,7 +76,7 @@ def clear_parked(row: Ticket) -> None:
     row.parked_reason = None
 
 
-def apply_park(row: Ticket, until_at: datetime, reason: str) -> ParkOutcome:
+def apply_park(row: Ticket, until_at: datetime, reason: ParkedReason) -> ParkOutcome:
     """Mutate a Ticket row into the parked state. Does NOT commit.
     409 if the row is resolved (reopen first) or already parked."""
     if row.resolved_at is not None:
@@ -139,7 +139,7 @@ async def mark_non_actionable(session: AsyncSession, ticket_id: str) -> ResolveO
 
 
 async def park(
-    session: AsyncSession, ticket_id: str, until_at: datetime, reason: str
+    session: AsyncSession, ticket_id: str, until_at: datetime, reason: ParkedReason
 ) -> ParkOutcome:
     """Park a ticket until `until_at`. 409 if resolved or already parked."""
     row = await get_or_404(session, ticket_id)

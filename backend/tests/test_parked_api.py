@@ -10,18 +10,31 @@ from app.util import naive_utcnow
 
 
 async def _seed_open(session: AsyncSession, tid: str = "api-1") -> None:
-    session.add(Ticket(
-        id=tid, title="t", state="open", priority=None, url=None,
-        author={}, parts=[], internal_notes=[],
-        created_at=naive_utcnow(), updated_at=naive_utcnow(), summary="", ai_confidence=0.0,
-    ))
+    session.add(
+        Ticket(
+            id=tid,
+            title="t",
+            state="open",
+            priority=None,
+            url=None,
+            author={},
+            parts=[],
+            internal_notes=[],
+            created_at=naive_utcnow(),
+            updated_at=naive_utcnow(),
+            summary="",
+            ai_confidence=0.0,
+        )
+    )
     await session.commit()
 
 
 async def test_park_and_unpark_roundtrip(client: AsyncClient, session: AsyncSession) -> None:
     await _seed_open(session)
     until = (naive_utcnow() + timedelta(hours=1)).isoformat() + "Z"
-    r = await client.post("/tickets/api-1/park", json={"until_at": until, "reason": "waiting_on_customer"})
+    r = await client.post(
+        "/tickets/api-1/park", json={"until_at": until, "reason": "waiting_on_customer"}
+    )
     assert r.status_code == 200, r.text
     assert r.json()["parked_reason"] == "waiting_on_customer"
     r2 = await client.post("/tickets/api-1/unpark", json={})

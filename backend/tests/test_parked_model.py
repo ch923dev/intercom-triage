@@ -11,10 +11,18 @@ from app.util import naive_utcnow
 
 async def _make_open_ticket(session: AsyncSession, tid: str = "park-1") -> Ticket:
     row = Ticket(
-        id=tid, title="t", state="open", priority=None, url=None,
-        author={}, parts=[], internal_notes=[],
-        created_at=naive_utcnow(), updated_at=naive_utcnow(),
-        summary="", ai_confidence=0.0,
+        id=tid,
+        title="t",
+        state="open",
+        priority=None,
+        url=None,
+        author={},
+        parts=[],
+        internal_notes=[],
+        created_at=naive_utcnow(),
+        updated_at=naive_utcnow(),
+        summary="",
+        ai_confidence=0.0,
     )
     session.add(row)
     await session.commit()

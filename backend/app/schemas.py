@@ -61,9 +61,7 @@ LookbackUnit = Literal["hours", "days"]
 CategorySource = Literal["seed", "ai_proposed", "user_created"]
 ProposalStatus = Literal["pending", "approved", "merged", "rejected"]
 ResolvedSource = Literal["manual", "intercom_closed", "non_actionable", "ai_resolved"]
-ParkedReason = Literal[
-    "waiting_on_customer", "waiting_on_third_party", "waiting_internal", "other"
-]
+ParkedReason = Literal["waiting_on_customer", "waiting_on_third_party", "waiting_internal", "other"]
 ResolutionVerdict = Literal["resolved", "non_actionable", "not_resolved"]
 ResolutionChipState = Literal["ai_resolved", "ai_reopened", "new_reply"]
 # Roadmap 0.2 — triage facets emitted by the categorization call.
@@ -511,7 +509,7 @@ class ParkRequest(BaseModel):
     reason: ParkedReason
 
     @model_validator(mode="after")
-    def _check_future(self) -> "ParkRequest":
+    def _check_future(self) -> ParkRequest:
         _require_future_until(self.until_at)
         return self
 
@@ -644,7 +642,7 @@ class BulkParkRequest(BulkTicketIds):
     reason: ParkedReason
 
     @model_validator(mode="after")
-    def _check_future(self) -> "BulkParkRequest":
+    def _check_future(self) -> BulkParkRequest:
         _require_future_until(self.until_at)
         return self
 

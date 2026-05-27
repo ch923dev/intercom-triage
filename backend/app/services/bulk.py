@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.metrics import metrics
 from app.models import Category, Override, Ticket
-from app.schemas import BulkFailure, BulkResult
+from app.schemas import BulkFailure, BulkResult, ParkedReason
 from app.services import followups as followups_svc
 from app.services import resolution as resolution_svc
 from app.util import naive_utcnow
@@ -159,7 +159,7 @@ async def bulk_recategorize(
 
 
 async def bulk_park(
-    session: AsyncSession, ticket_ids: list[str], until_at: datetime, reason: str
+    session: AsyncSession, ticket_ids: list[str], until_at: datetime, reason: ParkedReason
 ) -> BulkResult:
     """Park N tickets until `until_at`. Resolved/already-parked rows fail 409."""
 
