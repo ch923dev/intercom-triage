@@ -91,11 +91,19 @@ class OpenRouterClient:
         model: str,
         messages: list[dict[str, str]],
         ticket_id: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> str:
         """Call `/chat/completions` and return the assistant message content.
 
         Request shape per plan §7: `temperature=0.1`, `max_tokens=400`,
         `response_format={type:"json_object"}`.
+
+        ``response_format`` defaults to ``{"type": "json_object"}`` so existing
+        callers (e.g. the playbook drafter) are unaffected.  The categorization
+        pipeline passes a strict ``{"type": "json_schema", ...}`` value to enforce
+        the response shape natively (roadmap 2.1).  An endpoint that rejects the
+        schema returns a non-retryable 4xx, which surfaces as ``OpenRouterError``
+        and degrades to the caller's per-ticket fallback — ingest never aborts.
 
         Retries up to ``_MAX_ATTEMPTS`` times on 429/5xx and transient network
         errors, with exponential backoff plus jitter.  Non-retryable statuses
@@ -108,7 +116,7 @@ class OpenRouterClient:
             "messages": messages,
             "temperature": 0.1,
             "max_tokens": 400,
-            "response_format": {"type": "json_object"},
+            "response_format": response_format or {"type": "json_object"},
         }
 
         last_error: Exception | None = None

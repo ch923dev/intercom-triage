@@ -7,6 +7,7 @@ Each test builds a response queue; the transport pops one entry per request.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -242,3 +243,52 @@ def test_parse_retry_after_numeric() -> None:
     assert _parse_retry_after(None) is None
     assert _parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT") is None
     assert _parse_retry_after("  10  ") == 10.0
+
+
+# ---------------------------------------------------------------------------
+# response_format injection (roadmap 2.1)
+# ---------------------------------------------------------------------------
+
+
+class _CapturingTransport(httpx.AsyncBaseTransport):
+    """Records the JSON body of the request, then returns a fixed 200."""
+
+    def __init__(self) -> None:
+        self.body: dict[str, Any] | None = None
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.body = json.loads(request.content)
+        return _make_response(200, _GOOD_BODY)
+
+
+@pytest.mark.asyncio
+async def test_default_response_format_is_json_object() -> None:
+    """Callers that omit response_format get the unchanged json_object default."""
+    transport = _CapturingTransport()
+    http = httpx.AsyncClient(base_url="https://openrouter.ai/api/v1", transport=transport)
+    client = OpenRouterClient("fake-key", http=http)
+    try:
+        await client.complete(model="m", messages=[{"role": "user", "content": "hi"}])
+        assert transport.body is not None
+        assert transport.body["response_format"] == {"type": "json_object"}
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_injected_response_format_is_forwarded() -> None:
+    """An injected json_schema response_format reaches the request body verbatim."""
+    transport = _CapturingTransport()
+    http = httpx.AsyncClient(base_url="https://openrouter.ai/api/v1", transport=transport)
+    client = OpenRouterClient("fake-key", http=http)
+    schema = {"type": "json_schema", "json_schema": {"name": "x", "strict": True, "schema": {}}}
+    try:
+        await client.complete(
+            model="m",
+            messages=[{"role": "user", "content": "hi"}],
+            response_format=schema,
+        )
+        assert transport.body is not None
+        assert transport.body["response_format"] == schema
+    finally:
+        await client.aclose()
