@@ -8,7 +8,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
-import type { BulkResult, Ticket } from '@/types/api';
+import type { BulkResult, ParkedReason, Ticket } from '@/types/api';
 import { needsReview } from '@/utils/review';
 import {
   cloneFilter,
@@ -120,7 +120,7 @@ export const useTicketsStore = defineStore('tickets', () => {
    *  the raw open list so the count is stable regardless of the active search /
    *  saved-view filter. */
   const needsReviewTickets = computed(() =>
-    state.value.tickets.filter((t) => needsReview(t, effectiveOverridden(t))),
+    state.value.tickets.filter((t) => t.parked_at === null && needsReview(t, effectiveOverridden(t))),
   );
 
   /** When true, the board narrows every category column to needs-review tickets
@@ -134,15 +134,39 @@ export const useTicketsStore = defineStore('tickets', () => {
     reviewOnly.value = !reviewOnly.value;
   }
 
+  /** When true, the board narrows to PARKED tickets (roadmap 4.1, Layout B).
+   *  A board-level toggle like `reviewOnly`, driven by the Topbar parked chip. */
+  const parkedOnly = ref(false);
+  function setParkedOnly(v: boolean) {
+    parkedOnly.value = v;
+  }
+  function toggleParkedOnly() {
+    parkedOnly.value = !parkedOnly.value;
+  }
+
+  /** Open tickets currently parked (parked_at set). Parked rows ride in the
+   *  open list (resolved_at is null), so this is a straight filter. */
+  const parkedTickets = computed(() => state.value.tickets.filter((t) => t.parked_at !== null));
+
+  /** Count of parked tickets whose wake time has passed ("ready to resume"). */
+  const readyParkedCount = computed(() => {
+    const now = Date.now();
+    return parkedTickets.value.filter(
+      (t) => t.parked_until !== null && Date.parse(t.parked_until) <= now,
+    ).length;
+  });
+
   /** `visibleTickets` further narrowed by the active saved-view filter
    *  (roadmap 1.1). Pass-through when no facet is active. A single `Date.now()`
    *  is sampled per recompute so every card in one pass shares an age clock. */
   const facetVisibleTickets = computed(() => {
-    // The needs-review lane toggle (roadmap 2.3) narrows the board to OPEN,
-    // non-overridden, low-confidence tickets — layered on top of the saved-view
-    // filter, so it applies even when no facet is active.
     let base = visibleTickets.value;
     if (reviewOnly.value) base = base.filter((t) => needsReview(t, effectiveOverridden(t)));
+    // Layout B: parked tickets leave the category columns. The parked chip flips
+    // `parkedOnly` to show ONLY parked; otherwise parked rows are hidden.
+    base = parkedOnly.value
+      ? base.filter((t) => t.parked_at !== null)
+      : base.filter((t) => t.parked_at === null);
     if (!isFilterActive.value) return base;
     const now = Date.now();
     return base.filter((t) =>
@@ -389,6 +413,51 @@ export const useTicketsStore = defineStore('tickets', () => {
     } catch (e) {
       state.value.tickets = state.value.tickets.filter((t) => t.id !== id);
       resolvedTickets.value.splice(idx, 0, original);
+      throw e;
+    } finally {
+      mutating.value--;
+    }
+  }
+
+  /** Park a ticket in place (it stays in the open list, drops out of columns).
+   *  Optimistic; rolls back on server failure. */
+  async function parkTicket(id: string, untilAt: string, reason: ParkedReason) {
+    const idx = state.value.tickets.findIndex((t) => t.id === id);
+    if (idx === -1) return;
+    const original = state.value.tickets[idx]!;
+    mutating.value++;
+    state.value.tickets.splice(idx, 1, {
+      ...original,
+      parked_at: new Date().toISOString(),
+      parked_until: untilAt,
+      parked_reason: reason,
+    });
+    try {
+      await api.parkTicket(id, untilAt, reason);
+    } catch (e) {
+      state.value.tickets.splice(idx, 1, original);
+      throw e;
+    } finally {
+      mutating.value--;
+    }
+  }
+
+  /** Clear a ticket's parked state in place; rolls back on failure. */
+  async function unparkTicket(id: string) {
+    const idx = state.value.tickets.findIndex((t) => t.id === id);
+    if (idx === -1) return;
+    const original = state.value.tickets[idx]!;
+    mutating.value++;
+    state.value.tickets.splice(idx, 1, {
+      ...original,
+      parked_at: null,
+      parked_until: null,
+      parked_reason: null,
+    });
+    try {
+      await api.unparkTicket(id);
+    } catch (e) {
+      state.value.tickets.splice(idx, 1, original);
       throw e;
     } finally {
       mutating.value--;
@@ -670,6 +739,45 @@ export const useTicketsStore = defineStore('tickets', () => {
     }
   }
 
+  /** Bulk park — sets the trio on every ok id the server confirms. */
+  async function bulkPark(ids: string[], untilAt: string, reason: ParkedReason): Promise<BulkResult> {
+    mutating.value++;
+    try {
+      const result = await api.bulkPark(ids, untilAt, reason);
+      const okSet = new Set(result.ok_ids);
+      const stamped = new Date().toISOString();
+      for (const t of state.value.tickets) {
+        if (okSet.has(t.id)) {
+          t.parked_at = stamped;
+          t.parked_until = untilAt;
+          t.parked_reason = reason;
+        }
+      }
+      return result;
+    } finally {
+      mutating.value--;
+    }
+  }
+
+  /** Bulk unpark — clears the trio on every ok id. */
+  async function bulkUnpark(ids: string[]): Promise<BulkResult> {
+    mutating.value++;
+    try {
+      const result = await api.bulkUnpark(ids);
+      const okSet = new Set(result.ok_ids);
+      for (const t of state.value.tickets) {
+        if (okSet.has(t.id)) {
+          t.parked_at = null;
+          t.parked_until = null;
+          t.parked_reason = null;
+        }
+      }
+      return result;
+    } finally {
+      mutating.value--;
+    }
+  }
+
   /** Roll back from a snapshot — reinsert each row into state.value.tickets
    *  at its original index and prune it from resolvedTickets. Used by
    *  bulkResolve when per-id `failed[]` is non-empty. */
@@ -739,5 +847,15 @@ export const useTicketsStore = defineStore('tickets', () => {
     bulkReopen,
     bulkRecategorize,
     bulkDismissChip,
+    // Parked / snoozed (roadmap 4.1)
+    parkedTickets,
+    readyParkedCount,
+    parkedOnly,
+    setParkedOnly,
+    toggleParkedOnly,
+    parkTicket,
+    unparkTicket,
+    bulkPark,
+    bulkUnpark,
   };
 });
