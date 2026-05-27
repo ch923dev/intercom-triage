@@ -430,11 +430,24 @@ class FilterSettings(BaseModel):
 # ── Metrics ───────────────────────────────────────────────────────────────────
 
 
+class LatencyHistogram(BaseModel):
+    """Per-key latency distribution (milliseconds) over the retained sample
+    window. Fed by `observability.logged_call` for external HTTP calls."""
+
+    count: int
+    p50: float
+    p95: float
+    max: float
+
+
 class MetricsResponse(BaseModel):
-    """Process-lifetime counters (plan §11). Keys with a `.` carry a label,
-    e.g. `ai_calls_total.ok`, `proposals_resolved_total.rejected`."""
+    """Process-lifetime counters + latency histograms (plan §11). Counter keys
+    with a `.` carry a label, e.g. `ai_calls_total.ok`,
+    `proposals_resolved_total.rejected`. Histogram keys are namespaced per op,
+    e.g. `latency_ms.openrouter.complete`."""
 
     counters: dict[str, int]
+    histograms: dict[str, LatencyHistogram] = Field(default_factory=dict)
 
 
 # ── Bulk actions ──────────────────────────────────────────────────────────────

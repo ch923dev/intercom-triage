@@ -16,6 +16,8 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from app.metrics import metrics
+
 log = logging.getLogger("triage")
 
 
@@ -48,6 +50,7 @@ async def logged_call(op: str, ticket_id: str | None = None) -> AsyncIterator[No
         raise
     finally:
         duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        metrics.observe(f"latency_ms.{op}", duration_ms)
         log_event(
             "external_call",
             op=op,
