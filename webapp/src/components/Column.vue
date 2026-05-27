@@ -22,6 +22,8 @@ interface Props {
   column: Column;
   tickets: Ticket[];
   selectedId?: string | null;
+  /** Keyboard-triage cursor id (NFR-007) — distinct from `selectedId`. */
+  focusedId?: string | null;
 }
 const props = defineProps<Props>();
 
@@ -131,6 +133,7 @@ function modelList() {
         <TicketCard
           :ticket="element"
           :selected="props.selectedId === element.id"
+          :focused="props.focusedId === element.id"
           :multi-selected="selection.has(element.id)"
           :overridden="element.user_override || !!ticketsStore.pendingOverrides[element.id]"
           @click="(e: MouseEvent) => onCardClick(element, e)"

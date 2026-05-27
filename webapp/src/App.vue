@@ -16,6 +16,7 @@ import ProposalsPage from '@/components/ProposalsPage.vue';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
 import TicketFlyout from '@/components/TicketFlyout.vue';
 import Topbar from '@/components/Topbar.vue';
+import { useKeyboardTriage } from '@/composables/useKeyboardTriage';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
 import { useNoteEntriesStore } from '@/stores/noteEntries';
@@ -36,6 +37,7 @@ const noteEntries = useNoteEntriesStore();
 const view = useViewStore();
 const tweaks = useTweaksStore();
 const selection = useSelectionStore();
+const triage = useKeyboardTriage();
 
 const COLUMN_STEP = 296; // column width (280) + gutter
 
@@ -174,6 +176,18 @@ function onKeydown(e: KeyboardEvent) {
     return;
   }
   if (view.view !== 'board') return;
+
+  // Keyboard-driven triage (NFR-007): j/k navigate, e resolves, 1..9
+  // recategorize the focused card. Suppressed while a modal surface is open
+  // (flyout / settings drawer) so those keep their own focus + Escape
+  // semantics; the bulk-selection set does not block triage (it has no key
+  // overlap). See composables/useKeyboardTriage.ts for the key scheme.
+  const modalOpen = view.selectedTicketId !== null || view.drawerOpen;
+  if (!modalOpen && triage.runTriageKey(e.key)) {
+    e.preventDefault();
+    return;
+  }
+
   if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
     const board = document.querySelector<HTMLElement>('.board');
     if (!board) return;
@@ -248,7 +262,9 @@ watch(
         Last {{ settings.lookbackValue }} {{ settings.lookbackUnit }} · auto-categorized · drag to
         override
       </span>
-      <span class="mono">r refresh · ←/→ columns · / search</span>
+      <span class="mono"
+        >j/k focus · e resolve · 1-9 categorize · r refresh · ←/→ columns · / search</span
+      >
     </footer>
 
     <SettingsDrawer />
