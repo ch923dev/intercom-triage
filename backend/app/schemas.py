@@ -8,9 +8,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer, model_validator
 
 from app.config import MAX_BULK_IDS
+from app.util import naive_utcnow
 
 
 def _naive_utc(value: datetime) -> datetime:
@@ -37,6 +38,12 @@ def _isoformat_utc(value: datetime) -> str:
     return aware.isoformat().replace("+00:00", "Z")
 
 
+def _require_future_until(until_at: datetime) -> None:
+    # `until_at` is already coerced to naive UTC by NaiveUTCDatetime.
+    if until_at <= naive_utcnow():
+        raise ValueError("until_at must be in the future")
+
+
 # Emits a `Z`-suffixed UTC ISO string on output. Use for every datetime that
 # leaves the API in a response model.
 UTCDatetime = Annotated[datetime, PlainSerializer(_isoformat_utc, return_type=str)]
@@ -54,6 +61,9 @@ LookbackUnit = Literal["hours", "days"]
 CategorySource = Literal["seed", "ai_proposed", "user_created"]
 ProposalStatus = Literal["pending", "approved", "merged", "rejected"]
 ResolvedSource = Literal["manual", "intercom_closed", "non_actionable", "ai_resolved"]
+ParkedReason = Literal[
+    "waiting_on_customer", "waiting_on_third_party", "waiting_internal", "other"
+]
 ResolutionVerdict = Literal["resolved", "non_actionable", "not_resolved"]
 ResolutionChipState = Literal["ai_resolved", "ai_reopened", "new_reply"]
 # Roadmap 0.2 — triage facets emitted by the categorization call.
@@ -464,6 +474,11 @@ class TicketSchema(HydratedTicket):
     ai_priority: AIPriority | None = None
     ai_sentiment: AISentiment | None = None
     ai_labels: list[str] = Field(default_factory=list)
+    # Roadmap 4.1 (T106) — parked / snoozed state. Board-state, like resolved_*
+    # (NOT on HydratedTicket). `ready` is derived client-side from parked_until.
+    parked_at: UTCDatetime | None = None
+    parked_until: UTCDatetime | None = None
+    parked_reason: ParkedReason | None = None
 
 
 class CategoryUpdate(BaseModel):
@@ -486,6 +501,29 @@ class ResolveResponse(BaseModel):
 
 
 class ReopenResponse(BaseModel):
+    ok: Literal[True] = True
+
+
+class ParkRequest(BaseModel):
+    """POST /tickets/{id}/park body. `until_at` is the wake time (must be future)."""
+
+    until_at: NaiveUTCDatetime
+    reason: ParkedReason
+
+    @model_validator(mode="after")
+    def _check_future(self) -> "ParkRequest":
+        _require_future_until(self.until_at)
+        return self
+
+
+class ParkResponse(BaseModel):
+    ok: Literal[True] = True
+    parked_at: UTCDatetime
+    parked_until: UTCDatetime
+    parked_reason: ParkedReason
+
+
+class UnparkResponse(BaseModel):
     ok: Literal[True] = True
 
 
@@ -597,6 +635,18 @@ class BulkFollowupSet(BulkTicketIds):
 
     due_at: datetime
     reason: str | None = Field(default=None, max_length=80)
+
+
+class BulkParkRequest(BulkTicketIds):
+    """POST /tickets/bulk/park body — one wake time + reason applied to N tickets."""
+
+    until_at: NaiveUTCDatetime
+    reason: ParkedReason
+
+    @model_validator(mode="after")
+    def _check_future(self) -> "BulkParkRequest":
+        _require_future_until(self.until_at)
+        return self
 
 
 class BulkFailure(BaseModel):
