@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 1.6 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 1.7 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v1.6:** reconciliation backfill — the forward roadmap (`docs/ROADMAP.md`) was executed in full through Phase 3 + 4.1, but the shipped capability landed in code ahead of this spec. This version writes the source-of-truth requirements for the 19 shipped-but-undocumented features: triage facets (US-022), aging indicators (US-023), keyboard triage (US-024), saved views (US-025), priority-sorted queue (US-026), stats dashboard (US-027), cost meter (US-028), snippets (US-029), bulk pre-flight diff (US-030), reliable structured AI output (US-031), model cascade (US-032), needs-review lane (US-033), local embedding layer (US-034), few-shot categorization (US-035), RAG draft replies (US-036), recurring-issue clustering (US-037), playbook-gap detection (US-038), playbook auto-match (US-039). Adds FR-043..FR-061 and NFR-009. No capability removed; no behavior changed — code and spec are now in sync.
 
 **Changes from v1.5:** backfilled definitions for two capabilities already shipped in code and traced in `tasks.md` but missing from this spec. Added the **non-actionable tickets** capability — US-019 / FR-037 let the operator (or AI ingest) mark spam / thank-you / out-of-scope tickets as a non-actionable sub-state of resolved, split out at the view layer. Also documented the **reusable playbooks** capability already present as US-020 / FR-038..FR-041.
 
@@ -256,6 +258,212 @@ internal) until a chosen time with a reason, so it leaves my live queue without
 being lost; when the wake time passes it flags "ready to resume" and I unpark it
 in one click.
 
+### US-022 — Triage facets on every card
+Beyond a category, I see the AI's read of each ticket's priority, the customer's
+sentiment, and a few free-form labels, so I can work the queue by urgency and
+tone — not just by topic.
+
+Acceptance:
+- The same categorization call returns `priority` (low / normal / high / urgent),
+  `sentiment` (negative / neutral / positive), and zero or more short `labels`.
+- The facets are cached alongside the categorization result and reused on warm
+  fetches without re-calling the AI.
+- Facets add no second AI call and do not change the cache key — internal
+  teammate notes still don't bust the cache.
+- Cards display a priority badge and (where shown) sentiment; tickets predating
+  this capability simply carry no facets.
+
+### US-023 — Aging indicators on cards
+I can see at a glance how long a ticket has gone without a customer reply, so
+stale tickets stop silently rotting.
+
+Acceptance:
+- Each card carries an age tier derived from time since its last
+  customer-visible message.
+- The tier is shown as a visual treatment (e.g. a colored stripe), tiered by
+  configurable thresholds held in one place.
+- Aging is presentation only — it never changes stored state or ordering by
+  itself.
+
+### US-024 — Keyboard-driven triage
+I can run a full triage loop from the keyboard without reaching for the mouse.
+
+Acceptance:
+- `j` / `k` move focus between cards; `e` resolves the focused ticket; a digit
+  key moves it to the Nth category; `/` focuses the search box.
+- Shortcuts never fire while a text input, textarea, or contenteditable is
+  focused.
+- The focused card is visibly indicated.
+
+### US-025 — Saved views / smart filters
+I can save a named filter preset (category, age, urgency, resolution source) and
+recall it in one click — e.g. "my morning queue."
+
+Acceptance:
+- I can save the current filter facets as a named view and re-apply it later.
+- Saved views persist locally across reloads.
+- Applying a view sets the active filter; clearing returns to the default board.
+- Saving a view requires no backend change — the board already returns the
+  fields a view filters on.
+
+### US-026 — Priority-sorted queue
+I can sort or group the board by the AI priority facet so I drain the most
+urgent tickets first.
+
+Acceptance:
+- A toggle orders cards within each column by priority (urgent → low), falling
+  back to recency within a priority band.
+- The setting is remembered across reloads.
+- With the toggle off, the existing recency / follow-up-due ordering is
+  unchanged.
+
+### US-027 — Stats dashboard
+I can see how the queue is performing: category breakdown, volume trend,
+resolution-source mix, and how long tickets take to resolve.
+
+Acceptance:
+- A dashboard renders the four success metrics (spec §8) over a trailing window
+  I can choose (in days).
+- The numbers are aggregated server-side over the local store; no new ingest is
+  required.
+- Resolution mix distinguishes manual / intercom_closed / non_actionable /
+  ai-confirmed sources.
+
+### US-028 — Token / cost meter
+I can see how much I'm spending on the AI provider per day, since I pay for my
+own calls.
+
+Acceptance:
+- Per-day OpenRouter token usage and an estimated USD cost are tracked,
+  bucketed by date and model.
+- The current day's spend is visible in the webapp.
+- The estimate is best-effort from token counts × model pricing; it resets on
+  backend restart (in-process counters) and is never billed-against.
+
+### US-029 — Snippets / canned responses
+I can keep short reusable reply snippets with fill-in placeholders, lighter than
+a full playbook, for high-frequency answers.
+
+Acceptance:
+- I can create, edit, archive, and restore snippets, each a title plus a body.
+- A body may contain `{{variable}}` placeholders; substitution happens
+  client-side from the ticket I'm viewing.
+- Snippets are durable operator knowledge — they survive ingest / re-sync and
+  are never content-keyed.
+
+### US-030 — Bulk pre-flight diff
+Before I apply a bulk action I see how many tickets it will actually affect and
+how many will be skipped, so the bulk path stays legible.
+
+Acceptance:
+- Selecting a bulk action previews a count, e.g. "12 will resolve, 3 skipped
+  (already resolved)."
+- The preview respects the `MAX_BULK_IDS` cap and warns before a selection over
+  the cap.
+- The preview is computed client-side from already-loaded ticket state.
+
+### US-031 — Reliable structured AI output
+The AI's categorization output is structurally valid so the board doesn't fall
+back to "Other" because of a malformed `{...}` response.
+
+Acceptance:
+- The categorization call requests a schema-enforced JSON object.
+- A response that doesn't satisfy the schema is rejected and degrades to the
+  fallback for that one ticket — the batch never aborts (FR-007 unchanged).
+
+### US-032 — Model cascade (opt-in)
+To cut cost, easy tickets can be categorized by a cheap model and only
+low-confidence ones escalated to the strong model.
+
+Acceptance:
+- A cheap model handles the first pass; when its self-reported confidence is
+  below a configurable threshold (or the cheap call fails / is malformed), the
+  ticket escalates to the strong model.
+- The cascade is off by default — out-of-the-box behavior is a single
+  strong-model call.
+- The escalation trigger reuses the same confidence the needs-review lane reads.
+
+### US-033 — Needs-review lane
+Low-confidence categorizations surface in a dedicated review lane instead of
+silently committing, so I can confirm the AI's guesses.
+
+Acceptance:
+- An open, non-overridden ticket whose categorization confidence is below a
+  calibrated threshold appears in a "needs review" lane.
+- The lane is a view-layer split over the existing confidence value — not a
+  stored ticket state.
+- Confirming a ticket (writing an override) removes it from the lane.
+
+### US-034 — Local embedding layer
+The tool can embed ticket text locally and offline, providing the vector
+substrate for few-shot, RAG, clustering, and auto-match — with no data leaving
+the machine.
+
+Acceptance:
+- Customer-visible `parts[]` (+ title / operator notes) are embedded with a
+  local CPU model; `internal_notes[]` are never embedded.
+- Embeddings are computed on ingest and stored in the local database; computing
+  them never busts the AI content-signature cache.
+- The layer can be disabled (e.g. low-RAM machines); disabled means the ingest
+  hook is a no-op and the dependent features degrade gracefully.
+
+### US-035 — Few-shot categorization from confirmed overrides
+The categorizer learns from my confirmed category overrides by showing the AI
+the nearest confirmed examples, improving consistency on repeat issues.
+
+Acceptance:
+- When categorizing an uncached ticket, the nearest confirmed-override
+  neighbours are retrieved and injected into the prompt as examples.
+- The number of examples is configurable; zero disables injection and matches
+  the cold-corpus prompt exactly.
+- Retrieval is gated on the embedding layer — no embeddings, no neighbours.
+
+### US-036 — RAG draft replies
+I can ask for a draft customer reply grounded in our own resolved tickets and
+playbooks, so drafts match my voice and prior resolutions rather than being
+generic.
+
+Acceptance:
+- A draft is grounded in the nearest resolved tickets (customer-visible content
+  only) plus the ticket's effective-category playbooks.
+- The draft is ephemeral — never persisted as ticket state — and exposes what
+  it was grounded in (ticket ids, playbook ids) for transparency.
+- `internal_notes[]` never reach a draft.
+
+### US-037 — Recurring-issue clustering
+The tool groups resolved tickets into recurring-issue clusters so I can see
+which problems repeat.
+
+Acceptance:
+- An offline periodic job clusters resolved tickets' embeddings and labels each
+  cluster with its top terms drawn from customer-visible text only.
+- Clustering runs in the background (not per request) and outliers are flagged,
+  not force-fit into a cluster.
+- The cluster snapshot is read-only over the API; a manual recompute is
+  available.
+
+### US-038 — "What should I build a playbook for"
+I can see which recurring-issue clusters have no matching playbook yet, ranked
+by frequency, so I know where a playbook would pay off most.
+
+Acceptance:
+- Clusters whose dominant effective category has no active playbook are listed,
+  ranked most-recurring-first.
+- Each entry names the category to write a playbook for and the support behind
+  the suggestion.
+- The ranking is read-only local logic over the cluster snapshot + playbooks.
+
+### US-039 — Playbook auto-match on ticket open
+When I open a ticket, the most relevant playbooks for it are suggested
+automatically rather than my scanning a category-filtered list.
+
+Acceptance:
+- On open, the ticket's effective-category playbooks are ranked by semantic
+  similarity to its customer-visible text, most-relevant-first.
+- Suggestions are ephemeral and scoped to the effective category (override beats
+  AI); an uncategorized ticket or one with no in-category playbooks shows none.
+- Computing suggestions never busts the AI cache.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -302,6 +510,25 @@ in one click.
 | FR-040 | `POST /playbooks/draft` returns an ephemeral AI-drafted body from the ticket's customer-visible `parts` + operator notes. It MUST NOT read `internal_notes` (FR-005 / invariant #4). 503 when AI is unconfigured. | US-020 |
 | FR-041 | A library page lists playbooks grouped by category with edit, archive, and restore (including an archived view); new playbooks are captured from a ticket flyout (FR-039/FR-040). | US-020 |
 | FR-042 | A ticket may be parked: `parked_at` + `parked_until` + `parked_reason` (`waiting_on_customer` \| `waiting_on_third_party` \| `waiting_internal` \| `other`), the trio XOR-constrained (all-set or all-null) and never co-existing with `resolved_at`; every resolve path clears it. Park is orthogonal to resolution and category. An optional free-text `parked_note` (≤200 chars, cleared with the trio) elaborates the reason — surfaced as a text box when the reason is `other`. The system exposes `POST /tickets/{id}/park`, `POST /tickets/{id}/unpark`, `POST /tickets/bulk/park`, `POST /tickets/bulk/unpark` (`until_at` must be future; bulk bounded by `MAX_BULK_IDS`). Parked tickets are excluded from the live category columns and surfaced via a parked-only filter chip; "ready to resume" (`parked_until ≤ now`) is derived on read, never stored. Parked state is operator-owned and survives ingest / re-sync untouched. | US-021 |
+| FR-043 | The categorization call also returns `priority` (`low`\|`normal`\|`high`\|`urgent`), `sentiment` (`negative`\|`neutral`\|`positive`), and a list of short free-form `labels`. These facets are cached with the categorization result, reused on warm fetches, add no second AI call, and do not change the cache key. Pre-existing rows carry null facets / empty labels. | US-022 |
+| FR-044 | Every ticket returned to a client carries the triage facets (`ai_priority`, `ai_sentiment`, `ai_labels`); the board surfaces a priority badge. | US-022, US-026 |
+| FR-045 | Each ticket exposes an age derived from its last customer-visible message timestamp; the webapp tiers cards by configurable thresholds held in one constant. Presentation only — no stored state. | US-023 |
+| FR-046 | The webapp is keyboard-operable for triage: `j`/`k` move card focus, `e` resolves the focused ticket, a digit key recategorizes it, `/` focuses search. No shortcut fires while a text input/textarea/contenteditable is focused. | US-024 |
+| FR-047 | The webapp persists named filter presets ("saved views") locally over the facets the board already returns (category, age, urgency, resolution source). Applying a view sets the active filter; the backend is untouched. | US-025 |
+| FR-048 | The webapp can order cards within a column by `ai_priority` (urgent→low), falling back to the existing recency / follow-up-due ordering within a band. The toggle is remembered locally; off restores the default order. | US-026 |
+| FR-049 | The system exposes `GET /stats?window_days=N` returning, over the trailing window by `created_at`: total count, category breakdown, volume trend, resolution-source mix, and a time-to-resolve distribution + median. Aggregated server-side over the local store; no migration. | US-027 |
+| FR-050 | The system accumulates per-(UTC-date, model) OpenRouter token usage and an estimated USD cost (tokens × model pricing), exposed via `GET /metrics`. In-process counters; reset on restart. | US-028 |
+| FR-051 | Snippets are stored in a dedicated `snippets` table (title, body, soft-archive). The body is served verbatim with `{{variable}}` placeholders intact; substitution is client-side. CRUD + archive/restore endpoints. Operator-owned and durable (never content-keyed). | US-029 |
+| FR-052 | Before submitting a bulk action the webapp previews the affected vs skipped counts from already-loaded ticket state and refuses selections over `MAX_BULK_IDS`. | US-030 |
+| FR-053 | The categorization call requests a schema-enforced JSON object; a response that fails the schema degrades to the fallback for that ticket only (FR-007 unchanged). | US-031 |
+| FR-054 | An opt-in model cascade categorizes with a configurable cheap model first and escalates to the strong model when cheap-model confidence is below `cascade_escalate_below` (or the cheap call fails/malformed). Off by default; reuses the categorization confidence as the escalation signal. | US-032 |
+| FR-055 | An open, non-overridden ticket whose categorization confidence is below a configurable, calibrated `review_confidence_threshold` is surfaced in a webapp "needs review" lane — a view-layer split over the stored confidence, not a stored state. Writing an override clears it. The threshold is exposed on `GET /health`. | US-033 |
+| FR-056 | The backend computes local, offline embeddings of customer-visible text (`parts[]` + title / operator notes; never `internal_notes[]`) on ingest and stores them in the local DB. Computing embeddings never busts the content-signature cache (FR-008). The layer is toggleable; disabled = the ingest hook is a no-op and dependent features degrade. | US-034 |
+| FR-057 | When categorizing an uncached ticket, the system retrieves the nearest confirmed-override neighbours via embeddings and injects up to `fewshot_examples` of them into the prompt. Zero disables injection. Gated on the embedding layer. | US-035 |
+| FR-058 | The system exposes `POST /playbooks/draft-reply` returning an ephemeral RAG-grounded customer reply built from the nearest resolved tickets (customer-visible content only) + the ticket's effective-category playbooks, reporting `grounding_ticket_ids` + `playbook_ids`. Never reads `internal_notes[]` (invariant #4); 503 when AI is unconfigured. | US-036 |
+| FR-059 | An offline periodic background job clusters resolved tickets' embeddings (gated on the embedding layer), labels each cluster with c-TF-IDF top terms over customer-visible text only, flags outliers rather than force-fitting, and persists a snapshot. `GET /clusters` reads the snapshot; `POST /clusters/recompute` forces a refresh. Never touches `ai_cache` (invariant #6). | US-037 |
+| FR-060 | `GET /clusters/gaps` ranks recurring-issue clusters whose dominant effective category (override beats AI, invariant #13) has no active playbook, most-recurring-first, naming the category to write a playbook for. Read-only local logic over the cluster snapshot + playbooks. | US-038 |
+| FR-061 | `GET /playbooks/suggested?ticket_id=` ranks the ticket's effective-category playbooks by embedding similarity to its customer-visible text, most-relevant-first. Ephemeral; empty when uncategorized or no in-category playbooks; never busts the cache. | US-039 |
 
 ## 6. Non-functional requirements
 
@@ -315,6 +542,7 @@ in one click.
 | NFR-006 | External calls (Intercom, AI provider) emit structured logs carrying latency and outcome. Ticket bodies are never logged. |
 | NFR-007 | The webapp surface is keyboard-navigable for column scrolling, refresh, and override. |
 | NFR-008 | The backend runs from a single command (`uvicorn` or equivalent) with no external services required beyond the local database file. |
+| NFR-009 | External-call latency is sampled into in-process histograms; `GET /metrics` exposes per-key p50 / p95 / max over a bounded sample window. Single-operator scope — not a metrics exporter. |
 
 ## 7. Decisions
 
