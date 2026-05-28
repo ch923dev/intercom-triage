@@ -96,3 +96,19 @@ async def test_delete_is_idempotent(client: AsyncClient) -> None:
 async def test_reason_over_80_chars_rejected(client: AsyncClient) -> None:
     resp = await client.put("/followups/T1", json={"due_at": _DUE, "reason": "x" * 100})
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_put_normalizes_tz_aware_due_at_to_utc(client: AsyncClient) -> None:
+    """A tz-aware due_at (+05:00) must be stored as the equivalent naive-UTC
+    instant and read back as a Z-suffixed UTC string. 2030-01-01T12:00:00+05:00
+    is 2030-01-01T07:00:00Z."""
+    put = await client.put(
+        "/followups/T1",
+        json={"due_at": "2030-01-01T12:00:00+05:00", "reason": None},
+    )
+    assert put.status_code == 200
+
+    due_at = (await client.get("/followups")).json()[0]["due_at"]
+    assert due_at.endswith("Z"), f"due_at not UTC-aware: {due_at!r}"
+    assert datetime.fromisoformat(due_at) == datetime(2030, 1, 1, 7, 0, 0, tzinfo=UTC)
