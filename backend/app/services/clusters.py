@@ -47,6 +47,7 @@ from app.models import (
     TicketCluster,
     TicketClusterMember,
 )
+from app.services.categorization_rule import effective_category
 
 
 @dataclass(frozen=True)
@@ -88,10 +89,7 @@ async def _effective_category_ids(
 
     effective: dict[str, int] = {}
     for ticket in tickets:
-        category_id = ticket.category_id
-        override = override_by_ticket.get(ticket.id)
-        if override is not None and ticket.updated_at <= override.set_at:
-            category_id = override.category_id
+        category_id, _, _ = effective_category(ticket, override_by_ticket.get(ticket.id))
         if category_id is not None:
             effective[ticket.id] = category_id
     return effective
