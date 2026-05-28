@@ -66,6 +66,7 @@ const FIXTURES = [
   'conversation-mixed',
   'conversation-unknown-type',
   'conversation-events',
+  'conversation-attachment',
 ];
 
 for (const name of FIXTURES) {
