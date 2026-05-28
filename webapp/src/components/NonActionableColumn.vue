@@ -12,18 +12,11 @@ import { useSelectionStore } from '@/stores/selection';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
 import type { NonActionableKind, Ticket } from '@/types/api';
+import { NON_ACTIONABLE_KIND_LABELS } from '@/utils/nonActionable';
 
 const tickets = useTicketsStore();
 const view = useViewStore();
 const selection = useSelectionStore();
-
-const KIND_LABELS: Record<NonActionableKind, string> = {
-  auto_reply: 'Auto-reply',
-  thanks: 'Thanks',
-  spam: 'Spam',
-  out_of_office: 'Out of office',
-  other: 'Other',
-};
 
 /** Kinds that actually appear in the unfiltered non-actionable set, in stable order. */
 const presentKinds = computed(() => {
@@ -34,8 +27,6 @@ const presentKinds = computed(() => {
   const ORDER: NonActionableKind[] = ['auto_reply', 'thanks', 'spam', 'out_of_office', 'other'];
   return ORDER.filter((k) => seen.has(k));
 });
-
-const activeKindFilter = computed(() => tickets.nonActionableKindFilter);
 
 function setKindFilter(kind: NonActionableKind | null) {
   tickets.setNonActionableKindFilter(kind);
@@ -93,7 +84,7 @@ function onCardClick(t: Ticket, e: MouseEvent) {
     >
       <button
         class="kind-chip"
-        :class="{ active: activeKindFilter === null }"
+        :class="{ active: tickets.nonActionableKindFilter === null }"
         @click="setKindFilter(null)"
       >
         All
@@ -102,10 +93,10 @@ function onCardClick(t: Ticket, e: MouseEvent) {
         v-for="kind in presentKinds"
         :key="kind"
         class="kind-chip"
-        :class="{ active: activeKindFilter === kind }"
+        :class="{ active: tickets.nonActionableKindFilter === kind }"
         @click="setKindFilter(kind)"
       >
-        {{ KIND_LABELS[kind] }}
+        {{ NON_ACTIONABLE_KIND_LABELS[kind] }}
       </button>
     </div>
 

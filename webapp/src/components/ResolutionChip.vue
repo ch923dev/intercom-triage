@@ -5,18 +5,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useTicketsStore } from '@/stores/tickets';
-import type { NonActionableKind, Ticket } from '@/types/api';
+import type { Ticket } from '@/types/api';
+import { NON_ACTIONABLE_KIND_LABELS } from '@/utils/nonActionable';
 
 const props = defineProps<{ ticket: Ticket }>();
 const tickets = useTicketsStore();
-
-const KIND_LABELS: Record<NonActionableKind, string> = {
-  auto_reply: 'Auto-reply',
-  thanks: 'Thanks',
-  spam: 'Spam',
-  out_of_office: 'Out of office',
-  other: 'Other',
-};
 
 const advisoryLabel = computed(() => {
   switch (props.ticket.resolution_chip_state) {
@@ -34,7 +27,7 @@ const advisoryLabel = computed(() => {
 const nonActionableLabel = computed(() => {
   if (props.ticket.resolved_source !== 'non_actionable') return '';
   const kind = props.ticket.non_actionable_kind;
-  return kind ? `Non-actionable · ${KIND_LABELS[kind]}` : 'Non-actionable';
+  return kind ? `Non-actionable · ${NON_ACTIONABLE_KIND_LABELS[kind]}` : 'Non-actionable';
 });
 
 async function onApplyAdvisory() {
