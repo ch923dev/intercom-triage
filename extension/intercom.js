@@ -162,6 +162,25 @@ function blocksToPlainText(blocks) {
     .slice(0, 8000);
 }
 
+// Fallback body for a part that has attachments but no text block (R.5).
+// The per-upload field that holds the filename is reverse-engineered (the
+// live capture confirmed uploads[] exists but not its object shape), so try
+// the likely names and degrade to a generic marker — never crash, never
+// re-drop. One line per upload; same 8000-char cap as blocksToPlainText.
+function uploadsToPlainText(uploads) {
+  if (!Array.isArray(uploads)) return '';
+  return uploads
+    .map((u) => {
+      if (!u || typeof u !== 'object') return '[attachment]';
+      const name = u.name ?? u.file_name ?? u.filename ?? null;
+      return typeof name === 'string' && name.trim()
+        ? `[attachment: ${name.trim()}]`
+        : '[attachment]';
+    })
+    .join('\n')
+    .slice(0, 8000);
+}
+
 function stripHtml(s) {
   return String(s)
     .replace(/<br\s*\/?>/gi, '\n')
@@ -257,7 +276,7 @@ export function normalizeConversation(detail, appId, summary) {
     const createdAt = toIso(node.created_at, createdIso);
 
     if (INBOUND_RENDERABLE_TYPES.has(renderableType)) {
-      const body = blocksToPlainText(data.blocks);
+      const body = blocksToPlainText(data.blocks) || uploadsToPlainText(data.uploads);
       if (!body) continue;
       parts.push({
         author: authorFromSummary(data.user_summary) || author,
@@ -266,7 +285,7 @@ export function normalizeConversation(detail, appId, summary) {
         is_admin: false,
       });
     } else if (ADMIN_REPLY_RENDERABLE_TYPES.has(renderableType)) {
-      const body = blocksToPlainText(data.blocks);
+      const body = blocksToPlainText(data.blocks) || uploadsToPlainText(data.uploads);
       if (!body) continue;
       parts.push({
         author: authorFromAdminBlob(data.entity || data.admin_summary || data.author),
@@ -275,7 +294,7 @@ export function normalizeConversation(detail, appId, summary) {
         is_admin: true,
       });
     } else if (renderableType === INTERNAL_NOTE_RENDERABLE_TYPE) {
-      const body = blocksToPlainText(data.blocks);
+      const body = blocksToPlainText(data.blocks) || uploadsToPlainText(data.uploads);
       if (!body) continue;
       internalNotes.push({
         author: authorFromAdminBlob(data.admin_summary || data.entity || data.author),

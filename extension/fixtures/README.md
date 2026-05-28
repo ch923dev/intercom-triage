@@ -28,6 +28,7 @@ extra fields are ignored.
 | `conversation-mixed.json`       | 1, 24, 3, 5 (event)       | split + skip       |
 | `conversation-unknown-type.json`| 1, 999 (unknown)          | part + warn+skip   |
 | `conversation-events.json`      | 21, 26, 31, 5 (events)    | skipped silently   |
+| `conversation-attachment.json`  | 1, 2, 3 (text-less + `uploads[]`) | `[attachment: …]` placeholder (R.5) |
 
 ## Snapshots
 

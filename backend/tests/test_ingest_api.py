@@ -238,3 +238,50 @@ async def test_get_tickets_sql_threshold_cutoff(app: FastAPI, client: AsyncClien
     ids = {t["id"] for t in rows}
     assert "RECENT-1" in ids, "ticket inside lookback window must be returned"
     assert "OLD-1" not in ids, "ticket outside lookback window must be excluded"
+
+
+@pytest.mark.asyncio
+async def test_internal_note_does_not_bust_content_signature_cache(
+    app: FastAPI,
+    client: AsyncClient,
+) -> None:
+    """Invariant #6 — the AI cache key is the last customer-visible part
+    timestamp, not Intercom's updated_at. An internal teammate note advances
+    updated_at but must NOT bust the cache: the re-ingest is a cache hit and
+    skips the AI call (categorized == 0)."""
+    app.state.openrouter = FakeOpenRouter({"C9": existing_assignment(1)})
+
+    now = datetime.now(UTC)
+    part_ts = now.isoformat()
+    author = {"id": "u1", "name": "Customer", "email": "c@example.com", "type": "user"}
+    admin = {"id": "a1", "name": "Agent", "email": "a@example.com", "type": "admin"}
+
+    payload = {
+        "id": "C9",
+        "title": "Need help",
+        "state": "open",
+        "priority": None,
+        "created_at": part_ts,
+        "updated_at": part_ts,
+        "author": author,
+        "url": "https://app.intercom.com/x/C9",
+        "parts": [{"author": author, "body": "please help", "created_at": part_ts}],
+    }
+
+    first = await client.post("/tickets/ingest", json=[payload])
+    assert first.json()["categorized"] == 1
+
+    # Second sync: an internal teammate note arrives and Intercom bumps
+    # updated_at — but the customer-visible parts are unchanged, so the content
+    # signature is identical and the cache must still hit.
+    later = (now + timedelta(hours=1)).isoformat()
+    payload_with_note = {
+        **payload,
+        "updated_at": later,
+        "internal_notes": [
+            {"author": admin, "body": "FYI internal", "created_at": later, "is_admin": True},
+        ],
+    }
+
+    again = await client.post("/tickets/ingest", json=[payload_with_note])
+    assert again.json()["categorized"] == 0  # cache hit — internal note did not bust it
