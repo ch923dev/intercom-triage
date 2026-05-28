@@ -95,15 +95,17 @@ async function requestJson(path, params = {}) {
 }
 
 /**
- * List conversation summaries.
+ * List one page of conversation summaries.
  *
  * @param {object} opts
  * @param {string} opts.appId   Workspace `app_id` (e.g. `j3dxf22l`).
  * @param {'open'|'snoozed'|'closed'} [opts.state='open']
  * @param {number} [opts.count=40]  Page size.
+ * @param {string|null} [opts.startingAfter=null]  Pagination cursor.
+ * @returns {Promise<{conversations: object[], nextCursor: string|null}>}
  */
-export async function listConversations({ appId, state = 'open', count = 40 }) {
-  const body = await requestJson('/ember/inbox/conversations/list', {
+export async function listConversations({ appId, state = 'open', count = 40, startingAfter = null }) {
+  const params = {
     app_id: appId,
     inbox_type: 'all',
     sort_field: 'sorting_updated_at',
@@ -113,8 +115,13 @@ export async function listConversations({ appId, state = 'open', count = 40 }) {
     include_latest_conversation: 'false',
     'fields[]': 'attributes',
     search_text: '',
-  });
-  return Array.isArray(body?.conversations) ? body.conversations : [];
+  };
+  if (startingAfter) params.starting_after = startingAfter;
+  const body = await requestJson('/ember/inbox/conversations/list', params);
+  return {
+    conversations: Array.isArray(body?.conversations) ? body.conversations : [],
+    nextCursor: body?.pages?.next?.starting_after ?? null,
+  };
 }
 
 /** Fetch one conversation with its renderable parts (the message text). */
@@ -349,6 +356,13 @@ export function normalizeConversation(detail, appId, summary) {
  * no newer than the stored value is skipped entirely — no detail fetch, no
  * re-categorization. New + changed conversations still go through.
  *
+ * Paginates the list (cursor `pages.next.starting_after`) so a workspace with
+ * more than one page of new/changed open conversations is fully synced rather
+ * than truncated at the first page. Summaries are newest-first, so once a full
+ * page yields nothing new or changed every older conversation below is also
+ * unchanged — that's the stop signal. `maxPages` is a runaway guard; hitting it
+ * is logged (never a silent truncation).
+ *
  * Returns only the conversations that were fetched (the changed ones). The
  * skipped tickets keep their existing stored row untouched.
  */
@@ -358,43 +372,80 @@ export async function fetchHydratedBatch({
   count = 40,
   concurrency = 4,
   knownState = {},
+  maxPages = 20,
 }) {
-  const summaries = await listConversations({ appId, state, count });
+  const results = [];
+  let startingAfter = null;
+  let pages = 0;
+  let truncated = false;
 
-  const out = new Array(summaries.length).fill(null);
-  let cursor = 0;
+  while (true) {
+    if (pages >= maxPages) {
+      truncated = true;
+      break;
+    }
+    pages += 1;
+    const { conversations: summaries, nextCursor } = await listConversations({
+      appId,
+      state,
+      count,
+      startingAfter,
+    });
+    if (summaries.length === 0) break;
 
-  async function worker() {
-    while (true) {
-      const i = cursor++;
-      if (i >= summaries.length) return;
-      const summary = summaries[i];
-      // Skip a conversation we already have stored unchanged. The list call is
-      // cheap; this avoids the per-conversation detail fetch + an AI call.
-      const knownIso = knownState[String(summary.id)];
-      if (knownIso) {
-        const updMs = summaryUpdatedMs(summary);
-        const knownMs = Date.parse(knownIso);
-        if (updMs !== null && Number.isFinite(knownMs) && updMs <= knownMs) {
-          continue; // leaves out[i] === null
+    const out = new Array(summaries.length).fill(null);
+    let cursor = 0;
+    let sawNewOrChanged = false;
+
+    async function worker() {
+      while (true) {
+        const i = cursor++;
+        if (i >= summaries.length) return;
+        const summary = summaries[i];
+        // Skip a conversation we already have stored unchanged. The list call is
+        // cheap; this avoids the per-conversation detail fetch + an AI call.
+        const knownIso = knownState[String(summary.id)];
+        if (knownIso) {
+          const updMs = summaryUpdatedMs(summary);
+          const knownMs = Date.parse(knownIso);
+          if (updMs !== null && Number.isFinite(knownMs) && updMs <= knownMs) {
+            continue; // leaves out[i] === null
+          }
         }
-      }
-      try {
-        const detail = await getConversation(appId, summary.id);
-        out[i] = normalizeConversation(detail, appId, summary);
-      } catch (err) {
-        // Auth errors must bubble so the popup can surface the "log in" hint.
-        if (err instanceof IntercomSessionError && (err.status === 401 || err.status === 403)) {
-          throw err;
+        // New (not in knownState) or changed — this page is worth a next page.
+        sawNewOrChanged = true;
+        try {
+          const detail = await getConversation(appId, summary.id);
+          out[i] = normalizeConversation(detail, appId, summary);
+        } catch (err) {
+          // Auth errors must bubble so the popup can surface the "log in" hint.
+          if (err instanceof IntercomSessionError && (err.status === 401 || err.status === 403)) {
+            throw err;
+          }
+          console.warn(`[intercom] skipped conversation ${summary.id}:`, err?.message ?? err);
+          // out[i] stays null; the .filter() below drops it from the result.
         }
-        console.warn(`[intercom] skipped conversation ${summary.id}:`, err?.message ?? err);
-        // out[i] stays null; the .filter() at the end drops it from the result.
       }
     }
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, summaries.length) }, worker));
+    for (const t of out) if (t !== null) results.push(t);
+
+    // Newest-first: a whole page with nothing new/changed means everything
+    // older is unchanged too. A brand-new conversation is never skip-known, so
+    // it can't hide below an all-skipped page (new activity sorts to the top).
+    if (!sawNewOrChanged || !nextCursor) break;
+    startingAfter = nextCursor;
   }
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, summaries.length) }, worker));
-  return out.filter((t) => t !== null);
+  if (truncated) {
+    console.warn(
+      `[intercom] fetchHydratedBatch hit the ${maxPages}-page cap for state=${state} — ` +
+        'some older new/changed conversations were not synced this pass.',
+    );
+  }
+
+  return results;
 }
 
 /**
