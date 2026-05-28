@@ -209,6 +209,9 @@ The project is feature-complete against `spec.md` v1.7. The 2026-05 roadmap is
 now an execution log (full ledger with commit SHAs + the original phase tables:
 [`docs/_archive/ROADMAP.md`](./_archive/ROADMAP.md)).
 
+Full per-feature catalog (every capability, by area, with code anchors):
+**[`docs/FEATURES.md`](./FEATURES.md)**.
+
 **Shipped to `main`:** Phases 0–3 + 4.1 (parked, T106) + 4.2 (`non_actionable_kind`,
 T107) + robustness R.1–R.5. That covers: priority/sentiment/multi-label, aging
 indicators, keyboard triage, saved views, priority-sorted queue, stats
@@ -262,6 +265,7 @@ Where knowledge lives now, and the boundary this handbook respects:
 | Doc | Owns | Status |
 |---|---|---|
 | **`docs/PROJECT.md`** (this) | System orientation: architecture, data-flow, stack, data model, API surface, feature status, glossary. | Canonical living handbook. |
+| **`docs/FEATURES.md`** | Exhaustive feature catalog by capability area, with code anchors + surfaces. | Canonical feature reference. |
 | `CLAUDE.md` (+ `backend/`, `webapp/`, `extension/`) | Per-change rules + the 14 invariants. Auto-loaded every session. | Canonical, authoritative. **Not folded here.** |
 | `spec.md` / `plan.md` / `tasks.md` | Requirements (US/FR/NFR) · architecture decisions (§1–§18) · traceability matrix (T001–T160). | Contract source of truth. **Not folded here** (charter-protected). |
 | `docs/principles.md` | The four engineering principles. | Live; referenced by every sub-package CLAUDE.md. |

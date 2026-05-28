@@ -11,6 +11,7 @@ Repo-wide guidance for Claude Code. Top-level entry point — read first, then d
 
 - [`docs/principles.md`](./docs/principles.md) — the four engineering principles (Think / Simplicity / Surgical / Goal-Driven). Override defaults; apply on every change.
 - [`docs/PROJECT.md`](./docs/PROJECT.md) — canonical project handbook: architecture, data-flow, stack, data model, full API surface, feature/roadmap status, glossary.
+- [`docs/FEATURES.md`](./docs/FEATURES.md) — exhaustive feature catalog by capability area (what the product does, with code anchors + surfaces).
 - `spec.md` — requirements (`US-*`, `FR-*`, `NFR-*`).
 - `plan.md` — architecture decisions (§1..§12).
 - `tasks.md` — task breakdown + traceability matrix (`T001..`).
