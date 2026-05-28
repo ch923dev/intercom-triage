@@ -284,11 +284,12 @@ Schema additions for §8c (FR-025..FR-031):
 ```text
 tickets (resolution columns — added via Alembic 0006):
   resolved_at                   datetime                          -- null = open
-  resolved_source               text                              -- 'manual' | 'intercom_closed' | null
+  resolved_source               text                              -- 'manual' | 'intercom_closed' | 'non_actionable' | 'ai_resolved' | null
   ai_resolve_enabled            boolean nullable                  -- null = inherit settings default
   resolution_chip_dismissed_at  datetime                          -- null = chip not dismissed
   -- check: (resolved_at IS NULL) = (resolved_source IS NULL)
-  -- check: resolved_source IN ('manual','intercom_closed') or null
+  -- check: resolved_source IN ('manual','intercom_closed','non_actionable','ai_resolved') or null
+  --        (widened by migrations 0010 non_actionable, 0012 ai_resolved)
   -- index: ix_tickets_resolved_at (partial, where resolved_at IS NOT NULL)
 
 ai_cache (resolution columns — same migration):
