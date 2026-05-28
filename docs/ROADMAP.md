@@ -6,7 +6,7 @@
 >
 > **As of 2026-05-28, Phases 0–3 + 4.1 + R.1 + R.4 are SHIPPED to `main`.** What was a forward plan got executed almost in full. The work landed in code ahead of the source-of-truth docs; the **2026-05-28 reconciliation** wrote it back into `spec.md` v1.7 (US-022..US-039, FR-043..FR-061, NFR-009), `plan.md` v1.7 (§15–§18), and `tasks.md` v1.6 (Phases 15–18, T142–T160; T106/T102 marked `✓`). See the execution ledger below for per-item status + commit. The phase tables further down are kept verbatim as the original plan of record.
 >
-> **Still open:** Phase 4.2 (`non_actionable_kind` column / T107), 4.3 (webhook + SSE / T100), 4.4 (popup bulk / T105); robustness R.2 (webapp race test), R.3 (perf NFR tests), R.5 (image-only message content loss — surfaced during the R.1 live capture). These are the live backlog.
+> **Still open:** Phase 4.2 (`non_actionable_kind` column / T107), 4.3 (webhook + SSE / T100), 4.4 (popup bulk / T105); robustness R.2 (webapp race test), R.5 (image-only message content loss — surfaced during the R.1 live capture). These are the live backlog.
 >
 > The original subagent dispatch artifacts that drove this execution are archived under [`docs/roadmap-execution/`](roadmap-execution/) — `TASK_CONTRACTS.md` (per-item contracts) + `DEPENDENCY_SCHEDULE.md` (wave/dependency graph).
 
@@ -40,7 +40,7 @@
 | 4.4 | Bulk actions in popup | ◯ open | T105 | — |
 | R.1 | Payload snapshot tests + unknown-type logging | ✅ shipped | — | `25e7f42` — live capture (workspace j3dxf22l) found event types 21/26/31 unmapped → false unknown-type warns; added to skip set + zero-dep full-output snapshot harness for `normalizeConversation` |
 | R.2 | Webapp E2E race test | ◯ open | — | — |
-| R.3 | NFR perf integration tests | ◯ open | — | NFR-001/002 still unguarded |
+| R.3 | NFR perf integration tests | ✅ shipped | — | `tests/test_perf_nfr.py` asserts NFR-001 (cold ≤15s) + NFR-002 (warm ≤3s) over the ingest+categorize path; OpenRouter mocked, so it guards pipeline overhead vs. the spec budget, not live model latency |
 | R.4 | Latency p95 histogram | ✅ shipped | T160 | `ffb28c5` |
 | R.5 | Image-only message content loss | ◯ open | — | type 1/2/3 parts can carry `uploads[]`; a text-less attachment-only message yields empty body and is dropped (`intercom.js` `if (!body) continue`). Surfaced during the R.1 live capture |
 
