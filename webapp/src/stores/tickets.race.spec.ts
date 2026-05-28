@@ -2,10 +2,11 @@
 // mutation is in flight must not clobber the pending change (auto-sync race,
 // cross-package invariant: optimistic state the server doesn't yet reflect).
 //
-// The guard is the `mutating` counter (incremented on entry to every mutating
-// action, decremented in `finally`). `silentRefresh()` bails early while
-// `mutating > 0`, so a poll that returns *stale* server state can never
-// overwrite the operator's pending optimistic move. These tests lock that in.
+// Two guards protect optimistic state: (1) the `mutating` counter — bails
+// `silentRefresh()` while a mutation is in flight at poll start; (2) the
+// `mutationGen` counter — discards a poll whose fetch was already in flight
+// when a mutation began (the R.2 reverse ordering), even one that finished
+// during the fetch. These tests lock both directions in.
 //
 // tickets.spec.ts already covers the markResolved vs silentRefresh path; this
 // file extends coverage to the category-override path (applyOverride), which is
@@ -215,5 +216,77 @@ describe('ticketsStore — silentRefresh vs in-flight applyOverride (R.2)', () =
     patch.resolve(undefined);
     await inFlight;
     expect(s.isMutating).toBe(false);
+  });
+
+  it('does not clobber a list-move mutation that begins after a silentRefresh fetch is already in flight (R.2 reverse ordering)', async () => {
+    const { api } = await import('@/api/client');
+
+    // The poll's GETs are held in flight — dispatched BEFORE the operator's
+    // mutation, so they carry pre-mutation (stale) server state.
+    const openFetch = deferred<Ticket[]>();
+    const resolvedFetch = deferred<Ticket[]>();
+    (api.listTickets as ReturnType<typeof vi.fn>).mockImplementation(
+      ({ resolved }: { resolved: boolean }) =>
+        resolved ? resolvedFetch.promise : openFetch.promise,
+    );
+    // Hold the resolve PATCH in flight too, so mutating > 0 when the poll lands.
+    const patch = deferred<unknown>();
+    (api.resolveTicket as ReturnType<typeof vi.fn>).mockReturnValue(patch.promise);
+
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a'));
+
+    // 1. Poll starts while idle (passes the mutating==0 guard); GETs in flight.
+    const poll = s.silentRefresh();
+
+    // 2. Operator resolves 'a' mid-fetch — optimistic move applied locally.
+    const move = s.markResolved('a');
+    expect(s.tickets.find((t) => t.id === 'a')).toBeUndefined();
+    expect(s.resolvedTickets.find((t) => t.id === 'a')).toBeDefined();
+
+    // 3. Stale poll lands: server still reports 'a' OPEN.
+    openFetch.resolve([fakeTicket('a')]);
+    resolvedFetch.resolve([]);
+    await poll;
+
+    // 4. Optimistic resolve survived — the poll discarded its stale snapshot.
+    expect(s.tickets.find((t) => t.id === 'a')).toBeUndefined();
+    expect(s.resolvedTickets.find((t) => t.id === 'a')).toBeDefined();
+
+    patch.resolve(undefined);
+    await move;
+    expect(s.isMutating).toBe(false);
+  });
+
+  it('discards a poll whose fetch overlapped a mutation that already completed (gen guard)', async () => {
+    const { api } = await import('@/api/client');
+
+    const openFetch = deferred<Ticket[]>();
+    const resolvedFetch = deferred<Ticket[]>();
+    (api.listTickets as ReturnType<typeof vi.fn>).mockImplementation(
+      ({ resolved }: { resolved: boolean }) =>
+        resolved ? resolvedFetch.promise : openFetch.promise,
+    );
+    (api.resolveTicket as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a'));
+
+    // 1. Poll starts (idle); GETs in flight; generation captured.
+    const poll = s.silentRefresh();
+
+    // 2. A full mutation begins AND completes during the fetch window.
+    await s.markResolved('a');
+    expect(s.isMutating).toBe(false); // mutating back to 0 …
+    expect(s.resolvedTickets.find((t) => t.id === 'a')).toBeDefined();
+
+    // 3. Stale poll lands: mutating==0 now, but the generation advanced.
+    openFetch.resolve([fakeTicket('a')]);
+    resolvedFetch.resolve([]);
+    await poll;
+
+    // 4. The committed resolve is preserved (NOT reverted to open).
+    expect(s.tickets.find((t) => t.id === 'a')).toBeUndefined();
+    expect(s.resolvedTickets.find((t) => t.id === 'a')).toBeDefined();
   });
 });
