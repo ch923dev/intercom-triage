@@ -29,7 +29,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from statistics import median
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Category, Override, Ticket
@@ -107,11 +107,21 @@ async def _category_breakdown(
 ) -> list[CategoryCount]:
     """Count tickets per effective category in the window.
 
-    Effective category = override if present, else `tickets.category_id`. We
-    LEFT JOIN `overrides`, coalesce, then LEFT JOIN `categories` for the name,
-    and group by the resolved id.
+    Effective category = the override's category only when the override is at
+    least as new as the ticket's last update (`ticket.updated_at <=
+    override.set_at`, invariant #11 — mirrors `categorization_rule`), else
+    `tickets.category_id`. A stale override (older than the last customer
+    message) must fall back to the AI category, so a bare coalesce is wrong. We
+    LEFT JOIN `overrides`, apply the timestamp-gated CASE, then LEFT JOIN
+    `categories` for the name, and group by the resolved id.
     """
-    effective_id = func.coalesce(Override.category_id, Ticket.category_id)
+    effective_id = case(
+        (
+            and_(Override.category_id.is_not(None), Ticket.updated_at <= Override.set_at),
+            Override.category_id,
+        ),
+        else_=Ticket.category_id,
+    )
     stmt = (
         select(
             effective_id.label("cat_id"),
