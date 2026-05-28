@@ -19,7 +19,7 @@ from app.ai.prompt import CATEGORIZATION_RESPONSE_FORMAT, build_messages
 from app.clients.openrouter import OpenRouterClient
 from app.metrics import metrics
 from app.models import Category, CategoryProposal, RejectedProposalSignature
-from app.schemas import HydratedTicket
+from app.schemas import HydratedTicket, NonActionableKind
 
 AssignmentKind = Literal["existing", "pending_proposal", "new_proposal"]
 
@@ -30,7 +30,6 @@ _PRIORITY_VALUES: frozenset[str] = frozenset(("low", "normal", "high", "urgent")
 _SENTIMENT_VALUES: frozenset[str] = frozenset(("negative", "neutral", "positive"))
 
 # T107 — structured sub-classification for non_actionable verdicts.
-NonActionableKind = Literal["auto_reply", "thanks", "spam", "out_of_office", "other"]
 _NON_ACTIONABLE_KINDS: tuple[str, ...] = ("auto_reply", "thanks", "spam", "out_of_office", "other")
 # Defaults applied to a fallback result and to any malformed/missing facet — a
 # neutral baseline so a card never renders an empty / misleading badge.
