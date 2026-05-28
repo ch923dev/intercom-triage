@@ -171,7 +171,7 @@ class FollowupSet(BaseModel):
     """PUT /followups/{ticket_id} body. `due_at` is absolute — the client
     computes it from a preset offset so server and client clocks agree."""
 
-    due_at: datetime
+    due_at: NaiveUTCDatetime
     reason: str | None = Field(default=None, max_length=80)
 
 
@@ -636,7 +636,7 @@ class BulkCategoryUpdate(BulkTicketIds):
 class BulkFollowupSet(BulkTicketIds):
     """`PUT /followups/bulk` body — applies one `due_at` + reason to N tickets."""
 
-    due_at: datetime
+    due_at: NaiveUTCDatetime
     reason: str | None = Field(default=None, max_length=80)
 
 

@@ -289,3 +289,35 @@ async def test_clusters_recompute_endpoint(
     assert len(body) >= 2
     # Persisted — a follow-up GET returns the same snapshot.
     assert len((await client.get("/clusters")).json()) == len(body)
+
+
+@pytest.mark.asyncio
+async def test_recompute_uses_wired_app_state_config(app, client, monkeypatch) -> None:
+    """POST /clusters/recompute must read app.state.config (get_app_config),
+    not the process-global lru_cache get_config(). We set a sentinel
+    min_tickets on the wired config and assert the clustering job receives it.
+
+    The conftest `app` fixture overrides `get_config` to return `test_config`
+    (the same object as `app.state.config`), so a naive sentinel can't tell the
+    two dependencies apart. To actually discriminate, point the `get_config`
+    override at a DISTINCT config carrying a different value — only an endpoint
+    reading `app.state.config` (i.e. `get_app_config`) sees our 99 sentinel."""
+    from app.config import get_config
+
+    captured: dict[str, int] = {}
+
+    async def _recorder(session, min_tickets: int):
+        captured["min_tickets"] = min_tickets
+        return None
+
+    monkeypatch.setattr(clustering, "recompute_clusters", _recorder)
+    app.state.config.clustering_enabled = True
+    app.state.config.clustering_min_tickets = 99  # sentinel, != get_config's value
+
+    # Decoy: if the endpoint still injects get_config it sees 7, not 99.
+    decoy = app.state.config.model_copy(update={"clustering_min_tickets": 7})
+    app.dependency_overrides[get_config] = lambda: decoy
+
+    resp = await client.post("/clusters/recompute")
+    assert resp.status_code == 200
+    assert captured["min_tickets"] == 99

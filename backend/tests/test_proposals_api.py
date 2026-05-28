@@ -6,10 +6,11 @@ from datetime import datetime
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AICacheEntry, Category, CategoryProposal, RejectedProposalSignature
+from app.services.proposals import list_pending
 
 
 async def _make_proposal(session: AsyncSession, name: str = "Refund Delay") -> int:
@@ -105,3 +106,48 @@ async def test_double_resolution_conflicts(
     pid = await _make_proposal(session)
     assert (await client.post(f"/proposals/{pid}/reject")).status_code == 200
     assert (await client.post(f"/proposals/{pid}/approve")).status_code == 409
+
+
+def _query_counter(session: AsyncSession):
+    """Count SQL statements issued on the session's engine. Returns (counter,
+    stop) — call stop() to detach the listener."""
+    sync_engine = session.bind.sync_engine
+    counter = {"n": 0}
+
+    def _before(*_args, **_kwargs):
+        counter["n"] += 1
+
+    event.listen(sync_engine, "before_cursor_execute", _before)
+    return counter, lambda: event.remove(sync_engine, "before_cursor_execute", _before)
+
+
+@pytest.mark.asyncio
+async def test_list_pending_is_not_n_plus_one(session: AsyncSession) -> None:
+    """Listing N pending proposals must issue a constant number of queries
+    (1 for the proposals + 1 for all examples), not 1 + N."""
+    for i in range(4):
+        proposal = CategoryProposal(name=f"Prop {i}", description="d", status="pending")
+        session.add(proposal)
+        await session.flush()
+        for j in range(6):  # 6 cache rows each, > _EXAMPLE_LIMIT (5)
+            session.add(
+                AICacheEntry(
+                    ticket_id=f"T-{i}-{j}",
+                    category_id=None,
+                    proposal_id=proposal.id,
+                    summary="s",
+                    confidence=0.6,
+                    ticket_updated_at=datetime(2026, 1, 1),
+                )
+            )
+    await session.commit()
+
+    counter, stop = _query_counter(session)
+    try:
+        out = await list_pending(session)
+    finally:
+        stop()
+
+    assert len(out) == 4
+    assert all(len(example_ids) == 5 for _proposal, example_ids in out)
+    assert counter["n"] <= 2, f"expected <= 2 queries, got {counter['n']} (N+1 regression)"

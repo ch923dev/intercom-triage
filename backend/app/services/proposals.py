@@ -39,7 +39,8 @@ async def list_pending(
     session: AsyncSession,
 ) -> list[tuple[CategoryProposal, list[str]]]:
     """Pending proposals, each paired with up to 5 example ticket ids drawn from
-    the cache rows currently grouped under that proposal."""
+    the cache rows currently grouped under that proposal. Examples are fetched in
+    a single batched query (not one query per proposal)."""
     proposals = (
         await session.scalars(
             select(CategoryProposal)
@@ -47,18 +48,25 @@ async def list_pending(
             .order_by(CategoryProposal.created_at.asc(), CategoryProposal.id.asc()),
         )
     ).all()
+    if not proposals:
+        return []
 
-    out: list[tuple[CategoryProposal, list[str]]] = []
-    for proposal in proposals:
-        example_ids = (
-            await session.scalars(
-                select(AICacheEntry.ticket_id)
-                .where(AICacheEntry.proposal_id == proposal.id)
-                .limit(_EXAMPLE_LIMIT),
-            )
-        ).all()
-        out.append((proposal, list(example_ids)))
-    return out
+    proposal_ids = [p.id for p in proposals]
+    rows = (
+        await session.execute(
+            select(AICacheEntry.proposal_id, AICacheEntry.ticket_id)
+            .where(AICacheEntry.proposal_id.in_(proposal_ids))
+            .order_by(AICacheEntry.proposal_id.asc(), AICacheEntry.ticket_id.asc()),
+        )
+    ).all()
+
+    examples: dict[int, list[str]] = {}
+    for proposal_id, ticket_id in rows:
+        bucket = examples.setdefault(proposal_id, [])
+        if len(bucket) < _EXAMPLE_LIMIT:
+            bucket.append(ticket_id)
+
+    return [(proposal, examples.get(proposal.id, [])) for proposal in proposals]
 
 
 # ── T022 — approve ────────────────────────────────────────────────────────────
