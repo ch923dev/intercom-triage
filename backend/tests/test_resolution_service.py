@@ -70,6 +70,23 @@ async def test_reopen_clears_resolved_fields(session):
     assert row.resolved_source is None
 
 
+def test_clear_resolution_nulls_the_full_quartet() -> None:
+    """clear_resolution is the single owner of the reopen mutation: it must null
+    the XOR pair, the AI kind, and stamp the reopen marker together so no reopen
+    path can leave a stale non_actionable_kind (the DB CHECK does not catch it)."""
+    t = _make_open_ticket("t-clear-1")
+    t.resolved_at = naive_utcnow()
+    t.resolved_source = "non_actionable"
+    t.non_actionable_kind = "spam"
+
+    svc.clear_resolution(t)
+
+    assert t.resolved_at is None
+    assert t.resolved_source is None
+    assert t.non_actionable_kind is None
+    assert t.resolution_cleared_at is not None
+
+
 @pytest.mark.asyncio
 async def test_reopen_409_if_already_open(session):
     session.add(_make_open_ticket("t4"))

@@ -30,7 +30,7 @@ from app.schemas import (
 )
 from app.services.cache import get_cached, set_cached
 from app.services.categories import get_fallback
-from app.services.resolution import clear_parked
+from app.services.resolution import clear_parked, clear_resolution
 from app.services.settings import get_settings
 from app.util import naive_utcnow
 
@@ -111,10 +111,7 @@ async def set_override(
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"ticket {ticket_id!r} not found")
     if ticket.resolved_at is not None:
-        ticket.resolved_at = None
-        ticket.resolved_source = None
-        ticket.non_actionable_kind = None
-        ticket.resolution_cleared_at = naive_utcnow()
+        clear_resolution(ticket)
 
     override = await session.get(Override, ticket_id)
     if override is None:
