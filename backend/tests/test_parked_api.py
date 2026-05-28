@@ -62,3 +62,28 @@ async def test_bulk_park(client: AsyncClient, session: AsyncSession) -> None:
         json={"ticket_ids": ["api-4"], "until_at": until, "reason": "waiting_internal"},
     )
     assert r.status_code == 200 and r.json()["ok_ids"] == ["api-4"]
+
+
+async def test_parked_fields_surface_on_board_read(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """The parked trio + note must be carried on the GET /tickets board response
+    (TicketSchema), not just the POST /park response — the webapp derives the
+    parked filter chip + ready-to-resume count straight off this payload
+    (invariant #14). A parked ticket is unresolved, so it rides the open list.
+    """
+    await _seed_open(session, "api-5")
+    until = (naive_utcnow() + timedelta(hours=1)).isoformat() + "Z"
+    r = await client.post(
+        "/tickets/api-5/park",
+        json={"until_at": until, "reason": "other", "note": "ping back later"},
+    )
+    assert r.status_code == 200, r.text
+
+    board = await client.get("/tickets")
+    assert board.status_code == 200, board.text
+    parked = next(t for t in board.json() if t["id"] == "api-5")
+    assert parked["parked_at"] is not None
+    assert parked["parked_until"] is not None
+    assert parked["parked_reason"] == "other"
+    assert parked["parked_note"] == "ping back later"

@@ -613,6 +613,10 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
                 ai_priority=row.ai_priority,  # type: ignore[arg-type]
                 ai_sentiment=row.ai_sentiment,  # type: ignore[arg-type]
                 ai_labels=list(row.ai_labels or []),
+                parked_at=row.parked_at,
+                parked_until=row.parked_until,
+                parked_reason=row.parked_reason,  # type: ignore[arg-type]
+                parked_note=row.parked_note,
             ),
         )
 
