@@ -18,16 +18,6 @@ const tickets = useTicketsStore();
 const view = useViewStore();
 const selection = useSelectionStore();
 
-/** Kinds that actually appear in the unfiltered non-actionable set, in stable order. */
-const presentKinds = computed(() => {
-  const seen = new Set<NonActionableKind>();
-  for (const t of tickets.nonActionableTickets) {
-    if (t.non_actionable_kind !== null) seen.add(t.non_actionable_kind);
-  }
-  const ORDER: NonActionableKind[] = ['auto_reply', 'thanks', 'spam', 'out_of_office', 'other'];
-  return ORDER.filter((k) => seen.has(k));
-});
-
 function setKindFilter(kind: NonActionableKind | null) {
   tickets.setNonActionableKindFilter(kind);
 }
@@ -77,23 +67,23 @@ function onCardClick(t: Ticket, e: MouseEvent) {
     </header>
 
     <div
-      v-if="presentKinds.length > 0"
+      v-if="tickets.presentNonActionableKinds.length > 0"
       class="kind-filters"
       role="group"
       aria-label="Filter by kind"
     >
       <button
         class="kind-chip"
-        :class="{ active: tickets.nonActionableKindFilter === null }"
+        :class="{ active: tickets.effectiveNonActionableKindFilter === null }"
         @click="setKindFilter(null)"
       >
         All
       </button>
       <button
-        v-for="kind in presentKinds"
+        v-for="kind in tickets.presentNonActionableKinds"
         :key="kind"
         class="kind-chip"
-        :class="{ active: tickets.nonActionableKindFilter === kind }"
+        :class="{ active: tickets.effectiveNonActionableKindFilter === kind }"
         @click="setKindFilter(kind)"
       >
         {{ NON_ACTIONABLE_KIND_LABELS[kind] }}

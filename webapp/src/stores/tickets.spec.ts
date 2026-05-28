@@ -302,7 +302,7 @@ describe('ticketsStore.nonActionableKindFilter (T107)', () => {
     expect(s.filteredNonActionableTickets.map((t) => t.id).sort()).toEqual(['a', 'c']);
   });
 
-  it('filteredNonActionableTickets returns empty when no tickets match kind', () => {
+  it('treats a filter for an absent kind as inert — shows all, not empty (finding #1)', () => {
     const s = useTicketsStore();
     s.resolvedTickets.push(
       fakeTicket('a', {
@@ -312,8 +312,69 @@ describe('ticketsStore.nonActionableKindFilter (T107)', () => {
       }),
     );
 
+    // 'thanks' is not present in the set, so the filter cannot hide the spam
+    // ticket — an active filter for an unselectable kind is inert.
     s.setNonActionableKindFilter('thanks');
-    expect(s.filteredNonActionableTickets).toHaveLength(0);
+    expect(s.filteredNonActionableTickets.map((t) => t.id)).toEqual(['a']);
+    expect(s.effectiveNonActionableKindFilter).toBeNull();
+  });
+
+  it('presentNonActionableKinds lists only present kinds in canonical order', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('a', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'out_of_office',
+      }),
+      fakeTicket('b', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+      fakeTicket('c', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: null,
+      }),
+    );
+
+    expect(s.presentNonActionableKinds).toEqual(['spam', 'out_of_office']);
+  });
+
+  it('stops hiding tickets once the active kind drains from the set (finding #1)', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('spam-1', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+      fakeTicket('manual-1', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: null,
+      }),
+    );
+    s.setNonActionableKindFilter('spam');
+    expect(s.filteredNonActionableTickets.map((t) => t.id)).toEqual(['spam-1']);
+
+    // The last spam ticket is reopened/recategorized; only a manual-mark
+    // (kind=null) non-actionable ticket survives. 'spam' is no longer present.
+    s.resolvedTickets.splice(
+      0,
+      s.resolvedTickets.length,
+      fakeTicket('manual-1', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: null,
+      }),
+    );
+
+    // The stale filter must not strand the surviving ticket, and the effective
+    // filter clears so the chip highlight stays consistent.
+    expect(s.filteredNonActionableTickets.map((t) => t.id)).toEqual(['manual-1']);
+    expect(s.effectiveNonActionableKindFilter).toBeNull();
   });
 
   it('setNonActionableKindFilter(null) clears the filter', () => {
