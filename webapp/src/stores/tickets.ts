@@ -18,6 +18,18 @@ import {
   ticketMatchesFilter,
   type SavedFilter,
 } from '@/utils/savedViews';
+import { MAX_BULK_IDS } from '@/utils/bulkPreview';
+
+/** Client-side pre-flight for the per-request bulk cap (invariant #9). Returns
+ *  an all-failed `BulkResult` (no API call, no optimistic mutation) when a
+ *  selection exceeds `MAX_BULK_IDS`, so an over-cap bulk op — whether from the
+ *  action bar or a multi-card drag — is blocked cleanly instead of round-tripping
+ *  to a backend 422 that surfaces as a confusing whole-batch failure. */
+function overCapResult(ids: string[]): BulkResult | null {
+  if (ids.length <= MAX_BULK_IDS) return null;
+  const reason = `over ${MAX_BULK_IDS}-id cap`;
+  return { ok_ids: [], failed: ids.map((id) => ({ id, reason })) };
+}
 
 interface TicketsState {
   tickets: Ticket[];
@@ -616,6 +628,8 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   /** Bulk resolve — moves matching open rows into resolvedTickets. */
   async function bulkResolve(ids: string[]): Promise<BulkResult> {
+    const capped = overCapResult(ids);
+    if (capped) return capped;
     const idSet = new Set(ids);
     const snapshot: Array<{ idx: number; row: Ticket }> = [];
     const moved: Ticket[] = [];
@@ -651,6 +665,8 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   /** Bulk mark non-actionable — moves matching open rows into resolvedTickets. */
   async function bulkMarkNonActionable(ids: string[]): Promise<BulkResult> {
+    const capped = overCapResult(ids);
+    if (capped) return capped;
     const idSet = new Set(ids);
     const snapshot: Array<{ idx: number; row: Ticket }> = [];
     const moved: Ticket[] = [];
@@ -683,6 +699,8 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   /** Bulk reopen — moves matching resolved rows back to the open list. */
   async function bulkReopen(ids: string[]): Promise<BulkResult> {
+    const capped = overCapResult(ids);
+    if (capped) return capped;
     const idSet = new Set(ids);
     const snapshot: Array<{ idx: number; row: Ticket }> = [];
     const moved: Ticket[] = [];
@@ -728,6 +746,8 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   /** Bulk recategorize — applies pending overrides; reopens resolved rows. */
   async function bulkRecategorize(ids: string[], categoryId: number): Promise<BulkResult> {
+    const capped = overCapResult(ids);
+    if (capped) return capped;
     const idSet = new Set(ids);
 
     // Snapshot prior overrides + any resolved→open moves so we can roll back.
@@ -798,6 +818,8 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   /** Bulk dismiss chip — clears `resolution_chip_state` locally for ok ids. */
   async function bulkDismissChip(ids: string[]): Promise<BulkResult> {
+    const capped = overCapResult(ids);
+    if (capped) return capped;
     beginMutation();
     try {
       const result = await api.bulkDismissChip(ids);
@@ -820,6 +842,8 @@ export const useTicketsStore = defineStore('tickets', () => {
     reason: ParkedReason,
     note: string | null = null,
   ): Promise<BulkResult> {
+    const capped = overCapResult(ids);
+    if (capped) return capped;
     beginMutation();
     try {
       const result = await api.bulkPark(ids, untilAt, reason, note);
@@ -841,6 +865,8 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   /** Bulk unpark — clears the trio on every ok id. */
   async function bulkUnpark(ids: string[]): Promise<BulkResult> {
+    const capped = overCapResult(ids);
+    if (capped) return capped;
     beginMutation();
     try {
       const result = await api.bulkUnpark(ids);

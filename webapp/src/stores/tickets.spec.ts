@@ -131,6 +131,52 @@ describe('ticketsStore.resolved getters', () => {
   });
 });
 
+describe('ticketsStore bulk cap pre-flight (invariant #9)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  const overCapIds = Array.from({ length: 201 }, (_, i) => `t-${i}`);
+
+  it('bulkResolve blocks an over-cap selection without calling the API', async () => {
+    const { api } = await import('@/api/client');
+    const s = useTicketsStore();
+
+    const result = await s.bulkResolve(overCapIds);
+
+    expect(api.bulkResolve).not.toHaveBeenCalled();
+    expect(result.ok_ids).toEqual([]);
+    expect(result.failed.length).toBe(201);
+    expect(result.failed[0]!.reason).toContain('200');
+  });
+
+  it('bulkRecategorize blocks an over-cap selection without mutating state', async () => {
+    const { api } = await import('@/api/client');
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('keep', { category_id: 1 }));
+
+    const result = await s.bulkRecategorize(overCapIds, 2);
+
+    expect(api.bulkRecategorize).not.toHaveBeenCalled();
+    expect(result.ok_ids).toEqual([]);
+    expect(result.failed.length).toBe(201);
+    expect(s.pendingOverrides).toEqual({});
+    expect(s.tickets.find((t) => t.id === 'keep')!.category_id).toBe(1);
+  });
+
+  it('still calls the API for a selection exactly at the cap', async () => {
+    const { api } = await import('@/api/client');
+    (api.bulkResolve as ReturnType<typeof vi.fn>).mockResolvedValue({ ok_ids: [], failed: [] });
+    const s = useTicketsStore();
+    const atCap = Array.from({ length: 200 }, (_, i) => `t-${i}`);
+
+    await s.bulkResolve(atCap);
+
+    expect(api.bulkResolve).toHaveBeenCalledOnce();
+  });
+});
+
 /** A promise whose resolution the test controls — lets us hold a mutation
  *  "in flight" while asserting other store behaviour. */
 function deferred<T>() {

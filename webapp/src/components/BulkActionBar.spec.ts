@@ -101,3 +101,26 @@ describe('BulkActionBar — Non-actionable button', () => {
     expect(btn!.attributes('disabled')).toBeDefined();
   });
 });
+
+describe('BulkActionBar — over-cap selection (invariant #9)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('disables the action buttons when the selection exceeds MAX_BULK_IDS', () => {
+    const selection = useSelectionStore();
+    const tickets = useTicketsStore();
+    for (let i = 0; i < 201; i++) {
+      const t = fake(`t-${i}`);
+      tickets.tickets.push(t);
+      selection.toggle(t.id, 'col1');
+    }
+
+    const w = mount(BulkActionBar);
+    for (const label of ['Resolve', 'Non-actionable', 'Move to ▾']) {
+      const btn = w.findAll('button').find((b) => b.text() === label);
+      expect(btn, label).toBeDefined();
+      expect(btn!.attributes('disabled'), label).toBeDefined();
+    }
+  });
+});
