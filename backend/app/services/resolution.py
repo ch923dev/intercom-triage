@@ -115,6 +115,8 @@ def apply_mark_non_actionable(row: Ticket) -> ResolveOutcome:
     now = naive_utcnow()
     row.resolved_at = now
     row.resolved_source = "non_actionable"
+    # Manual marks carry no AI kind (D3). Explicit for the CHECK-coupling pattern.
+    row.non_actionable_kind = None
     clear_parked(row)
     return ResolveOutcome(resolved_at=now, resolved_source="non_actionable")
 
