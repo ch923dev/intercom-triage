@@ -583,6 +583,52 @@ async def test_cascade_strong_malformed_still_falls_back(session: AsyncSession) 
     assert out["X1"].fallback is True
 
 
+# ── T107 — structured non_actionable_kind ─────────────────────────────────────
+
+
+def test_parse_response_reads_non_actionable_kind() -> None:
+    raw = (
+        '{"assignment":"existing","category_id":1,"summary":"out of office",'
+        '"confidence":0.9,"resolution_verdict":"non_actionable",'
+        '"resolution_confidence":0.95,"resolution_reason":"auto-reply: OOO",'
+        '"non_actionable_kind":"auto_reply"}'
+    )
+    parsed = parse_response(raw)
+    assert parsed.non_actionable_kind == "auto_reply"
+
+
+def test_parse_response_defaults_kind_to_other_when_missing() -> None:
+    raw = (
+        '{"assignment":"existing","category_id":1,"summary":"thanks",'
+        '"confidence":0.9,"resolution_verdict":"non_actionable",'
+        '"resolution_confidence":0.9,"resolution_reason":"thanks"}'
+    )
+    parsed = parse_response(raw)
+    assert parsed.non_actionable_kind == "other"
+
+
+def test_parse_response_kind_null_when_verdict_not_non_actionable() -> None:
+    raw = (
+        '{"assignment":"existing","category_id":1,"summary":"needs reply",'
+        '"confidence":0.9,"resolution_verdict":"not_resolved",'
+        '"resolution_confidence":0.4,"resolution_reason":"awaiting fix",'
+        '"non_actionable_kind":"spam"}'
+    )
+    parsed = parse_response(raw)
+    assert parsed.non_actionable_kind is None
+
+
+def test_parse_response_invalid_kind_falls_back_to_other() -> None:
+    raw = (
+        '{"assignment":"existing","category_id":1,"summary":"weird",'
+        '"confidence":0.9,"resolution_verdict":"non_actionable",'
+        '"resolution_confidence":0.9,"resolution_reason":"?",'
+        '"non_actionable_kind":"banana"}'
+    )
+    parsed = parse_response(raw)
+    assert parsed.non_actionable_kind == "other"
+
+
 @pytest.mark.asyncio
 async def test_cascade_escalation_rate_accounting(session: AsyncSession) -> None:
     """MEASURE-FIRST harness: run a representative mixed-confidence batch through

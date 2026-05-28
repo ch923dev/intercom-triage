@@ -28,6 +28,10 @@ Priority = Literal["low", "normal", "high", "urgent"]
 Sentiment = Literal["negative", "neutral", "positive"]
 _PRIORITY_VALUES: frozenset[str] = frozenset(("low", "normal", "high", "urgent"))
 _SENTIMENT_VALUES: frozenset[str] = frozenset(("negative", "neutral", "positive"))
+
+# T107 — structured sub-classification for non_actionable verdicts.
+NonActionableKind = Literal["auto_reply", "thanks", "spam", "out_of_office", "other"]
+_NON_ACTIONABLE_KINDS: tuple[str, ...] = ("auto_reply", "thanks", "spam", "out_of_office", "other")
 # Defaults applied to a fallback result and to any malformed/missing facet — a
 # neutral baseline so a card never renders an empty / misleading badge.
 _DEFAULT_PRIORITY: Priority = "normal"
@@ -50,6 +54,7 @@ class ParsedAssignment:
     resolution_verdict: Literal["resolved", "non_actionable", "not_resolved"] | None = None
     resolution_confidence: float | None = None
     resolution_reason: str | None = None
+    non_actionable_kind: NonActionableKind | None = None
     # Roadmap 0.2 — priority/sentiment/multi-label triage facets.
     priority: Priority = _DEFAULT_PRIORITY
     sentiment: Sentiment = _DEFAULT_SENTIMENT
@@ -72,6 +77,7 @@ class CategorizationResult:
     ai_resolution_verdict: Literal["resolved", "non_actionable", "not_resolved"] | None = None
     ai_resolution_confidence: float | None = None
     ai_resolution_reason: str | None = None
+    non_actionable_kind: NonActionableKind | None = None
     # Roadmap 0.2 — triage facets persisted on the ticket row + cache. A
     # fallback result carries the neutral defaults (normal / neutral / []).
     ai_priority: Priority = _DEFAULT_PRIORITY
@@ -174,6 +180,17 @@ def _parse_triage(obj: dict[str, Any]) -> tuple[Priority, Sentiment, list[str]]:
     return priority, sentiment, labels
 
 
+def _parse_non_actionable_kind(verdict: str | None, raw_kind: object) -> NonActionableKind | None:
+    # Kind is only meaningful for the non_actionable verdict.
+    if verdict != "non_actionable":
+        return None
+    if isinstance(raw_kind, str) and raw_kind in _NON_ACTIONABLE_KINDS:
+        return raw_kind  # type: ignore[return-value]
+    # Missing or out-of-set kind on a non_actionable verdict → 'other'
+    # (graceful: never abort the whole ticket over a soft sub-classification).
+    return "other"
+
+
 def parse_response(raw: str) -> ParsedAssignment:
     """Parse a model response into a typed assignment. Raises `ValueError` on any
     malformed shape — the caller treats that as a fallback trigger (FR-007)."""
@@ -186,6 +203,7 @@ def parse_response(raw: str) -> ParsedAssignment:
     confidence = _clamp_confidence(obj.get("confidence"))
     verdict, res_conf, res_reason = _parse_resolution(obj)
     priority, sentiment, labels = _parse_triage(obj)
+    na_kind = _parse_non_actionable_kind(verdict, obj.get("non_actionable_kind"))
 
     if assignment == "existing":
         category_id = _coerce_int(obj.get("category_id"))
@@ -200,6 +218,7 @@ def parse_response(raw: str) -> ParsedAssignment:
             resolution_verdict=verdict,
             resolution_confidence=res_conf,
             resolution_reason=res_reason,
+            non_actionable_kind=na_kind,
             priority=priority,
             sentiment=sentiment,
             labels=labels,
@@ -218,6 +237,7 @@ def parse_response(raw: str) -> ParsedAssignment:
             resolution_verdict=verdict,
             resolution_confidence=res_conf,
             resolution_reason=res_reason,
+            non_actionable_kind=na_kind,
             priority=priority,
             sentiment=sentiment,
             labels=labels,
@@ -238,6 +258,7 @@ def parse_response(raw: str) -> ParsedAssignment:
             resolution_verdict=verdict,
             resolution_confidence=res_conf,
             resolution_reason=res_reason,
+            non_actionable_kind=na_kind,
             priority=priority,
             sentiment=sentiment,
             labels=labels,
@@ -280,6 +301,7 @@ async def resolve(
             ai_resolution_verdict=parsed.resolution_verdict,
             ai_resolution_confidence=parsed.resolution_confidence,
             ai_resolution_reason=parsed.resolution_reason,
+            non_actionable_kind=parsed.non_actionable_kind,
             ai_priority=parsed.priority,
             ai_sentiment=parsed.sentiment,
             ai_labels=parsed.labels,
@@ -297,6 +319,7 @@ async def resolve(
             ai_resolution_verdict=parsed.resolution_verdict,
             ai_resolution_confidence=parsed.resolution_confidence,
             ai_resolution_reason=parsed.resolution_reason,
+            non_actionable_kind=parsed.non_actionable_kind,
             ai_priority=parsed.priority,
             ai_sentiment=parsed.sentiment,
             ai_labels=parsed.labels,
@@ -320,6 +343,7 @@ async def resolve(
             ai_resolution_verdict=parsed.resolution_verdict,
             ai_resolution_confidence=parsed.resolution_confidence,
             ai_resolution_reason=parsed.resolution_reason,
+            non_actionable_kind=parsed.non_actionable_kind,
             ai_priority=parsed.priority,
             ai_sentiment=parsed.sentiment,
             ai_labels=parsed.labels,
@@ -345,6 +369,7 @@ async def resolve(
         ai_resolution_verdict=parsed.resolution_verdict,
         ai_resolution_confidence=parsed.resolution_confidence,
         ai_resolution_reason=parsed.resolution_reason,
+        non_actionable_kind=parsed.non_actionable_kind,
         ai_priority=parsed.priority,
         ai_sentiment=parsed.sentiment,
         ai_labels=parsed.labels,
