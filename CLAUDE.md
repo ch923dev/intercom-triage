@@ -10,7 +10,7 @@ Repo-wide guidance for Claude Code. Top-level entry point — read first, then d
 ## Read first
 
 - [`docs/principles.md`](./docs/principles.md) — the four engineering principles (Think / Simplicity / Surgical / Goal-Driven). Override defaults; apply on every change.
-- [`docs/architecture.md`](./docs/architecture.md) — system summary, data-flow diagram, run-the-stack steps, version table.
+- [`docs/PROJECT.md`](./docs/PROJECT.md) — canonical project handbook: architecture, data-flow, stack, data model, full API surface, feature/roadmap status, glossary.
 - `spec.md` — requirements (`US-*`, `FR-*`, `NFR-*`).
 - `plan.md` — architecture decisions (§1..§12).
 - `tasks.md` — task breakdown + traceability matrix (`T001..`).
@@ -78,7 +78,7 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 - Delegate broad codebase searches (>3 grep/glob rounds, "find every place that does X") to `Agent(subagent_type=Explore)` so the main context stays focused on the task. Direct `Grep` / `Glob` for targeted, single-file lookups.
 - Delegate independent parallel research (e.g. "summarise backend/app/services/ + extension/intercom.js side-by-side") to two `Agent` calls in one message. Don't run them sequentially in the main thread.
 - Do **not** delegate the actual edit. Cross-package edits (HydratedTicket, renderable_type, MAX_BULK_IDS) must run in the main thread with the corresponding skill loaded so the invariant guardrails apply.
-- Do **not** delegate when the answer is already in `docs/architecture.md`, `spec.md`, `plan.md`, or `tasks.md`. Read those directly — they exist precisely to short-circuit exploration.
+- Do **not** delegate when the answer is already in `docs/PROJECT.md`, `spec.md`, `plan.md`, or `tasks.md`. Read those directly — they exist precisely to short-circuit exploration.
 
 ## Scope guardrails
 
@@ -132,7 +132,7 @@ conflict at MERGE time — serialize or pre-assign them across sessions:
   change touches all three; don't split it across parallel sessions.
 - `webapp/package-lock.json` — never hand-merge; re-run `npm install` (in
   `webapp/`) after merge. Backend has no lockfile (pip `requirements.txt`).
-- Single-source docs — `spec.md`, `plan.md`, `tasks.md`, `docs/architecture.md`,
+- Single-source docs — `spec.md`, `plan.md`, `tasks.md`, `docs/PROJECT.md`,
   this `CLAUDE.md`. Append-heavy; coordinate or expect textual conflicts.
 
 **Keep branches short (<~2 days) and rebase on the default branch daily.**

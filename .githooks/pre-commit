@@ -43,7 +43,7 @@ if command -v gitleaks >/dev/null 2>&1; then
   fi
 else
   # Fallback: built-in regex sweep of the staged diff (added lines only).
-  # Skips known-safe paths (tests, fixtures, .env.example, .audit/).
+  # Skips known-safe paths (tests, fixtures, .env.example, docs/_archive/).
   diff=$(git diff --cached --diff-filter=ACM -U0 \
     -- . \
     ':(exclude).env.example' \
@@ -51,7 +51,7 @@ else
     ':(exclude)webapp/**/*.spec.ts' \
     ':(exclude)extension/**/*.test.js' \
     ':(exclude)extension/fixtures/**' \
-    ':(exclude).audit/**' \
+    ':(exclude)docs/_archive/**' \
     | grep -E '^\+' || true)
 
   hits=$(printf '%s\n' "$diff" | grep -E \
