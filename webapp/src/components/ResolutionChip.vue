@@ -1,11 +1,12 @@
 <!-- ResolutionChip — advisory chip on cards where the backend computed
      `resolution_chip_state` (ai_resolved / ai_reopened / new_reply).
      Clicking applies the action; the × dismisses it.
-     Non-actionable is communicated by its own Kanban column — no chip here. -->
+     Also renders a static kind label for non-actionable tickets (T107). -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useTicketsStore } from '@/stores/tickets';
 import type { Ticket } from '@/types/api';
+import { NON_ACTIONABLE_KIND_LABELS } from '@/utils/nonActionable';
 
 const props = defineProps<{ ticket: Ticket }>();
 const tickets = useTicketsStore();
@@ -21,6 +22,12 @@ const advisoryLabel = computed(() => {
     default:
       return '';
   }
+});
+
+const nonActionableLabel = computed(() => {
+  if (props.ticket.resolved_source !== 'non_actionable') return '';
+  const kind = props.ticket.non_actionable_kind;
+  return kind ? `Non-actionable · ${NON_ACTIONABLE_KIND_LABELS[kind]}` : 'Non-actionable';
 });
 
 async function onApplyAdvisory() {
@@ -48,6 +55,12 @@ async function onDismiss(e: Event) {
     {{ advisoryLabel }}
     <span class="dismiss" aria-label="Dismiss suggestion" @click="onDismiss">×</span>
   </button>
+  <span
+    v-else-if="ticket.resolved_source === 'non_actionable'"
+    class="resolution-chip non-actionable"
+  >
+    {{ nonActionableLabel }}
+  </span>
 </template>
 
 <style scoped>

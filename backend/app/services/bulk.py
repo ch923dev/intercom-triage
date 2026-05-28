@@ -141,9 +141,7 @@ async def bulk_recategorize(
         if ticket is None:
             raise HTTPException(status_code=404, detail=f"ticket {tid!r} not found")
         if ticket.resolved_at is not None:
-            ticket.resolved_at = None
-            ticket.resolved_source = None
-            ticket.resolution_cleared_at = naive_utcnow()
+            resolution_svc.clear_resolution(ticket)
         override = await session.get(Override, tid)
         now = naive_utcnow()
         if override is None:

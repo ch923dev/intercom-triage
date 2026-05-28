@@ -516,6 +516,25 @@ body {
   color: var(--ink-3);
 }
 
+/* ── Non-actionable kind chip (T107) ───────────────────────────────────── */
+.resolution-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: var(--hairline) solid var(--line);
+  background: var(--chip-bg);
+  color: var(--ink-2);
+}
+
+.resolution-chip.non-actionable {
+  border-style: dashed;
+  border-color: var(--ink-3);
+  color: var(--ink-3);
+}
+
 .action-btn.park-btn {
   border-color: var(--line);
   color: var(--ink-3);

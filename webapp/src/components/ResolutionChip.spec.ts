@@ -1,11 +1,11 @@
 // ResolutionChip spec — renders correct variant per resolved_source +
-// resolution_chip_state. Reference: spec §10.2.
+// resolution_chip_state. Reference: spec §10.2, T107.
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import ResolutionChip from './ResolutionChip.vue';
-import type { Ticket } from '@/types/api';
+import type { NonActionableKind, Ticket } from '@/types/api';
 
 const NOW = '2026-05-25T00:00:00.000Z';
 
@@ -41,6 +41,7 @@ function base(overrides: Partial<Ticket> = {}): Ticket {
     note: null,
     resolved_at: null,
     resolved_source: null,
+    non_actionable_kind: null,
     ai_resolve_enabled: false,
     ai_resolve_override: null,
     ai_resolution_verdict: null,
@@ -68,15 +69,6 @@ describe('ResolutionChip', () => {
     expect(w.find('.resolution-chip').exists()).toBe(false);
   });
 
-  it('renders nothing for a resolved non-actionable ticket (column conveys source)', () => {
-    const w = mount(ResolutionChip, {
-      props: {
-        ticket: base({ resolved_at: NOW, resolved_source: 'non_actionable' }),
-      },
-    });
-    expect(w.find('.resolution-chip').exists()).toBe(false);
-  });
-
   it('renders the advisory chip when resolution_chip_state is set', () => {
     const w = mount(ResolutionChip, {
       props: {
@@ -88,5 +80,74 @@ describe('ResolutionChip', () => {
     });
     expect(w.text()).toContain('AI: resolved?');
     expect(w.text()).toContain('0.81');
+  });
+});
+
+describe('ResolutionChip — non-actionable kind label (T107)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('shows kind label when non_actionable_kind is set', () => {
+    const w = mount(ResolutionChip, {
+      props: {
+        ticket: base({
+          resolved_at: NOW,
+          resolved_source: 'non_actionable',
+          non_actionable_kind: 'spam',
+        }),
+      },
+    });
+    expect(w.text()).toContain('Non-actionable · Spam');
+  });
+
+  it('shows plain Non-actionable when non_actionable_kind is null', () => {
+    const w = mount(ResolutionChip, {
+      props: {
+        ticket: base({
+          resolved_at: NOW,
+          resolved_source: 'non_actionable',
+          non_actionable_kind: null,
+        }),
+      },
+    });
+    const text = w.text();
+    expect(text).toContain('Non-actionable');
+    expect(text).not.toContain('·');
+  });
+
+  it('renders correct labels for all five kinds', () => {
+    const cases: Array<[NonActionableKind, string]> = [
+      ['auto_reply', 'Auto-reply'],
+      ['thanks', 'Thanks'],
+      ['spam', 'Spam'],
+      ['out_of_office', 'Out of office'],
+      ['other', 'Other'],
+    ];
+    for (const [kind, label] of cases) {
+      const w = mount(ResolutionChip, {
+        props: {
+          ticket: base({
+            resolved_at: NOW,
+            resolved_source: 'non_actionable',
+            non_actionable_kind: kind,
+          }),
+        },
+      });
+      expect(w.text()).toContain(`Non-actionable · ${label}`);
+    }
+  });
+
+  it('does not render the kind chip for non-non_actionable resolved tickets', () => {
+    const w = mount(ResolutionChip, {
+      props: {
+        ticket: base({
+          resolved_at: NOW,
+          resolved_source: 'manual',
+          non_actionable_kind: null,
+        }),
+      },
+    });
+    expect(w.find('.resolution-chip').exists()).toBe(false);
   });
 });

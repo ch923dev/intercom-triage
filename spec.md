@@ -245,6 +245,7 @@ Acceptance:
 - When the AI's verdict is non-actionable with confidence at or above the shared
   resolution threshold, ingest auto-marks the ticket; a fallback verdict never
   does.
+- A non-actionable ticket carries an optional structured kind (auto_reply / thanks / spam / out_of_office / other); the AI sets it on auto-mark, manual marks leave it null, reopen clears it.
 
 ### US-020 — Reusable playbooks per category
 As the operator, when I solve a ticket I can save a reusable
@@ -529,6 +530,7 @@ Acceptance:
 | FR-059 | An offline periodic background job clusters resolved tickets' embeddings (gated on the embedding layer), labels each cluster with c-TF-IDF top terms over customer-visible text only, flags outliers rather than force-fitting, and persists a snapshot. `GET /clusters` reads the snapshot; `POST /clusters/recompute` forces a refresh. Never touches `ai_cache` (invariant #6). | US-037 |
 | FR-060 | `GET /clusters/gaps` ranks recurring-issue clusters whose dominant effective category (override beats AI, invariant #13) has no active playbook, most-recurring-first, naming the category to write a playbook for. Read-only local logic over the cluster snapshot + playbooks. | US-038 |
 | FR-061 | `GET /playbooks/suggested?ticket_id=` ranks the ticket's effective-category playbooks by embedding similarity to its customer-visible text, most-relevant-first. Ephemeral; empty when uncategorized or no in-category playbooks; never busts the cache. | US-039 |
+| FR-062 | A non-actionable ticket may carry a structured `non_actionable_kind` (`auto_reply`\|`thanks`\|`spam`\|`out_of_office`\|`other`, nullable) on `tickets` + `ai_cache`. The categorization call returns it (only for the `non_actionable` verdict; null otherwise; missing/invalid → `other`); ingest stamps it on AI auto-mark, manual marks leave it null; every reopen path clears it (XOR with `resolved_source='non_actionable'`). Surfaced on `TicketSchema` (not `HydratedTicket`); the webapp filters the non-actionable view by it and both surfaces label the chip. | US-019 |
 
 ## 6. Non-functional requirements
 

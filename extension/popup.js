@@ -33,6 +33,14 @@ const RESOLVED_TAB_KEY = 'resolved';
 const NON_ACTIONABLE_TAB_KEY = 'non-actionable';
 const PARKED_TAB_KEY = 'parked';
 
+const NON_ACTIONABLE_KIND_LABELS = {
+  auto_reply: 'Auto-reply',
+  thanks: 'Thanks',
+  spam: 'Spam',
+  out_of_office: 'Out of office',
+  other: 'Other',
+};
+
 const state = {
   categories: [],
   proposals: [],
@@ -231,11 +239,17 @@ function renderCard(ticket, { isResolved = false } = {}) {
   }
 
   if (isResolved) {
-    // Resolved + Non-actionable tabs both show ↺ Reopen. Source is communicated
-    // by the tab itself, so no per-card badge.
+    // Resolved + Non-actionable tabs both show ↺ Reopen. Non-actionable cards
+    // also show the kind chip (e.g. "Non-actionable · Spam") when kind is set.
     const reopenBtn = node('button', 'action-btn reopen-btn', '↺ Reopen');
     reopenBtn.addEventListener('click', () => void doReopen(ticket));
     meta.append(reopenBtn);
+
+    if (ticket.resolved_source === 'non_actionable') {
+      const kindLabel = NON_ACTIONABLE_KIND_LABELS[ticket.non_actionable_kind];
+      const chipText = kindLabel ? `Non-actionable · ${kindLabel}` : 'Non-actionable';
+      meta.append(node('span', 'resolution-chip non-actionable', chipText));
+    }
   } else {
     // Open/category tabs: show ✓ Resolve + ⊘ Non-actionable + Park/Unpark + Move buttons.
     const resolveBtn = node('button', 'action-btn resolve-btn', '✓ Resolve');

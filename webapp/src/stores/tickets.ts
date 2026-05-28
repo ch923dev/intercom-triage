@@ -8,7 +8,8 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
-import type { BulkResult, ParkedReason, Ticket } from '@/types/api';
+import type { BulkResult, NonActionableKind, ParkedReason, Ticket } from '@/types/api';
+import { NON_ACTIONABLE_KIND_LABELS } from '@/utils/nonActionable';
 import { needsReview } from '@/utils/review';
 import {
   cloneFilter,
@@ -136,6 +137,38 @@ export const useTicketsStore = defineStore('tickets', () => {
     reviewOnly.value = !reviewOnly.value;
   }
 
+  /** Active per-kind filter for the Non-actionable column (T107). null = show all
+   *  non-actionable tickets; a specific kind = show only that kind. */
+  const nonActionableKindFilter = ref<NonActionableKind | null>(null);
+
+  function setNonActionableKindFilter(kind: NonActionableKind | null) {
+    nonActionableKindFilter.value = kind;
+  }
+
+  /** Non-actionable kinds actually present in the current set, in the canonical
+   *  label order. Drives the column's per-kind filter chips. */
+  const presentNonActionableKinds = computed<NonActionableKind[]>(() => {
+    const seen = new Set(
+      nonActionableTickets.value
+        .map((t) => t.non_actionable_kind)
+        .filter((k): k is NonActionableKind => k !== null),
+    );
+    return (Object.keys(NON_ACTIONABLE_KIND_LABELS) as NonActionableKind[]).filter((k) =>
+      seen.has(k),
+    );
+  });
+
+  /** The kind filter actually in effect: the operator's choice, but only while
+   *  that kind is still present. A filter whose kind has drained (its last
+   *  ticket reopened/recategorized) goes inert rather than stranding the
+   *  surviving non-actionable tickets behind a chip that no longer renders. */
+  const effectiveNonActionableKindFilter = computed<NonActionableKind | null>(() =>
+    nonActionableKindFilter.value !== null &&
+    presentNonActionableKinds.value.includes(nonActionableKindFilter.value)
+      ? nonActionableKindFilter.value
+      : null,
+  );
+
   /** When true, the board narrows to PARKED tickets (roadmap 4.1, Layout B).
    *  A board-level toggle like `reviewOnly`, driven by the Topbar parked chip. */
   const parkedOnly = ref(false);
@@ -216,11 +249,18 @@ export const useTicketsStore = defineStore('tickets', () => {
   });
 
   const filteredNonActionableTickets = computed(() => {
-    if (!isFilterActive.value) return nonActionableTickets.value;
-    const now = Date.now();
-    return nonActionableTickets.value.filter((t) =>
-      ticketMatchesFilter(t, activeFilter.value, effectiveCategoryId(t), now),
-    );
+    let base = nonActionableTickets.value;
+    if (isFilterActive.value) {
+      const now = Date.now();
+      base = base.filter((t) =>
+        ticketMatchesFilter(t, activeFilter.value, effectiveCategoryId(t), now),
+      );
+    }
+    const kind = effectiveNonActionableKindFilter.value;
+    if (kind !== null) {
+      base = base.filter((t) => t.non_actionable_kind === kind);
+    }
+    return base;
   });
 
   /** Every ticket keyed by id — intentionally walks the raw list, NOT
@@ -838,6 +878,10 @@ export const useTicketsStore = defineStore('tickets', () => {
     clearFilter,
     filteredPureResolvedTickets,
     filteredNonActionableTickets,
+    nonActionableKindFilter,
+    setNonActionableKindFilter,
+    presentNonActionableKinds,
+    effectiveNonActionableKindFilter,
     // Needs-review lane (roadmap 2.3)
     needsReviewTickets,
     reviewOnly,

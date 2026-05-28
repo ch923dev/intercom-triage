@@ -30,7 +30,7 @@ from app.schemas import (
 )
 from app.services.cache import get_cached, set_cached
 from app.services.categories import get_fallback
-from app.services.resolution import clear_parked
+from app.services.resolution import clear_parked, clear_resolution
 from app.services.settings import get_settings
 from app.util import naive_utcnow
 
@@ -111,9 +111,7 @@ async def set_override(
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"ticket {ticket_id!r} not found")
     if ticket.resolved_at is not None:
-        ticket.resolved_at = None
-        ticket.resolved_source = None
-        ticket.resolution_cleared_at = naive_utcnow()
+        clear_resolution(ticket)
 
     override = await session.get(Override, ticket_id)
     if override is None:
@@ -190,6 +188,9 @@ def _maybe_auto_resolve_from_ai(
     row.resolved_source = (
         "ai_resolved" if result.ai_resolution_verdict == "resolved" else "non_actionable"
     )
+    row.non_actionable_kind = (
+        result.non_actionable_kind if result.ai_resolution_verdict == "non_actionable" else None
+    )
     clear_parked(row)
 
 
@@ -250,6 +251,7 @@ async def _upsert_ticket(
     if hydrated.state == "closed" and row.state != "closed" and row.resolved_at is None:
         row.resolved_at = now
         row.resolved_source = "intercom_closed"
+        row.non_actionable_kind = None
         clear_parked(row)
     else:
         _maybe_auto_resolve_from_ai(row, result, settings, now, content_signature)
@@ -601,6 +603,7 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
                 note=TicketNoteRead.model_validate(note) if note is not None else None,
                 resolved_at=row.resolved_at,
                 resolved_source=row.resolved_source,  # type: ignore[arg-type]
+                non_actionable_kind=row.non_actionable_kind,  # type: ignore[arg-type]
                 ai_resolve_enabled=effective_ai_resolve,
                 ai_resolve_override=row.ai_resolve_enabled,
                 ai_resolution_verdict=verdict,  # type: ignore[arg-type]
