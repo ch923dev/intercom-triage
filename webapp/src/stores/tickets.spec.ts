@@ -72,6 +72,7 @@ function fakeTicket(id: string, overrides: Partial<Ticket> = {}): Ticket {
     parked_until: null,
     parked_reason: null,
     parked_note: null,
+    non_actionable_kind: null,
     ...overrides,
   };
 }
@@ -248,6 +249,157 @@ describe('ticketsStore.editTicket on a resolved ticket (A1)', () => {
   });
 });
 
+describe('ticketsStore.nonActionableKindFilter (T107)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('filteredNonActionableTickets returns all non-actionable tickets when filter is null', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('a', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+      fakeTicket('b', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'thanks',
+      }),
+      fakeTicket('c', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'auto_reply',
+      }),
+    );
+
+    expect(s.filteredNonActionableTickets.map((t) => t.id).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('filteredNonActionableTickets filters by kind when filter is set', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('a', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+      fakeTicket('b', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'thanks',
+      }),
+      fakeTicket('c', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+    );
+
+    s.setNonActionableKindFilter('spam');
+    expect(s.filteredNonActionableTickets.map((t) => t.id).sort()).toEqual(['a', 'c']);
+  });
+
+  it('treats a filter for an absent kind as inert — shows all, not empty (finding #1)', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('a', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+    );
+
+    // 'thanks' is not present in the set, so the filter cannot hide the spam
+    // ticket — an active filter for an unselectable kind is inert.
+    s.setNonActionableKindFilter('thanks');
+    expect(s.filteredNonActionableTickets.map((t) => t.id)).toEqual(['a']);
+    expect(s.effectiveNonActionableKindFilter).toBeNull();
+  });
+
+  it('presentNonActionableKinds lists only present kinds in canonical order', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('a', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'out_of_office',
+      }),
+      fakeTicket('b', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+      fakeTicket('c', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: null,
+      }),
+    );
+
+    expect(s.presentNonActionableKinds).toEqual(['spam', 'out_of_office']);
+  });
+
+  it('stops hiding tickets once the active kind drains from the set (finding #1)', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('spam-1', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+      fakeTicket('manual-1', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: null,
+      }),
+    );
+    s.setNonActionableKindFilter('spam');
+    expect(s.filteredNonActionableTickets.map((t) => t.id)).toEqual(['spam-1']);
+
+    // The last spam ticket is reopened/recategorized; only a manual-mark
+    // (kind=null) non-actionable ticket survives. 'spam' is no longer present.
+    s.resolvedTickets.splice(
+      0,
+      s.resolvedTickets.length,
+      fakeTicket('manual-1', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: null,
+      }),
+    );
+
+    // The stale filter must not strand the surviving ticket, and the effective
+    // filter clears so the chip highlight stays consistent.
+    expect(s.filteredNonActionableTickets.map((t) => t.id)).toEqual(['manual-1']);
+    expect(s.effectiveNonActionableKindFilter).toBeNull();
+  });
+
+  it('setNonActionableKindFilter(null) clears the filter', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('a', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+      fakeTicket('b', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'thanks',
+      }),
+    );
+
+    s.setNonActionableKindFilter('spam');
+    expect(s.filteredNonActionableTickets).toHaveLength(1);
+
+    s.setNonActionableKindFilter(null);
+    expect(s.filteredNonActionableTickets).toHaveLength(2);
+  });
+});
+
 describe('ticketsStore.bulkMarkNonActionable', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -268,5 +420,41 @@ describe('ticketsStore.bulkMarkNonActionable', () => {
     expect(result.ok_ids).toEqual(['x', 'z']);
     expect(s.resolvedTickets.map((t) => t.id).sort()).toEqual(['x', 'z']);
     expect(s.tickets.find((t) => t.id === 'y')).toBeDefined();
+  });
+});
+
+describe('ticketsStore.bulkReopen partial-failure rollback', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('restores failed rows to their original resolved positions regardless of failed[] order', async () => {
+    const { api } = await import('@/api/client');
+    const s = useTicketsStore();
+    // Resolved column order: X(0) A(1) B(2) C(3) Y(4). Reopen A, B, C.
+    s.resolvedTickets.push(
+      fakeTicket('X', { resolved_at: NOW, resolved_source: 'manual' }),
+      fakeTicket('A', { resolved_at: NOW, resolved_source: 'manual' }),
+      fakeTicket('B', { resolved_at: NOW, resolved_source: 'manual' }),
+      fakeTicket('C', { resolved_at: NOW, resolved_source: 'manual' }),
+      fakeTicket('Y', { resolved_at: NOW, resolved_source: 'manual' }),
+    );
+    // Server rejects all three, reported in scrambled (non-ascending) order.
+    (api.bulkReopen as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok_ids: [],
+      failed: [
+        { id: 'C', reason: 'locked' },
+        { id: 'A', reason: 'locked' },
+        { id: 'B', reason: 'locked' },
+      ],
+    });
+
+    await s.bulkReopen(['A', 'B', 'C']);
+
+    // All three return to resolved in their original interleaved order.
+    expect(s.resolvedTickets.map((t) => t.id)).toEqual(['X', 'A', 'B', 'C', 'Y']);
+    // None leaked into the open list.
+    expect(s.tickets.map((t) => t.id)).toEqual([]);
   });
 });

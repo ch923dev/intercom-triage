@@ -1,0 +1,63 @@
+{
+  "_comment": "SYNTHESIZED fixture, not a real capture. Exercises R.5: text-less parts that carry uploads[]. The per-upload field names (name/file_name/filename) are a DEFENSIVE GUESS — the R.1 live capture confirmed uploads[] is present on type 1/2/3 parts but did not record the object shape. Parts: (1) customer image-only with a named upload, (2) customer attachment-only with no name, (3) admin reply with text AND an upload (text must win, upload NOT appended), (4) internal note attachment-only (-> internal_notes[]), (5) customer part with no text and no upload (still dropped). user_summary mirrors live reality: companies:[] + first_company:null.",
+  "id": "1007",
+  "title": "Customer sent screenshots",
+  "state": "open",
+  "priority": false,
+  "created_at": 1716860000,
+  "last_updated": 1716861000,
+  "user_summary": {
+    "user_id": "user-ext-777",
+    "name": "Jordan Snap",
+    "email": "jordan@example.com",
+    "role": "user",
+    "companies": [],
+    "first_company": null
+  },
+  "renderable_parts": [
+    {
+      "renderable_type": 1,
+      "created_at": 1716860100,
+      "renderable_data": {
+        "user_summary": { "user_id": "user-ext-777", "name": "Jordan Snap", "email": "jordan@example.com", "role": "user" },
+        "blocks": [],
+        "uploads": [{ "name": "receipt.png", "content_type": "image/png" }]
+      }
+    },
+    {
+      "renderable_type": 1,
+      "created_at": 1716860200,
+      "renderable_data": {
+        "user_summary": { "user_id": "user-ext-777", "name": "Jordan Snap", "email": "jordan@example.com", "role": "user" },
+        "blocks": [],
+        "uploads": [{ "content_type": "application/pdf" }]
+      }
+    },
+    {
+      "renderable_type": 2,
+      "created_at": 1716860300,
+      "renderable_data": {
+        "admin_summary": { "id": "admin-7", "name": "Riley Agent", "email": "riley@support.example" },
+        "blocks": [{ "type": "paragraph", "text": "See attached" }],
+        "uploads": [{ "name": "fix.pdf" }]
+      }
+    },
+    {
+      "renderable_type": 3,
+      "created_at": 1716860400,
+      "renderable_data": {
+        "admin_summary": { "id": "admin-7", "name": "Riley Agent", "email": "riley@support.example" },
+        "blocks": [],
+        "uploads": [{ "name": "trace.log" }]
+      }
+    },
+    {
+      "renderable_type": 1,
+      "created_at": 1716860500,
+      "renderable_data": {
+        "user_summary": { "user_id": "user-ext-777", "name": "Jordan Snap", "email": "jordan@example.com", "role": "user" },
+        "blocks": []
+      }
+    }
+  ]
+}

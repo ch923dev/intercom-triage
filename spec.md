@@ -245,6 +245,7 @@ Acceptance:
 - When the AI's verdict is non-actionable with confidence at or above the shared
   resolution threshold, ingest auto-marks the ticket; a fallback verdict never
   does.
+- A non-actionable ticket carries an optional structured kind (auto_reply / thanks / spam / out_of_office / other); the AI sets it on auto-mark, manual marks leave it null, reopen clears it.
 
 ### US-020 — Reusable playbooks per category
 As the operator, when I solve a ticket I can save a reusable
@@ -493,7 +494,7 @@ Acceptance:
 | FR-023 | Each ticket may carry one notes record with a free-text body. Empty body deletes the record. | US-014 |
 | FR-024 | Settings include a `mute_alarms` boolean; both surfaces read and write through the existing settings endpoint. | US-013 |
 | FR-025 | Tickets carry `resolved_at` and `resolved_source` as an orthogonal resolution flag, independent of category assignment and Intercom state. | US-015, US-016, US-017 |
-| FR-026 | Resolution source is one of three values: `manual` (operator action), `intercom_closed` (sync auto-resolve), or implied by an AI-suggested chip the operator confirms. | US-015, US-016, US-017 |
+| FR-026 | Resolution source is one of four stored values: `manual` (operator action), `intercom_closed` (sync auto-resolve), `non_actionable` (FR-037), or `ai_resolved` (AI auto-close confirmed under the operator's auto-resolve setting). | US-015, US-016, US-017 |
 | FR-027 | The backend computes `resolution_chip_state` (`ai_resolved` \| `ai_reopened` \| `new_reply` \| `null`) server-side from settings + ticket + AI cache, and includes it in every ticket response. | US-016 |
 | FR-028 | The system exposes `POST /tickets/{id}/resolve`, `POST /tickets/{id}/reopen`, `PATCH /tickets/{id}/ai-resolve`, and `POST /tickets/{id}/dismiss-chip`. `GET /tickets` accepts `?resolved=true\|false`; default excludes resolved tickets. | US-015, US-016 |
 | FR-029 | Each ticket carries a per-ticket AI-resolve tri-state override (`true` / `false` / `null`); `null` means inherit `settings.ai_resolve_default`. | US-016 |
@@ -529,6 +530,7 @@ Acceptance:
 | FR-059 | An offline periodic background job clusters resolved tickets' embeddings (gated on the embedding layer), labels each cluster with c-TF-IDF top terms over customer-visible text only, flags outliers rather than force-fitting, and persists a snapshot. `GET /clusters` reads the snapshot; `POST /clusters/recompute` forces a refresh. Never touches `ai_cache` (invariant #6). | US-037 |
 | FR-060 | `GET /clusters/gaps` ranks recurring-issue clusters whose dominant effective category (override beats AI, invariant #13) has no active playbook, most-recurring-first, naming the category to write a playbook for. Read-only local logic over the cluster snapshot + playbooks. | US-038 |
 | FR-061 | `GET /playbooks/suggested?ticket_id=` ranks the ticket's effective-category playbooks by embedding similarity to its customer-visible text, most-relevant-first. Ephemeral; empty when uncategorized or no in-category playbooks; never busts the cache. | US-039 |
+| FR-062 | A non-actionable ticket may carry a structured `non_actionable_kind` (`auto_reply`\|`thanks`\|`spam`\|`out_of_office`\|`other`, nullable) on `tickets` + `ai_cache`. The categorization call returns it (only for the `non_actionable` verdict; null otherwise; missing/invalid → `other`); ingest stamps it on AI auto-mark, manual marks leave it null; every reopen path clears it (XOR with `resolved_source='non_actionable'`). Surfaced on `TicketSchema` (not `HydratedTicket`); the webapp filters the non-actionable view by it and both surfaces label the chip. | US-019 |
 
 ## 6. Non-functional requirements
 

@@ -200,7 +200,7 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T103 — Multi-user expansion: add a `users` table + simple session cookie auth + per-user overrides and settings. *(out of scope — `CLAUDE.md`)*
 - T104 ✓ — Alembic migrations.
 - T105 — Bulk actions in the extension popup. *(roadmap 4.4 — open)*
-- T107 — Structured `non_actionable_kind` column. *(roadmap 4.2 — open, cross-package)*
+- T107 ✓ — Structured `non_actionable_kind` column on tickets + ai_cache (migration 0020); AI emits/parses + strict schema; cached; stamped on AI non_actionable auto-mark, cleared on every reopen path; surfaced on TicketSchema; webapp chip label + per-kind filter; extension popup chip. FR-062/US-019, plan §8c, migration 0020. Branch feat/t107-non-actionable-kind. *(Cross-package backend+webapp+extension at the API-contract level; HydratedTicket / invariant #2 untouched — non_actionable_kind is board-state on TicketSchema, like triage facets T142.)*
 
 ---
 
@@ -305,4 +305,5 @@ Every requirement maps to at least one task.
 | FR-060 | T158 |
 | US-039 | T159 |
 | FR-061 | T159 |
+| FR-062 | T107 |
 | NFR-009 | T160 |

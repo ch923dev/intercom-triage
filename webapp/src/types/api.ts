@@ -19,6 +19,8 @@ export type ProposalStatus = 'pending' | 'approved' | 'merged' | 'rejected';
 
 export type ResolvedSource = 'manual' | 'intercom_closed' | 'non_actionable' | 'ai_resolved';
 
+export type NonActionableKind = 'auto_reply' | 'thanks' | 'spam' | 'out_of_office' | 'other';
+
 export type ParkedReason =
   | 'waiting_on_customer'
   | 'waiting_on_third_party'
@@ -200,6 +202,7 @@ export interface Ticket {
   note: TicketNote | null;
   resolved_at: string | null;
   resolved_source: ResolvedSource | null;
+  non_actionable_kind: NonActionableKind | null;
   /** Effective value — backend merges per-ticket override with settings default. */
   ai_resolve_enabled: boolean;
   /** Raw per-ticket override. null = inherit from settings.ai_resolve_default. */

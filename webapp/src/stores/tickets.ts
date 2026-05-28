@@ -8,7 +8,8 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
-import type { BulkResult, ParkedReason, Ticket } from '@/types/api';
+import type { BulkResult, NonActionableKind, ParkedReason, Ticket } from '@/types/api';
+import { NON_ACTIONABLE_KIND_LABELS } from '@/utils/nonActionable';
 import { needsReview } from '@/utils/review';
 import {
   cloneFilter,
@@ -73,6 +74,24 @@ export const useTicketsStore = defineStore('tickets', () => {
    *  mutating action increments on entry and decrements in `finally`. */
   const mutating = ref(0);
 
+  /** Bumped once per mutation entry. `silentRefresh` captures it before its
+   *  fetch and re-checks after: if any mutation began during the in-flight
+   *  fetch — even one that already finished — the fetched lists predate the
+   *  optimistic change, so the poll discards them instead of clobbering it
+   *  (auto-sync race R.2; the `mutating` counter only guards the start). */
+  const mutationGen = ref(0);
+
+  /** Enter a mutation: hold off `silentRefresh` (mutating) and mark a new
+   *  generation so an already-in-flight poll knows its data is now stale. */
+  function beginMutation() {
+    mutating.value += 1;
+    mutationGen.value += 1;
+  }
+  /** Leave a mutation. */
+  function endMutation() {
+    mutating.value -= 1;
+  }
+
   const tickets = computed(() => state.value.tickets);
   const loading = computed(() => state.value.loading);
   const lastRefresh = computed(() => state.value.lastRefresh);
@@ -135,6 +154,38 @@ export const useTicketsStore = defineStore('tickets', () => {
   function toggleReviewOnly() {
     reviewOnly.value = !reviewOnly.value;
   }
+
+  /** Active per-kind filter for the Non-actionable column (T107). null = show all
+   *  non-actionable tickets; a specific kind = show only that kind. */
+  const nonActionableKindFilter = ref<NonActionableKind | null>(null);
+
+  function setNonActionableKindFilter(kind: NonActionableKind | null) {
+    nonActionableKindFilter.value = kind;
+  }
+
+  /** Non-actionable kinds actually present in the current set, in the canonical
+   *  label order. Drives the column's per-kind filter chips. */
+  const presentNonActionableKinds = computed<NonActionableKind[]>(() => {
+    const seen = new Set(
+      nonActionableTickets.value
+        .map((t) => t.non_actionable_kind)
+        .filter((k): k is NonActionableKind => k !== null),
+    );
+    return (Object.keys(NON_ACTIONABLE_KIND_LABELS) as NonActionableKind[]).filter((k) =>
+      seen.has(k),
+    );
+  });
+
+  /** The kind filter actually in effect: the operator's choice, but only while
+   *  that kind is still present. A filter whose kind has drained (its last
+   *  ticket reopened/recategorized) goes inert rather than stranding the
+   *  surviving non-actionable tickets behind a chip that no longer renders. */
+  const effectiveNonActionableKindFilter = computed<NonActionableKind | null>(() =>
+    nonActionableKindFilter.value !== null &&
+    presentNonActionableKinds.value.includes(nonActionableKindFilter.value)
+      ? nonActionableKindFilter.value
+      : null,
+  );
 
   /** When true, the board narrows to PARKED tickets (roadmap 4.1, Layout B).
    *  A board-level toggle like `reviewOnly`, driven by the Topbar parked chip. */
@@ -216,11 +267,18 @@ export const useTicketsStore = defineStore('tickets', () => {
   });
 
   const filteredNonActionableTickets = computed(() => {
-    if (!isFilterActive.value) return nonActionableTickets.value;
-    const now = Date.now();
-    return nonActionableTickets.value.filter((t) =>
-      ticketMatchesFilter(t, activeFilter.value, effectiveCategoryId(t), now),
-    );
+    let base = nonActionableTickets.value;
+    if (isFilterActive.value) {
+      const now = Date.now();
+      base = base.filter((t) =>
+        ticketMatchesFilter(t, activeFilter.value, effectiveCategoryId(t), now),
+      );
+    }
+    const kind = effectiveNonActionableKindFilter.value;
+    if (kind !== null) {
+      base = base.filter((t) => t.non_actionable_kind === kind);
+    }
+    return base;
   });
 
   /** Every ticket keyed by id — intentionally walks the raw list, NOT
@@ -275,12 +333,17 @@ export const useTicketsStore = defineStore('tickets', () => {
    *  optimistic state and corrupt index-based rollback. */
   async function silentRefresh() {
     if (state.value.loading || mutating.value > 0) return;
+    const gen = mutationGen.value;
     state.value.error = null;
     try {
       const [open, resolved] = await Promise.all([
         api.listTickets({ resolved: false }),
         api.listTickets({ resolved: true }),
       ]);
+      // A mutation that began during the fetch (still in flight, or already
+      // committed) makes these lists stale — discard rather than clobber the
+      // operator's optimistic state (R.2).
+      if (mutating.value > 0 || mutationGen.value !== gen) return;
       state.value.tickets = open;
       resolvedTickets.value = resolved;
       _reconcilePendingOverrides();
@@ -335,7 +398,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       if (list === 'open') state.value.tickets = next;
       else resolvedTickets.value = next;
     };
-    mutating.value++;
+    beginMutation();
     writeAt(optimistic);
     try {
       await api.editTicket(ticketId, patch);
@@ -343,7 +406,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       writeAt(prev); // roll back to the pre-edit ticket
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -353,7 +416,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     if (idx === -1) return;
     const original = state.value.tickets[idx]!;
     // Optimistic move
-    mutating.value++;
+    beginMutation();
     state.value.tickets.splice(idx, 1);
     resolvedTickets.value.unshift({
       ...original,
@@ -369,7 +432,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       state.value.tickets.splice(idx, 0, original);
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -378,7 +441,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idx = state.value.tickets.findIndex((t) => t.id === id);
     if (idx === -1) return;
     const original = state.value.tickets[idx]!;
-    mutating.value++;
+    beginMutation();
     state.value.tickets.splice(idx, 1);
     resolvedTickets.value.unshift({
       ...original,
@@ -393,7 +456,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       state.value.tickets.splice(idx, 0, original);
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -402,7 +465,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idx = resolvedTickets.value.findIndex((t) => t.id === id);
     if (idx === -1) return;
     const original = resolvedTickets.value[idx]!;
-    mutating.value++;
+    beginMutation();
     resolvedTickets.value.splice(idx, 1);
     state.value.tickets.unshift({
       ...original,
@@ -417,7 +480,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       resolvedTickets.value.splice(idx, 0, original);
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -432,7 +495,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idx = state.value.tickets.findIndex((t) => t.id === id);
     if (idx === -1) return;
     const original = state.value.tickets[idx]!;
-    mutating.value++;
+    beginMutation();
     state.value.tickets.splice(idx, 1, {
       ...original,
       parked_at: new Date().toISOString(),
@@ -446,7 +509,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       state.value.tickets.splice(idx, 1, original);
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -455,7 +518,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idx = state.value.tickets.findIndex((t) => t.id === id);
     if (idx === -1) return;
     const original = state.value.tickets[idx]!;
-    mutating.value++;
+    beginMutation();
     state.value.tickets.splice(idx, 1, {
       ...original,
       parked_at: null,
@@ -469,13 +532,13 @@ export const useTicketsStore = defineStore('tickets', () => {
       state.value.tickets.splice(idx, 1, original);
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
   /** Set (or clear) the per-ticket AI-resolve override; reflects optimistically. */
   async function setAiResolve(id: string, enabled: boolean | null) {
-    mutating.value++;
+    beginMutation();
     try {
       await api.setAiResolve(id, enabled);
       // Optimistically reflect the raw override in both lists; effective value
@@ -485,13 +548,13 @@ export const useTicketsStore = defineStore('tickets', () => {
         if (t) t.ai_resolve_override = enabled;
       }
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
   /** Suppress the resolution chip until the next update_at advance. */
   async function dismissChip(id: string) {
-    mutating.value++;
+    beginMutation();
     try {
       await api.dismissChip(id);
       for (const list of [state.value.tickets, resolvedTickets.value]) {
@@ -499,7 +562,7 @@ export const useTicketsStore = defineStore('tickets', () => {
         if (t) t.resolution_chip_state = null;
       }
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -523,7 +586,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     }
 
     const previous = state.value.pendingOverrides[ticketId];
-    mutating.value++;
+    beginMutation();
     state.value.pendingOverrides = { ...state.value.pendingOverrides, [ticketId]: categoryId };
     try {
       await api.overrideCategory(ticketId, categoryId);
@@ -540,7 +603,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       }
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -556,7 +619,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idSet = new Set(ids);
     const snapshot: Array<{ idx: number; row: Ticket }> = [];
     const moved: Ticket[] = [];
-    mutating.value++;
+    beginMutation();
     // Walk in reverse so splices don't invalidate indexes ahead of us.
     for (let i = state.value.tickets.length - 1; i >= 0; i--) {
       const t = state.value.tickets[i]!;
@@ -582,7 +645,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       _rollbackAll(snapshot);
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -591,7 +654,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idSet = new Set(ids);
     const snapshot: Array<{ idx: number; row: Ticket }> = [];
     const moved: Ticket[] = [];
-    mutating.value++;
+    beginMutation();
     for (let i = state.value.tickets.length - 1; i >= 0; i--) {
       const t = state.value.tickets[i]!;
       if (!idSet.has(t.id)) continue;
@@ -614,7 +677,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       _rollbackAll(snapshot);
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -623,7 +686,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const idSet = new Set(ids);
     const snapshot: Array<{ idx: number; row: Ticket }> = [];
     const moved: Ticket[] = [];
-    mutating.value++;
+    beginMutation();
     for (let i = resolvedTickets.value.length - 1; i >= 0; i--) {
       const t = resolvedTickets.value[i]!;
       if (!idSet.has(t.id)) continue;
@@ -640,13 +703,15 @@ export const useTicketsStore = defineStore('tickets', () => {
 
     try {
       const result = await api.bulkReopen(ids);
-      // Reopen rollback is the inverse direction: a failed id needs to go
-      // back into resolvedTickets and out of state.value.tickets.
-      for (const failure of result.failed) {
-        const original = snapshot.find((s) => s.row.id === failure.id);
-        if (!original) continue;
-        state.value.tickets = state.value.tickets.filter((t) => t.id !== failure.id);
-        resolvedTickets.value.splice(original.idx, 0, original.row);
+      // Reopen rollback is the inverse direction: a failed id goes back into
+      // resolvedTickets and out of state.value.tickets. Restore in ascending
+      // original-index order (the snapshot is descending — reverse it) so the
+      // splices land at the right slots, matching `_rollbackFromSnapshot`.
+      const failedSet = new Set(result.failed.map((f) => f.id));
+      state.value.tickets = state.value.tickets.filter((t) => !failedSet.has(t.id));
+      for (const { idx, row } of [...snapshot].reverse()) {
+        if (!failedSet.has(row.id)) continue;
+        resolvedTickets.value.splice(idx, 0, row);
       }
       return result;
     } catch (e) {
@@ -657,7 +722,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       }
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -669,7 +734,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     const overrideSnap: Record<string, number | undefined> = {};
     const resolvedMoves: Array<{ idx: number; row: Ticket }> = [];
 
-    mutating.value++;
+    beginMutation();
     // Move any selected resolved tickets back to the open list optimistically.
     for (let i = resolvedTickets.value.length - 1; i >= 0; i--) {
       const t = resolvedTickets.value[i]!;
@@ -727,13 +792,13 @@ export const useTicketsStore = defineStore('tickets', () => {
       }
       throw e;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
   /** Bulk dismiss chip — clears `resolution_chip_state` locally for ok ids. */
   async function bulkDismissChip(ids: string[]): Promise<BulkResult> {
-    mutating.value++;
+    beginMutation();
     try {
       const result = await api.bulkDismissChip(ids);
       const okSet = new Set(result.ok_ids);
@@ -744,7 +809,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       }
       return result;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -755,7 +820,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     reason: ParkedReason,
     note: string | null = null,
   ): Promise<BulkResult> {
-    mutating.value++;
+    beginMutation();
     try {
       const result = await api.bulkPark(ids, untilAt, reason, note);
       const okSet = new Set(result.ok_ids);
@@ -770,13 +835,13 @@ export const useTicketsStore = defineStore('tickets', () => {
       }
       return result;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
   /** Bulk unpark — clears the trio on every ok id. */
   async function bulkUnpark(ids: string[]): Promise<BulkResult> {
-    mutating.value++;
+    beginMutation();
     try {
       const result = await api.bulkUnpark(ids);
       const okSet = new Set(result.ok_ids);
@@ -790,7 +855,7 @@ export const useTicketsStore = defineStore('tickets', () => {
       }
       return result;
     } finally {
-      mutating.value--;
+      endMutation();
     }
   }
 
@@ -838,6 +903,10 @@ export const useTicketsStore = defineStore('tickets', () => {
     clearFilter,
     filteredPureResolvedTickets,
     filteredNonActionableTickets,
+    nonActionableKindFilter,
+    setNonActionableKindFilter,
+    presentNonActionableKinds,
+    effectiveNonActionableKindFilter,
     // Needs-review lane (roadmap 2.3)
     needsReviewTickets,
     reviewOnly,

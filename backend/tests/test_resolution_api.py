@@ -478,6 +478,42 @@ async def test_reopen_clears_non_actionable(client: AsyncClient, session: AsyncS
 
 
 @pytest.mark.asyncio
+async def test_reopen_clears_non_actionable_kind(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """POST /reopen on a non_actionable ticket with a kind set clears
+    resolved_at, resolved_source, AND non_actionable_kind."""
+    t = Ticket(
+        id="t-na-kind-reopen",
+        title="x",
+        state="open",
+        author={},
+        parts=[],
+        internal_notes=[],
+        created_at=naive_utcnow(),
+        updated_at=naive_utcnow(),
+        category_id=1,
+        summary="",
+        ai_confidence=0.0,
+        resolved_at=naive_utcnow(),
+        resolved_source="non_actionable",
+        non_actionable_kind="spam",
+    )
+    session.add(t)
+    await session.commit()
+
+    r = await client.post("/tickets/t-na-kind-reopen/reopen")
+    assert r.status_code == 200
+
+    session.expire_all()
+    row = await session.get(Ticket, "t-na-kind-reopen")
+    assert row is not None
+    assert row.resolved_at is None
+    assert row.resolved_source is None
+    assert row.non_actionable_kind is None
+
+
+@pytest.mark.asyncio
 async def test_chip_state_new_reply_when_resolved_with_new_activity_and_ai_off(
     client: AsyncClient, session: AsyncSession
 ) -> None:

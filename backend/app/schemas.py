@@ -64,6 +64,7 @@ ResolvedSource = Literal["manual", "intercom_closed", "non_actionable", "ai_reso
 ParkedReason = Literal["waiting_on_customer", "waiting_on_third_party", "waiting_internal", "other"]
 ResolutionVerdict = Literal["resolved", "non_actionable", "not_resolved"]
 ResolutionChipState = Literal["ai_resolved", "ai_reopened", "new_reply"]
+NonActionableKind = Literal["auto_reply", "thanks", "spam", "out_of_office", "other"]
 # Roadmap 0.2 — triage facets emitted by the categorization call.
 AIPriority = Literal["low", "normal", "high", "urgent"]
 AISentiment = Literal["negative", "neutral", "positive"]
@@ -461,6 +462,7 @@ class TicketSchema(HydratedTicket):
     note: TicketNoteRead | None = None
     resolved_at: UTCDatetime | None = None
     resolved_source: ResolvedSource | None = None
+    non_actionable_kind: NonActionableKind | None = None
     ai_resolve_enabled: bool = False  # effective value after merging with settings default
     ai_resolve_override: bool | None = None  # raw per-ticket override (None = inherit)
     ai_resolution_verdict: ResolutionVerdict | None = None
