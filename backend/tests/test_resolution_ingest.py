@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -454,6 +454,7 @@ async def test_ai_non_actionable_verdict_stamps_kind(
 
     monkeypatch.setattr("app.services.tickets.categorize_many", fake_categorize_many)
 
+    now = datetime.now(UTC).isoformat()
     payload = [
         {
             "id": "conv-na-kind-1",
@@ -462,8 +463,8 @@ async def test_ai_non_actionable_verdict_stamps_kind(
             "priority": None,
             "url": None,
             "author": {"type": "user"},
-            "created_at": "2026-05-25T00:00:00Z",
-            "updated_at": "2026-05-25T00:00:00Z",
+            "created_at": now,
+            "updated_at": now,
             "parts": [],
             "internal_notes": [],
         }
@@ -471,18 +472,16 @@ async def test_ai_non_actionable_verdict_stamps_kind(
     r = await client.post("/tickets/ingest", json=payload)
     assert r.status_code == 200
 
-    # DB-level assertion — authoritative for this task.
+    # DB-level assertion — authoritative.
     session.expire_all()
     row = await session.get(Ticket, "conv-na-kind-1")
     assert row is not None
     assert row.resolved_source == "non_actionable"
     assert row.non_actionable_kind == "auto_reply"
 
-    # GET-level assertion — tolerant: ticket may be outside lookback window and not
-    # appear in the list (updated_at is 2026-05-25 which can age out relative to
-    # test-run time). If present, non_actionable_kind key may be absent until Task 7
-    # adds it to TicketSchema.
+    # GET-level assertion — ticket uses current timestamp so it clears the 24 h
+    # lookback filter and must appear in the resolved list with the kind set.
     resolved_tickets = (await client.get("/tickets?resolved=true")).json()
     matching = [t for t in resolved_tickets if t["id"] == "conv-na-kind-1"]
-    if matching:
-        assert matching[0].get("non_actionable_kind") in ("auto_reply", None)
+    assert len(matching) == 1
+    assert matching[0]["non_actionable_kind"] == "auto_reply"

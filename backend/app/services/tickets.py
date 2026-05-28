@@ -606,6 +606,7 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
                 note=TicketNoteRead.model_validate(note) if note is not None else None,
                 resolved_at=row.resolved_at,
                 resolved_source=row.resolved_source,  # type: ignore[arg-type]
+                non_actionable_kind=row.non_actionable_kind,  # type: ignore[arg-type]
                 ai_resolve_enabled=effective_ai_resolve,
                 ai_resolve_override=row.ai_resolve_enabled,
                 ai_resolution_verdict=verdict,  # type: ignore[arg-type]
