@@ -789,8 +789,11 @@ export const useTicketsStore = defineStore('tickets', () => {
           else reverted[id] = prev;
         }
         state.value.pendingOverrides = reverted;
-        // Restore any resolved-row moves whose ids failed.
-        for (const { idx, row } of resolvedMoves) {
+        // Restore any resolved-row moves whose ids failed. resolvedMoves is in
+        // descending original-index order (it was built by a reverse scan), so
+        // restore in ASCENDING order — same as the whole-batch catch below — or
+        // the splices land at the wrong slots when ≥2 adjacent rows fail.
+        for (const { idx, row } of [...resolvedMoves].reverse()) {
           if (!failedSet.has(row.id)) continue;
           state.value.tickets = state.value.tickets.filter((t) => t.id !== row.id);
           resolvedTickets.value.splice(idx, 0, row);
