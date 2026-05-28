@@ -173,6 +173,11 @@ _SHARED_PROPERTIES: dict[str, Any] = {
     "resolution_verdict": {"type": "string", "enum": _RESOLUTION_VERDICT_VALUES},
     "resolution_confidence": {"type": "number", "minimum": 0, "maximum": 1},
     "resolution_reason": {"type": "string", "description": "One clause, <=120 chars."},
+    "non_actionable_kind": {
+        "type": ["string", "null"],
+        "enum": ["auto_reply", "thanks", "spam", "out_of_office", "other", None],
+        "description": "Set only when resolution_verdict is non_actionable; else null.",
+    },
 }
 _SHARED_REQUIRED = [
     "subject",
@@ -184,6 +189,7 @@ _SHARED_REQUIRED = [
     "resolution_verdict",
     "resolution_confidence",
     "resolution_reason",
+    "non_actionable_kind",
 ]
 
 
