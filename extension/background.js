@@ -114,9 +114,16 @@ async function poll() {
 
     await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
     await chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
-  } catch {
-    // Backend down or Intercom session expired — leave the last badge value
-    // alone. The popup surfaces actionable errors when the operator opens it.
+  } catch (e) {
+    // An expired Intercom session is the one background failure worth a signal:
+    // the operator gets no other feedback until they open the popup. Surface it
+    // on the badge so re-auth is visible; a later successful tick overwrites '!'
+    // with the Urgent count. Every other error (backend down, transient) leaves
+    // the last badge value alone — the popup surfaces those when it's opened.
+    if (e instanceof IntercomSessionError && (e.status === 401 || e.status === 403)) {
+      await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
+      await chrome.action.setBadgeText({ text: '!' });
+    }
   }
 }
 

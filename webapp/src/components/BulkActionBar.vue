@@ -177,7 +177,7 @@ function onClearSelection() {
 
       <button
         type="button"
-        :disabled="busy || !noneResolved"
+        :disabled="busy || overCap || !noneResolved"
         :title="noneResolved ? 'Mark selected resolved' : 'Some selected are already resolved'"
         @click="onResolve"
         @mouseenter="showPreview('resolve')"
@@ -190,7 +190,7 @@ function onClearSelection() {
 
       <button
         type="button"
-        :disabled="busy || !noneResolved"
+        :disabled="busy || overCap || !noneResolved"
         :title="
           noneResolved ? 'Mark selected non-actionable' : 'Some selected are already resolved'
         "
@@ -205,7 +205,7 @@ function onClearSelection() {
 
       <button
         type="button"
-        :disabled="busy || !allResolved"
+        :disabled="busy || overCap || !allResolved"
         :title="allResolved ? 'Reopen selected' : 'All selected must be resolved'"
         @click="onReopen"
         @mouseenter="showPreview('reopen')"
@@ -222,7 +222,7 @@ function onClearSelection() {
         <button
           ref="parkBtnEl"
           type="button"
-          :disabled="busy || !noneResolved || !noneParked"
+          :disabled="busy || overCap || !noneResolved || !noneParked"
           :title="noneResolved ? 'Park selected' : 'Some selected are already resolved'"
           @click="parkOpen = !parkOpen"
         >
@@ -233,7 +233,7 @@ function onClearSelection() {
 
       <button
         type="button"
-        :disabled="busy || !anyParked"
+        :disabled="busy || overCap || !anyParked"
         :title="anyParked ? 'Unpark selected' : 'None of the selected are parked'"
         @click="onUnpark"
       >
@@ -243,7 +243,9 @@ function onClearSelection() {
       <div class="divider" />
 
       <div class="dropdown">
-        <button type="button" :disabled="busy" @click="moveOpen = !moveOpen">Move to ▾</button>
+        <button type="button" :disabled="busy || overCap" @click="moveOpen = !moveOpen">
+          Move to ▾
+        </button>
         <div v-if="moveOpen" class="menu" role="menu">
           <button
             v-for="cat in categories.categories"
@@ -264,7 +266,7 @@ function onClearSelection() {
       </div>
 
       <div class="dropdown">
-        <button type="button" :disabled="busy" @click="followupOpen = !followupOpen">
+        <button type="button" :disabled="busy || overCap" @click="followupOpen = !followupOpen">
           Follow-up ▾
         </button>
         <div v-if="followupOpen" class="menu" role="menu">
@@ -283,7 +285,7 @@ function onClearSelection() {
 
       <button
         type="button"
-        :disabled="busy || !anyHasFollowup"
+        :disabled="busy || overCap || !anyHasFollowup"
         :title="anyHasFollowup ? 'Clear follow-ups on selected' : 'No follow-ups on selected'"
         @click="onClearFollowup"
         @mouseenter="showPreview('clear_followup')"
@@ -298,7 +300,7 @@ function onClearSelection() {
 
       <button
         type="button"
-        :disabled="busy || !anyHasChip"
+        :disabled="busy || overCap || !anyHasChip"
         :title="anyHasChip ? 'Dismiss AI resolution chip' : 'No chips on selected'"
         @click="onDismissChip"
         @mouseenter="showPreview('dismiss_chip')"
