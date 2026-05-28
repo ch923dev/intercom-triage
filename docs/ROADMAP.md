@@ -6,7 +6,7 @@
 >
 > **As of 2026-05-28, Phases 0–3 + 4.1 + R.1 + R.4 are SHIPPED to `main`.** What was a forward plan got executed almost in full. The work landed in code ahead of the source-of-truth docs; the **2026-05-28 reconciliation** wrote it back into `spec.md` v1.7 (US-022..US-039, FR-043..FR-061, NFR-009), `plan.md` v1.7 (§15–§18), and `tasks.md` v1.6 (Phases 15–18, T142–T160; T106/T102 marked `✓`). See the execution ledger below for per-item status + commit. The phase tables further down are kept verbatim as the original plan of record.
 >
-> **Still open:** Phase 4.2 (`non_actionable_kind` column / T107), 4.3 (webhook + SSE / T100), 4.4 (popup bulk / T105); robustness R.2 (webapp race test), R.3 (perf NFR tests), R.5 (image-only message content loss — surfaced during the R.1 live capture). These are the live backlog.
+> **Still open:** Phase 4.2 (`non_actionable_kind` column / T107), 4.3 (webhook + SSE / T100), 4.4 (popup bulk / T105); robustness R.2 (webapp race test), R.3 (perf NFR tests). These are the live backlog.
 >
 > The original subagent dispatch artifacts that drove this execution are archived under [`docs/roadmap-execution/`](roadmap-execution/) — `TASK_CONTRACTS.md` (per-item contracts) + `DEPENDENCY_SCHEDULE.md` (wave/dependency graph).
 
@@ -42,7 +42,7 @@
 | R.2 | Webapp E2E race test | ◯ open | — | — |
 | R.3 | NFR perf integration tests | ◯ open | — | NFR-001/002 still unguarded |
 | R.4 | Latency p95 histogram | ✅ shipped | T160 | `ffb28c5` |
-| R.5 | Image-only message content loss | ◯ open | — | type 1/2/3 parts can carry `uploads[]`; a text-less attachment-only message yields empty body and is dropped (`intercom.js` `if (!body) continue`). Surfaced during the R.1 live capture |
+| R.5 | Image-only message content loss | ✅ shipped | — | text-less parts carrying `uploads[]` now synthesize an `[attachment: …]` placeholder body (extension-only, no contract change) instead of being dropped; covered by behavioral + snapshot tests |
 
 ## Where the project stood (when this was written, 2026-05-27)
 
