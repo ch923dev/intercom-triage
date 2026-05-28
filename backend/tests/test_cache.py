@@ -179,3 +179,26 @@ async def test_cache_legacy_row_has_null_resolution(session: AsyncSession) -> No
     assert cached.ai_resolution_verdict is None
     assert cached.ai_resolution_confidence is None
     assert cached.ai_resolution_reason is None
+
+
+@pytest.mark.asyncio
+async def test_cache_round_trip_non_actionable_kind(session: AsyncSession) -> None:
+    """Cache write + read preserves non_actionable_kind so a warm fetch reuses
+    it without a second AI call (#6)."""
+    sig = datetime(2026, 5, 28, 12, 0)
+    result = CategorizationResult(
+        category_id=1,
+        proposal_id=None,
+        summary="ooo",
+        confidence=0.9,
+        ai_resolution_verdict="non_actionable",
+        ai_resolution_confidence=0.95,
+        ai_resolution_reason="auto-reply: OOO",
+        non_actionable_kind="auto_reply",
+    )
+    await set_cached(session, "t-na", result, sig)
+    await session.commit()
+
+    cached = await get_cached(session, "t-na", sig, ttl_seconds=300)
+    assert cached is not None
+    assert cached.non_actionable_kind == "auto_reply"
