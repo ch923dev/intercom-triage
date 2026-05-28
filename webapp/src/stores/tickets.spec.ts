@@ -72,6 +72,7 @@ function fakeTicket(id: string, overrides: Partial<Ticket> = {}): Ticket {
     parked_until: null,
     parked_reason: null,
     parked_note: null,
+    non_actionable_kind: null,
     ...overrides,
   };
 }
@@ -245,6 +246,96 @@ describe('ticketsStore.editTicket on a resolved ticket (A1)', () => {
 
     await expect(s.editTicket('r', { title: 'edited title' })).rejects.toThrow('boom');
     expect(s.resolvedTickets.find((t) => t.id === 'r')!.title).toBe('t-r');
+  });
+});
+
+describe('ticketsStore.nonActionableKindFilter (T107)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('filteredNonActionableTickets returns all non-actionable tickets when filter is null', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('a', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+      fakeTicket('b', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'thanks',
+      }),
+      fakeTicket('c', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'auto_reply',
+      }),
+    );
+
+    expect(s.filteredNonActionableTickets.map((t) => t.id).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('filteredNonActionableTickets filters by kind when filter is set', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('a', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+      fakeTicket('b', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'thanks',
+      }),
+      fakeTicket('c', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+    );
+
+    s.setNonActionableKindFilter('spam');
+    expect(s.filteredNonActionableTickets.map((t) => t.id).sort()).toEqual(['a', 'c']);
+  });
+
+  it('filteredNonActionableTickets returns empty when no tickets match kind', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('a', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+    );
+
+    s.setNonActionableKindFilter('thanks');
+    expect(s.filteredNonActionableTickets).toHaveLength(0);
+  });
+
+  it('setNonActionableKindFilter(null) clears the filter', () => {
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('a', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'spam',
+      }),
+      fakeTicket('b', {
+        resolved_at: NOW,
+        resolved_source: 'non_actionable',
+        non_actionable_kind: 'thanks',
+      }),
+    );
+
+    s.setNonActionableKindFilter('spam');
+    expect(s.filteredNonActionableTickets).toHaveLength(1);
+
+    s.setNonActionableKindFilter(null);
+    expect(s.filteredNonActionableTickets).toHaveLength(2);
   });
 });
 

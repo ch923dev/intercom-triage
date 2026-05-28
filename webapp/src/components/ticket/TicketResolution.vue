@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { ParkedReason, Ticket } from '@/types/api';
+import type { NonActionableKind, ParkedReason, Ticket } from '@/types/api';
 import CollapsibleSection from './CollapsibleSection.vue';
 import ParkMenu from '@/components/ParkMenu.vue';
 import { useTicketsStore } from '@/stores/tickets';
@@ -9,14 +9,24 @@ import { formatShortDateTime } from '@/utils/time';
 const { ticket } = defineProps<{ ticket: Ticket }>();
 const tickets = useTicketsStore();
 
+const KIND_LABELS: Record<NonActionableKind, string> = {
+  auto_reply: 'Auto-reply',
+  thanks: 'Thanks',
+  spam: 'Spam',
+  out_of_office: 'Out of office',
+  other: 'Other',
+};
+
 const statusLabel = computed(() => {
   switch (ticket.resolved_source) {
     case 'manual':
       return 'Resolved · manual';
     case 'intercom_closed':
       return 'Resolved · intercom';
-    case 'non_actionable':
-      return 'Non-actionable';
+    case 'non_actionable': {
+      const kind = ticket.non_actionable_kind;
+      return kind ? `Non-actionable · ${KIND_LABELS[kind]}` : 'Non-actionable';
+    }
     case 'ai_resolved':
       return 'Resolved · ai';
     default:

@@ -11,11 +11,35 @@ import TicketCard from './TicketCard.vue';
 import { useSelectionStore } from '@/stores/selection';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
-import type { Ticket } from '@/types/api';
+import type { NonActionableKind, Ticket } from '@/types/api';
 
 const tickets = useTicketsStore();
 const view = useViewStore();
 const selection = useSelectionStore();
+
+const KIND_LABELS: Record<NonActionableKind, string> = {
+  auto_reply: 'Auto-reply',
+  thanks: 'Thanks',
+  spam: 'Spam',
+  out_of_office: 'Out of office',
+  other: 'Other',
+};
+
+/** Kinds that actually appear in the unfiltered non-actionable set, in stable order. */
+const presentKinds = computed(() => {
+  const seen = new Set<NonActionableKind>();
+  for (const t of tickets.nonActionableTickets) {
+    if (t.non_actionable_kind !== null) seen.add(t.non_actionable_kind);
+  }
+  const ORDER: NonActionableKind[] = ['auto_reply', 'thanks', 'spam', 'out_of_office', 'other'];
+  return ORDER.filter((k) => seen.has(k));
+});
+
+const activeKindFilter = computed(() => tickets.nonActionableKindFilter);
+
+function setKindFilter(kind: NonActionableKind | null) {
+  tickets.setNonActionableKindFilter(kind);
+}
 
 const items = computed(() => tickets.filteredNonActionableTickets);
 const selectedId = computed(() => view.selectedTicketId);
@@ -60,6 +84,30 @@ function onCardClick(t: Ticket, e: MouseEvent) {
       <div class="name">Non-actionable</div>
       <Mono class="count">{{ items.length }}</Mono>
     </header>
+
+    <div
+      v-if="presentKinds.length > 0"
+      class="kind-filters"
+      role="group"
+      aria-label="Filter by kind"
+    >
+      <button
+        class="kind-chip"
+        :class="{ active: activeKindFilter === null }"
+        @click="setKindFilter(null)"
+      >
+        All
+      </button>
+      <button
+        v-for="kind in presentKinds"
+        :key="kind"
+        class="kind-chip"
+        :class="{ active: activeKindFilter === kind }"
+        @click="setKindFilter(kind)"
+      >
+        {{ KIND_LABELS[kind] }}
+      </button>
+    </div>
 
     <draggable
       :model-value="items"
@@ -142,5 +190,32 @@ header {
 }
 .card-dragging {
   cursor: grabbing;
+}
+.kind-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 10px 2px;
+}
+.kind-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--chip-bg);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.kind-chip:hover {
+  background: var(--hover);
+  color: var(--ink-2);
+}
+.kind-chip.active {
+  background: var(--chip-bg);
+  color: var(--ink);
+  border-color: var(--ink-3);
 }
 </style>

@@ -8,7 +8,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
-import type { BulkResult, ParkedReason, Ticket } from '@/types/api';
+import type { BulkResult, NonActionableKind, ParkedReason, Ticket } from '@/types/api';
 import { needsReview } from '@/utils/review';
 import {
   cloneFilter,
@@ -136,6 +136,14 @@ export const useTicketsStore = defineStore('tickets', () => {
     reviewOnly.value = !reviewOnly.value;
   }
 
+  /** Active per-kind filter for the Non-actionable column (T107). null = show all
+   *  non-actionable tickets; a specific kind = show only that kind. */
+  const nonActionableKindFilter = ref<NonActionableKind | null>(null);
+
+  function setNonActionableKindFilter(kind: NonActionableKind | null) {
+    nonActionableKindFilter.value = kind;
+  }
+
   /** When true, the board narrows to PARKED tickets (roadmap 4.1, Layout B).
    *  A board-level toggle like `reviewOnly`, driven by the Topbar parked chip. */
   const parkedOnly = ref(false);
@@ -216,11 +224,18 @@ export const useTicketsStore = defineStore('tickets', () => {
   });
 
   const filteredNonActionableTickets = computed(() => {
-    if (!isFilterActive.value) return nonActionableTickets.value;
-    const now = Date.now();
-    return nonActionableTickets.value.filter((t) =>
-      ticketMatchesFilter(t, activeFilter.value, effectiveCategoryId(t), now),
-    );
+    let base = nonActionableTickets.value;
+    if (isFilterActive.value) {
+      const now = Date.now();
+      base = base.filter((t) =>
+        ticketMatchesFilter(t, activeFilter.value, effectiveCategoryId(t), now),
+      );
+    }
+    if (nonActionableKindFilter.value !== null) {
+      const kind = nonActionableKindFilter.value;
+      base = base.filter((t) => t.non_actionable_kind === kind);
+    }
+    return base;
   });
 
   /** Every ticket keyed by id — intentionally walks the raw list, NOT
@@ -838,6 +853,8 @@ export const useTicketsStore = defineStore('tickets', () => {
     clearFilter,
     filteredPureResolvedTickets,
     filteredNonActionableTickets,
+    nonActionableKindFilter,
+    setNonActionableKindFilter,
     // Needs-review lane (roadmap 2.3)
     needsReviewTickets,
     reviewOnly,
