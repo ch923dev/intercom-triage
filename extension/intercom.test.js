@@ -179,3 +179,41 @@ test('author.company is null when companies[] is empty (confirmed live shape)', 
   assert.equal(t.author.company, null);
   assert.equal(t.author.id, 'user-ext-999');
 });
+
+test('R.5: text-less customer part with a named upload becomes [attachment: name] in parts[]', () => {
+  const t = normalizeConversation(fixture('conversation-attachment.json'), APP_ID);
+
+  // Parts that survive: customer img (1) + customer file (1) + admin text (2).
+  // The internal note goes to internal_notes[]; the no-text-no-upload part is dropped.
+  assert.equal(t.parts.length, 3);
+  assert.equal(t.parts[0].body, '[attachment: receipt.png]');
+  assert.equal(t.parts[0].is_admin, false);
+});
+
+test('R.5: text-less part with an unnamed upload falls back to [attachment]', () => {
+  const t = normalizeConversation(fixture('conversation-attachment.json'), APP_ID);
+  assert.equal(t.parts[1].body, '[attachment]');
+});
+
+test('R.5: a part with text AND an upload keeps only its text (text-less-only scope)', () => {
+  const t = normalizeConversation(fixture('conversation-attachment.json'), APP_ID);
+  assert.equal(t.parts[2].body, 'See attached');
+  assert.equal(t.parts[2].is_admin, true);
+  assert.ok(!t.parts[2].body.includes('[attachment'), 'upload must NOT be appended when text exists');
+});
+
+test('R.5: text-less internal note with an upload lands in internal_notes[], not parts[]', () => {
+  const t = normalizeConversation(fixture('conversation-attachment.json'), APP_ID);
+  assert.equal(t.internal_notes.length, 1);
+  assert.equal(t.internal_notes[0].body, '[attachment: trace.log]');
+  assert.equal(t.internal_notes[0].is_admin, true);
+  // invariant #4: the note's attachment must not leak into the AI-visible parts.
+  assert.ok(t.parts.every((p) => !p.body.includes('trace.log')));
+});
+
+test('R.5: a part with no text and no uploads is still dropped', () => {
+  const t = normalizeConversation(fixture('conversation-attachment.json'), APP_ID);
+  // Fixture has four 1/2 parts but one (the last) has neither text nor uploads,
+  // so only three survive — proving the empty part is dropped.
+  assert.equal(t.parts.length, 3);
+});
