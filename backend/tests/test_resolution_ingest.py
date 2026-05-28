@@ -414,3 +414,75 @@ async def test_auto_resolve_does_not_undo_manual_reopen(
         row.resolved_at is not None
     ), "new customer part after cleared_at should allow auto-resolve"
     assert row.resolved_source == "ai_resolved"
+
+
+# ── T107: non_actionable_kind is stamped on AI auto-resolve ───────────────────
+
+
+@pytest.mark.asyncio
+async def test_ai_non_actionable_verdict_stamps_kind(
+    app: object,
+    client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AI auto-resolve as non_actionable stamps the structured kind on the row."""
+    from app.ai.pipeline import CategorizationResult
+    from app.models import Settings, Ticket
+
+    s = (await session.scalars(select(Settings))).one()
+    s.use_ai = True
+    s.ai_resolve_default = True
+    s.ai_resolve_confidence_threshold = 0.7
+    await session.commit()
+
+    async def fake_categorize_many(
+        *args: object, **kwargs: object
+    ) -> dict[str, CategorizationResult]:
+        return {
+            "conv-na-kind-1": CategorizationResult(
+                category_id=1,
+                proposal_id=None,
+                summary="OOO bounce",
+                confidence=0.9,
+                ai_resolution_verdict="non_actionable",
+                ai_resolution_confidence=0.97,
+                ai_resolution_reason="auto-reply: OOO",
+                non_actionable_kind="auto_reply",
+            )
+        }
+
+    monkeypatch.setattr("app.services.tickets.categorize_many", fake_categorize_many)
+
+    payload = [
+        {
+            "id": "conv-na-kind-1",
+            "title": "Out of office",
+            "state": "open",
+            "priority": None,
+            "url": None,
+            "author": {"type": "user"},
+            "created_at": "2026-05-25T00:00:00Z",
+            "updated_at": "2026-05-25T00:00:00Z",
+            "parts": [],
+            "internal_notes": [],
+        }
+    ]
+    r = await client.post("/tickets/ingest", json=payload)
+    assert r.status_code == 200
+
+    # DB-level assertion — authoritative for this task.
+    session.expire_all()
+    row = await session.get(Ticket, "conv-na-kind-1")
+    assert row is not None
+    assert row.resolved_source == "non_actionable"
+    assert row.non_actionable_kind == "auto_reply"
+
+    # GET-level assertion — tolerant: ticket may be outside lookback window and not
+    # appear in the list (updated_at is 2026-05-25 which can age out relative to
+    # test-run time). If present, non_actionable_kind key may be absent until Task 7
+    # adds it to TicketSchema.
+    resolved_tickets = (await client.get("/tickets?resolved=true")).json()
+    matching = [t for t in resolved_tickets if t["id"] == "conv-na-kind-1"]
+    if matching:
+        assert matching[0].get("non_actionable_kind") in ("auto_reply", None)

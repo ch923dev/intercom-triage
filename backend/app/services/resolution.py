@@ -54,6 +54,7 @@ def apply_resolve(row: Ticket) -> ResolveOutcome:
     now = naive_utcnow()
     row.resolved_at = now
     row.resolved_source = "manual"
+    row.non_actionable_kind = None
     clear_parked(row)
     return ResolveOutcome(resolved_at=now, resolved_source="manual")
 
@@ -65,6 +66,7 @@ def apply_reopen(row: Ticket) -> None:
         raise HTTPException(status_code=409, detail="ticket is not resolved")
     row.resolved_at = None
     row.resolved_source = None
+    row.non_actionable_kind = None
     row.resolution_cleared_at = naive_utcnow()
 
 

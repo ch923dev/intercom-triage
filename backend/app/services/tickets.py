@@ -113,6 +113,7 @@ async def set_override(
     if ticket.resolved_at is not None:
         ticket.resolved_at = None
         ticket.resolved_source = None
+        ticket.non_actionable_kind = None
         ticket.resolution_cleared_at = naive_utcnow()
 
     override = await session.get(Override, ticket_id)
@@ -190,6 +191,9 @@ def _maybe_auto_resolve_from_ai(
     row.resolved_source = (
         "ai_resolved" if result.ai_resolution_verdict == "resolved" else "non_actionable"
     )
+    row.non_actionable_kind = (
+        result.non_actionable_kind if result.ai_resolution_verdict == "non_actionable" else None
+    )
     clear_parked(row)
 
 
@@ -250,6 +254,7 @@ async def _upsert_ticket(
     if hydrated.state == "closed" and row.state != "closed" and row.resolved_at is None:
         row.resolved_at = now
         row.resolved_source = "intercom_closed"
+        row.non_actionable_kind = None
         clear_parked(row)
     else:
         _maybe_auto_resolve_from_ai(row, result, settings, now, content_signature)
