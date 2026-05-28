@@ -159,6 +159,8 @@ class AICacheEntry(Base):
         server_default=text("'[]'"),
         nullable=False,
     )
+    # Roadmap 4.2 (T107) — structured kind for non-actionable cache entries.
+    non_actionable_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         # XOR: exactly one of category_id, proposal_id is set.
@@ -198,6 +200,12 @@ class AICacheEntry(Base):
         CheckConstraint(
             "ai_sentiment IS NULL OR ai_sentiment IN ('negative','neutral','positive')",
             name="ai_cache_ai_sentiment_check",
+        ),
+        # Roadmap 4.2 (T107) — non-actionable kind enum.
+        CheckConstraint(
+            "non_actionable_kind IS NULL OR non_actionable_kind "
+            "IN ('auto_reply','thanks','spam','out_of_office','other')",
+            name="ai_cache_non_actionable_kind_check",
         ),
     )
 
@@ -646,6 +654,9 @@ class Ticket(Base):
     # Optional free-text elaboration (mainly for reason='other'); only set while
     # parked, cleared with the trio by clear_parked.
     parked_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Roadmap 4.2 (T107) — structured kind for non-actionable tickets. Only set
+    # when resolved_source = 'non_actionable'; nullable; AI-derived.
+    non_actionable_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         Index("ix_tickets_updated_at", "updated_at"),
@@ -691,6 +702,13 @@ class Ticket(Base):
         CheckConstraint(
             "parked_note IS NULL OR (parked_at IS NOT NULL AND length(parked_note) <= 200)",
             name="tickets_parked_note_check",
+        ),
+        # Roadmap 4.2 (T107) — non-actionable kind enum; only valid while non-actionable.
+        CheckConstraint(
+            "non_actionable_kind IS NULL OR (resolved_source = 'non_actionable' "
+            "AND non_actionable_kind "
+            "IN ('auto_reply','thanks','spam','out_of_office','other'))",
+            name="tickets_non_actionable_kind_check",
         ),
     )
 

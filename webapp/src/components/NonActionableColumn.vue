@@ -11,11 +11,16 @@ import TicketCard from './TicketCard.vue';
 import { useSelectionStore } from '@/stores/selection';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
-import type { Ticket } from '@/types/api';
+import type { NonActionableKind, Ticket } from '@/types/api';
+import { NON_ACTIONABLE_KIND_LABELS } from '@/utils/nonActionable';
 
 const tickets = useTicketsStore();
 const view = useViewStore();
 const selection = useSelectionStore();
+
+function setKindFilter(kind: NonActionableKind | null) {
+  tickets.setNonActionableKindFilter(kind);
+}
 
 const items = computed(() => tickets.filteredNonActionableTickets);
 const selectedId = computed(() => view.selectedTicketId);
@@ -60,6 +65,30 @@ function onCardClick(t: Ticket, e: MouseEvent) {
       <div class="name">Non-actionable</div>
       <Mono class="count">{{ items.length }}</Mono>
     </header>
+
+    <div
+      v-if="tickets.presentNonActionableKinds.length > 0"
+      class="kind-filters"
+      role="group"
+      aria-label="Filter by kind"
+    >
+      <button
+        class="kind-chip"
+        :class="{ active: tickets.effectiveNonActionableKindFilter === null }"
+        @click="setKindFilter(null)"
+      >
+        All
+      </button>
+      <button
+        v-for="kind in tickets.presentNonActionableKinds"
+        :key="kind"
+        class="kind-chip"
+        :class="{ active: tickets.effectiveNonActionableKindFilter === kind }"
+        @click="setKindFilter(kind)"
+      >
+        {{ NON_ACTIONABLE_KIND_LABELS[kind] }}
+      </button>
+    </div>
 
     <draggable
       :model-value="items"
@@ -142,5 +171,32 @@ header {
 }
 .card-dragging {
   cursor: grabbing;
+}
+.kind-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 10px 2px;
+}
+.kind-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--chip-bg);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.kind-chip:hover {
+  background: var(--hover);
+  color: var(--ink-2);
+}
+.kind-chip.active {
+  background: var(--chip-bg);
+  color: var(--ink);
+  border-color: var(--ink-3);
 }
 </style>

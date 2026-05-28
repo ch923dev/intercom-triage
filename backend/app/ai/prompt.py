@@ -42,7 +42,8 @@ A) Assign to an EXISTING active category:
      "labels":                ["<secondary tag>", ...],
      "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
-     "resolution_reason":     "<see RESOLUTION rules>"
+     "resolution_reason":     "<see RESOLUTION rules>",
+     "non_actionable_kind":   "auto_reply" | "thanks" | "spam" | "out_of_office" | "other" | null
    }
 
 B) Reuse an already-PENDING proposal:
@@ -57,7 +58,8 @@ B) Reuse an already-PENDING proposal:
      "labels":                ["<secondary tag>", ...],
      "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
-     "resolution_reason":     "<see RESOLUTION rules>"
+     "resolution_reason":     "<see RESOLUTION rules>",
+     "non_actionable_kind":   "auto_reply" | "thanks" | "spam" | "out_of_office" | "other" | null
    }
 
 C) Propose a NEW category (only when no existing category fits with reasonable
@@ -74,7 +76,8 @@ C) Propose a NEW category (only when no existing category fits with reasonable
      "labels":                ["<secondary tag>", ...],
      "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
-     "resolution_reason":     "<see RESOLUTION rules>"
+     "resolution_reason":     "<see RESOLUTION rules>",
+     "non_actionable_kind":   "auto_reply" | "thanks" | "spam" | "out_of_office" | "other" | null
    }
 
 SUBJECT rules:
@@ -113,6 +116,9 @@ RESOLUTION rules (applies to every response):
     "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
     "resolution_confidence": <float 0..1>,
     "resolution_reason":     "<one short clause, <=120 chars, plain text>"
+- When (and only when) resolution_verdict is "non_actionable", also return
+  non_actionable_kind: one of "auto_reply", "thanks", "spam", "out_of_office",
+  "other". Use "other" when none fit. For any other verdict, set it to null.
 
 TRIAGE rules (applies to every response; add these THREE fields to EVERY object):
 - "priority": how urgently the operator should pick this up.
@@ -167,6 +173,11 @@ _SHARED_PROPERTIES: dict[str, Any] = {
     "resolution_verdict": {"type": "string", "enum": _RESOLUTION_VERDICT_VALUES},
     "resolution_confidence": {"type": "number", "minimum": 0, "maximum": 1},
     "resolution_reason": {"type": "string", "description": "One clause, <=120 chars."},
+    "non_actionable_kind": {
+        "type": ["string", "null"],
+        "enum": ["auto_reply", "thanks", "spam", "out_of_office", "other", None],
+        "description": "Set only when resolution_verdict is non_actionable; else null.",
+    },
 }
 _SHARED_REQUIRED = [
     "subject",
@@ -178,6 +189,7 @@ _SHARED_REQUIRED = [
     "resolution_verdict",
     "resolution_confidence",
     "resolution_reason",
+    "non_actionable_kind",
 ]
 
 

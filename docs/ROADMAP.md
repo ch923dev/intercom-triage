@@ -6,7 +6,7 @@
 >
 > **As of 2026-05-28, Phases 0–3 + 4.1 + R.1 + R.4 are SHIPPED to `main`.** What was a forward plan got executed almost in full. The work landed in code ahead of the source-of-truth docs; the **2026-05-28 reconciliation** wrote it back into `spec.md` v1.7 (US-022..US-039, FR-043..FR-061, NFR-009), `plan.md` v1.7 (§15–§18), and `tasks.md` v1.6 (Phases 15–18, T142–T160; T106/T102 marked `✓`). See the execution ledger below for per-item status + commit. The phase tables further down are kept verbatim as the original plan of record.
 >
-> **Still open:** Phase 4.2 (`non_actionable_kind` column / T107), 4.3 (webhook + SSE / T100), 4.4 (popup bulk / T105); robustness R.3 (perf NFR tests), R.5 (image-only message content loss — surfaced during the R.1 live capture). These are the live backlog.
+> **Still open:** Phase 4.3 (webhook + SSE / T100), 4.4 (popup bulk / T105); robustness R.3 (perf NFR tests). These are the live backlog.
 >
 > The original subagent dispatch artifacts that drove this execution are archived under [`docs/roadmap-execution/`](roadmap-execution/) — `TASK_CONTRACTS.md` (per-item contracts) + `DEPENDENCY_SCHEDULE.md` (wave/dependency graph).
 
@@ -35,14 +35,14 @@
 | 3.2 | Playbook-gap detection ⭐ | ✅ shipped | T158 | `790cf59` |
 | 3.3 | Playbook auto-match | ✅ shipped | T159 | `a2de64f` |
 | 4.1 | Parked / snoozed state | ✅ shipped | T106 | `889c0f1`, `87522a2` |
-| 4.2 | `non_actionable_kind` column | ◯ open | T107 | — |
+| 4.2 | `non_actionable_kind` column | ✅ shipped | T107 | branch `feat/t107-non-actionable-kind` |
 | 4.3 | Webhook + SSE live updates | ◯ open | T100 | — |
 | 4.4 | Bulk actions in popup | ◯ open | T105 | — |
 | R.1 | Payload snapshot tests + unknown-type logging | ✅ shipped | — | `25e7f42` — live capture (workspace j3dxf22l) found event types 21/26/31 unmapped → false unknown-type warns; added to skip set + zero-dep full-output snapshot harness for `normalizeConversation` |
 | R.2 | **Webapp race fix** — `silentRefresh()` vs. in-flight optimistic mutation | ✅ shipped | — | `mutationGen` guard discards a poll whose fetch overlapped a mutation; reverse-ordering tests added (`tickets.race.spec.ts`) |
 | R.3 | NFR perf integration tests | ◯ open | — | NFR-001/002 still unguarded |
 | R.4 | Latency p95 histogram | ✅ shipped | T160 | `ffb28c5` |
-| R.5 | Image-only message content loss | ◯ open | — | type 1/2/3 parts can carry `uploads[]`; a text-less attachment-only message yields empty body and is dropped (`intercom.js` `if (!body) continue`). Surfaced during the R.1 live capture |
+| R.5 | Image-only message content loss | ✅ shipped | — | text-less parts carrying `uploads[]` now synthesize an `[attachment: …]` placeholder body (extension-only, no contract change) instead of being dropped; covered by behavioral + snapshot tests |
 
 ## Where the project stood (when this was written, 2026-05-27)
 
@@ -124,7 +124,7 @@ Larger surface changes, some deferred since Phase 9 backlog. Pull forward indivi
 | ID | Item | Why | Effort | Notes |
 |----|------|-----|--------|-------|
 | 4.1 | **Parked / snoozed state** (T106) | "Waiting on third party / customer / hold." Distinct from non-actionable (nothing to do) — parked = deferred action. Likely `parked_at` + `parked_until` columns. | M–L | UI shape TBD: own column vs. filter chip |
-| 4.2 | **Structured `non_actionable_kind` column** (T107) | `auto_reply` / `thanks` / `spam` / `out_of_office` enables per-kind filtering + analytics (spam-wave detection). AI prompt already emits the kind tag — additive migration. | M | Cross-package (backend + webapp + extension) per #2 |
+| 4.2 | **Structured `non_actionable_kind` column** (T107) ✅ | `auto_reply` / `thanks` / `spam` / `out_of_office` enables per-kind filtering + analytics (spam-wave detection). AI prompt already emits the kind tag — additive migration. | M | Cross-package (backend + webapp + extension) at API-contract level; HydratedTicket/#2 untouched |
 | 4.3 | **Webhook + SSE live updates** (T100) | Biggest deferred feature: `conversation.user.created/replied` → push to webapp + popup instead of poll-on-open. | L | Heaviest; only worth it once volume makes polling feel stale |
 | 4.4 | **Bulk actions in the extension popup** (T105) | Mirror the webapp bulk bar in the popup. Deferred because popup ergonomics are cramped. | M | Revisit if the popup's role expands |
 

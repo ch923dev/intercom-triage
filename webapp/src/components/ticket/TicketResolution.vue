@@ -5,6 +5,7 @@ import CollapsibleSection from './CollapsibleSection.vue';
 import ParkMenu from '@/components/ParkMenu.vue';
 import { useTicketsStore } from '@/stores/tickets';
 import { formatShortDateTime } from '@/utils/time';
+import { NON_ACTIONABLE_KIND_LABELS } from '@/utils/nonActionable';
 
 const { ticket } = defineProps<{ ticket: Ticket }>();
 const tickets = useTicketsStore();
@@ -15,8 +16,10 @@ const statusLabel = computed(() => {
       return 'Resolved · manual';
     case 'intercom_closed':
       return 'Resolved · intercom';
-    case 'non_actionable':
-      return 'Non-actionable';
+    case 'non_actionable': {
+      const kind = ticket.non_actionable_kind;
+      return kind ? `Non-actionable · ${NON_ACTIONABLE_KIND_LABELS[kind]}` : 'Non-actionable';
+    }
     case 'ai_resolved':
       return 'Resolved · ai';
     default:

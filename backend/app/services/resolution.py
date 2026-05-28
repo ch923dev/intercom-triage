@@ -54,8 +54,27 @@ def apply_resolve(row: Ticket) -> ResolveOutcome:
     now = naive_utcnow()
     row.resolved_at = now
     row.resolved_source = "manual"
+    row.non_actionable_kind = None
     clear_parked(row)
     return ResolveOutcome(resolved_at=now, resolved_source="manual")
+
+
+def clear_resolution(row: Ticket) -> None:
+    """Clear the resolution quartet atomically: the XOR pair
+    (resolved_at / resolved_source), the AI-derived non_actionable_kind, and the
+    reopen marker (resolution_cleared_at). Does NOT commit. Safe on an
+    unresolved row.
+
+    The single owner of the reopen mutation — every reopen path (the button,
+    the drag-out override, bulk recategorize) routes through here so a field
+    coupled to resolution can never be cleared at some sites and forgotten at
+    others. Note tickets_non_actionable_kind_check does NOT catch a reopen that
+    nulls resolved_source but leaves a stale kind (its `IS NULL` branch passes),
+    so this helper is the structural guarantee, not the DB."""
+    row.resolved_at = None
+    row.resolved_source = None
+    row.non_actionable_kind = None
+    row.resolution_cleared_at = naive_utcnow()
 
 
 def apply_reopen(row: Ticket) -> None:
@@ -63,9 +82,7 @@ def apply_reopen(row: Ticket) -> None:
     the row is not currently resolved."""
     if row.resolved_at is None:
         raise HTTPException(status_code=409, detail="ticket is not resolved")
-    row.resolved_at = None
-    row.resolved_source = None
-    row.resolution_cleared_at = naive_utcnow()
+    clear_resolution(row)
 
 
 def clear_parked(row: Ticket) -> None:
@@ -113,6 +130,8 @@ def apply_mark_non_actionable(row: Ticket) -> ResolveOutcome:
     now = naive_utcnow()
     row.resolved_at = now
     row.resolved_source = "non_actionable"
+    # Manual marks carry no AI kind (D3). Explicit for the CHECK-coupling pattern.
+    row.non_actionable_kind = None
     clear_parked(row)
     return ResolveOutcome(resolved_at=now, resolved_source="non_actionable")
 

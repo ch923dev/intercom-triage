@@ -284,11 +284,12 @@ Schema additions for §8c (FR-025..FR-031):
 ```text
 tickets (resolution columns — added via Alembic 0006):
   resolved_at                   datetime                          -- null = open
-  resolved_source               text                              -- 'manual' | 'intercom_closed' | null
+  resolved_source               text                              -- 'manual' | 'intercom_closed' | 'non_actionable' | 'ai_resolved' | null
   ai_resolve_enabled            boolean nullable                  -- null = inherit settings default
   resolution_chip_dismissed_at  datetime                          -- null = chip not dismissed
   -- check: (resolved_at IS NULL) = (resolved_source IS NULL)
-  -- check: resolved_source IN ('manual','intercom_closed') or null
+  -- check: resolved_source IN ('manual','intercom_closed','non_actionable','ai_resolved') or null
+  --        (widened by migrations 0010 non_actionable, 0012 ai_resolved)
   -- index: ix_tickets_resolved_at (partial, where resolved_at IS NOT NULL)
 
 ai_cache (resolution columns — same migration):
@@ -458,6 +459,8 @@ never auto-moves a ticket.
 
 See `docs/superpowers/specs/2026-05-23-ticket-resolution-design.md` for the full
 design.
+
+**`non_actionable_kind` (roadmap 4.2 / T107, migration 0020):** `tickets.non_actionable_kind` + `ai_cache.non_actionable_kind` — nullable enum (`auto_reply` | `thanks` | `spam` | `out_of_office` | `other`). AI-derived: the categorization structured response returns it only for the `non_actionable` verdict; missing/invalid falls back to `other`. Stamped on ingest's AI auto-mark path; manual marks leave it null; every reopen path clears it (CHECK-coupled to `resolved_source='non_actionable'`). Rides `TicketSchema` (board-state only, not `HydratedTicket` — invariant #2 not involved, same pattern as triage facets T142). Webapp non-actionable column filters by it; both surfaces label the chip.
 
 ## 8d. Bulk actions
 
