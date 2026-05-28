@@ -640,13 +640,15 @@ export const useTicketsStore = defineStore('tickets', () => {
 
     try {
       const result = await api.bulkReopen(ids);
-      // Reopen rollback is the inverse direction: a failed id needs to go
-      // back into resolvedTickets and out of state.value.tickets.
-      for (const failure of result.failed) {
-        const original = snapshot.find((s) => s.row.id === failure.id);
-        if (!original) continue;
-        state.value.tickets = state.value.tickets.filter((t) => t.id !== failure.id);
-        resolvedTickets.value.splice(original.idx, 0, original.row);
+      // Reopen rollback is the inverse direction: a failed id goes back into
+      // resolvedTickets and out of state.value.tickets. Restore in ascending
+      // original-index order (the snapshot is descending — reverse it) so the
+      // splices land at the right slots, matching `_rollbackFromSnapshot`.
+      const failedSet = new Set(result.failed.map((f) => f.id));
+      state.value.tickets = state.value.tickets.filter((t) => !failedSet.has(t.id));
+      for (const { idx, row } of [...snapshot].reverse()) {
+        if (!failedSet.has(row.id)) continue;
+        resolvedTickets.value.splice(idx, 0, row);
       }
       return result;
     } catch (e) {

@@ -270,3 +270,39 @@ describe('ticketsStore.bulkMarkNonActionable', () => {
     expect(s.tickets.find((t) => t.id === 'y')).toBeDefined();
   });
 });
+
+describe('ticketsStore.bulkReopen partial-failure rollback', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('restores failed rows to their original resolved positions regardless of failed[] order', async () => {
+    const { api } = await import('@/api/client');
+    const s = useTicketsStore();
+    // Resolved column order: X(0) A(1) B(2) C(3) Y(4). Reopen A, B, C.
+    s.resolvedTickets.push(
+      fakeTicket('X', { resolved_at: NOW, resolved_source: 'manual' }),
+      fakeTicket('A', { resolved_at: NOW, resolved_source: 'manual' }),
+      fakeTicket('B', { resolved_at: NOW, resolved_source: 'manual' }),
+      fakeTicket('C', { resolved_at: NOW, resolved_source: 'manual' }),
+      fakeTicket('Y', { resolved_at: NOW, resolved_source: 'manual' }),
+    );
+    // Server rejects all three, reported in scrambled (non-ascending) order.
+    (api.bulkReopen as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok_ids: [],
+      failed: [
+        { id: 'C', reason: 'locked' },
+        { id: 'A', reason: 'locked' },
+        { id: 'B', reason: 'locked' },
+      ],
+    });
+
+    await s.bulkReopen(['A', 'B', 'C']);
+
+    // All three return to resolved in their original interleaved order.
+    expect(s.resolvedTickets.map((t) => t.id)).toEqual(['X', 'A', 'B', 'C', 'Y']);
+    // None leaked into the open list.
+    expect(s.tickets.map((t) => t.id)).toEqual([]);
+  });
+});
