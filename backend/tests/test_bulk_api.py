@@ -535,3 +535,58 @@ async def test_bulk_non_actionable_cap_exceeded(client: AsyncClient):
 async def test_bulk_non_actionable_empty(client: AsyncClient):
     r = await client.post("/tickets/bulk/non-actionable", json={"ticket_ids": []})
     assert r.status_code == 422
+
+
+# ── T107 regression: bulk recategorize clears non_actionable_kind ─────────────
+
+
+@pytest.mark.asyncio
+async def test_bulk_recategorize_clears_non_actionable_kind(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Bulk recategorize a non_actionable ticket must null non_actionable_kind.
+
+    Regression for T107: the inline reopen in bulk_recategorize previously
+    cleared resolved_at/resolved_source but not non_actionable_kind, violating
+    the tickets_non_actionable_kind_check constraint → IntegrityError on commit.
+    """
+    session.add(
+        Ticket(
+            id="na-kind-1",
+            title="auto reply",
+            state="open",
+            author={},
+            parts=[],
+            internal_notes=[],
+            created_at=naive_utcnow(),
+            updated_at=naive_utcnow(),
+            category_id=1,
+            summary="",
+            ai_confidence=0.0,
+            resolved_at=naive_utcnow(),
+            resolved_source="non_actionable",
+            non_actionable_kind="spam",
+        )
+    )
+    await session.commit()
+
+    r = await client.patch(
+        "/tickets/bulk/category",
+        json={"ticket_ids": ["na-kind-1"], "category_id": 2},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok_ids"] == ["na-kind-1"], f"expected ok, got: {body}"
+    assert body["failed"] == []
+
+    from app.models import Override
+
+    session.expire_all()
+    row = await session.get(Ticket, "na-kind-1")
+    assert row is not None
+    assert row.resolved_at is None
+    assert row.resolved_source is None
+    assert row.non_actionable_kind is None
+    ov = await session.get(Override, "na-kind-1")
+    assert ov is not None
+    assert ov.category_id == 2
