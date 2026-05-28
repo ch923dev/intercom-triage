@@ -279,7 +279,12 @@ export function normalizeConversation(detail, appId, summary) {
       const body = blocksToPlainText(data.blocks) || uploadsToPlainText(data.uploads);
       if (!body) continue;
       parts.push({
-        author: authorFromSummary(data.user_summary) || author,
+        // authorFromSummary always returns a (possibly all-null) object, so a
+        // plain `|| author` fallback is dead code. Guard explicitly: a part
+        // carrying its own user_summary uses it; an orphan inbound part (none)
+        // attributes to the conversation-level customer author instead of a
+        // fully-null author.
+        author: data.user_summary ? authorFromSummary(data.user_summary) : author,
         body,
         created_at: createdAt,
         is_admin: false,
