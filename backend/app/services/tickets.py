@@ -30,6 +30,7 @@ from app.schemas import (
 )
 from app.services.cache import get_cached, set_cached
 from app.services.categories import get_fallback
+from app.services.categorization_rule import effective_category
 from app.services.resolution import clear_parked, clear_resolution
 from app.services.settings import get_settings
 from app.util import naive_utcnow
@@ -544,14 +545,7 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
 
     composed: list[TicketSchema] = []
     for row in rows:
-        category_id = row.category_id
-        proposal_id = row.proposal_id
-        user_override = False
-        override = overrides.get(row.id)
-        if override is not None and row.updated_at <= override.set_at:
-            category_id = override.category_id
-            proposal_id = None
-            user_override = True
+        category_id, proposal_id, user_override = effective_category(row, overrides.get(row.id))
 
         # Effective ai_resolve: per-ticket override wins over settings default.
         effective_ai_resolve = (

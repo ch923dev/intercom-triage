@@ -115,13 +115,14 @@ extension/
 
 ### Sync pipeline
 
-`fetchHydratedBatch({ appId, state, count, concurrency, knownState })`:
+`fetchHydratedBatch({ appId, state, count, concurrency, knownState, maxPages })`:
 
-1. `listConversations` → page of summaries (newest-first, sorted by `sorting_updated_at`).
+1. `listConversations` → one page of summaries (newest-first, sorted by `sorting_updated_at`) + a `nextCursor` (`pages.next.starting_after`).
 2. Per summary: if `summaryUpdatedMs(summary) <= Date.parse(knownState[id])` → skip (no detail fetch, no AI call).
 3. Otherwise: `getConversation(appId, summary.id)` → `normalizeConversation` → push to result.
-4. Concurrency-bounded worker pool (default 4 parallel detail fetches).
-5. Per-conversation errors are logged + skipped; auth errors (401/403) bubble as `IntercomSessionError` so the popup can surface the login hint.
+4. Concurrency-bounded worker pool (default 4 parallel detail fetches) per page.
+5. **Paginate** via `nextCursor`. Stop when a full page yields nothing new/changed (newest-first ⇒ everything older is unchanged too; a brand-new convo is never skip-known so it can't hide below an all-skipped page) or `nextCursor` is null. `maxPages` (default 20) is a runaway guard — hitting it logs a warning, never a silent truncation.
+6. Per-conversation errors are logged + skipped; auth errors (401/403) bubble as `IntercomSessionError` so the popup can surface the login hint.
 
 `background.js:ingestFromIntercom` calls `fetchHydratedBatch` once per `settings.states` value (default `['open']`), then runs the **closure pass**: for every backend-tracked id that isn't in the open list, search `listClosedConversations` until found or the lookback window (`LOOKBACK_SECONDS = 7 days`) is exhausted. Found ids are hydrated and included in the ingest so the backend's `_upsert_ticket` stamps `resolved_at` / `resolved_source = 'intercom_closed'`.
 

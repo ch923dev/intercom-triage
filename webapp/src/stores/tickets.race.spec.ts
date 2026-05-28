@@ -258,6 +258,34 @@ describe('ticketsStore — silentRefresh vs in-flight applyOverride (R.2)', () =
     expect(s.isMutating).toBe(false);
   });
 
+  it('manual refresh() does not clobber an in-flight optimistic mutation', async () => {
+    const { api } = await import('@/api/client');
+    // Hold the resolve PATCH in flight so mutating > 0 across the refresh.
+    const patch = deferred<unknown>();
+    (api.resolveTicket as ReturnType<typeof vi.fn>).mockReturnValue(patch.promise);
+    // Stale server view: still reports the ticket OPEN.
+    (api.listTickets as ReturnType<typeof vi.fn>).mockImplementation(
+      ({ resolved }: { resolved: boolean }) => (resolved ? [] : [fakeTicket('a')]),
+    );
+
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a'));
+
+    // Operator resolves 'a' (optimistic move), then hits 'r' / Topbar refresh
+    // while the PATCH is still in flight.
+    const inFlight = s.markResolved('a');
+    expect(s.tickets.find((t) => t.id === 'a')).toBeUndefined();
+    await s.refresh();
+
+    // The stale wholesale snapshot was discarded — optimistic move survives.
+    expect(s.tickets.find((t) => t.id === 'a')).toBeUndefined();
+    expect(s.resolvedTickets.find((t) => t.id === 'a')).toBeDefined();
+
+    patch.resolve(undefined);
+    await inFlight;
+    expect(s.isMutating).toBe(false);
+  });
+
   it('discards a poll whose fetch overlapped a mutation that already completed (gen guard)', async () => {
     const { api } = await import('@/api/client');
 

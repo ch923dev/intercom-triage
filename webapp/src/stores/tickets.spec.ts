@@ -177,6 +177,36 @@ describe('ticketsStore bulk cap pre-flight (invariant #9)', () => {
   });
 });
 
+describe('ticketsStore.bulkRecategorize partial-failure rollback ordering', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('restores multiple failed resolved rows to their original positions', async () => {
+    const { api } = await import('@/api/client');
+    const s = useTicketsStore();
+    // Five resolved rows; B and C (adjacent, middle) get recategorized then fail.
+    for (const id of ['A', 'B', 'C', 'D', 'E']) {
+      s.resolvedTickets.push(fakeTicket(id, { resolved_at: NOW, resolved_source: 'manual' }));
+    }
+    (api.bulkRecategorize as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok_ids: [],
+      failed: [
+        { id: 'B', reason: 'x' },
+        { id: 'C', reason: 'x' },
+      ],
+    });
+
+    await s.bulkRecategorize(['B', 'C'], 2);
+
+    // Both failed → both must return to resolvedTickets in their original order.
+    expect(s.resolvedTickets.map((t) => t.id)).toEqual(['A', 'B', 'C', 'D', 'E']);
+    // And neither should be left lingering in the open list.
+    expect(s.tickets.find((t) => t.id === 'B' || t.id === 'C')).toBeUndefined();
+  });
+});
+
 /** A promise whose resolution the test controls — lets us hold a mutation
  *  "in flight" while asserting other store behaviour. */
 function deferred<T>() {

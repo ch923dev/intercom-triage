@@ -923,6 +923,18 @@ def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
 # skipped so the rest of the app boots — only the embeddings layer is degraded.
 
 
+# Set True once the vec0 extension actually loads on a SQLite connection, so
+# `/health` can report whether the embedding layer is operational rather than
+# silently degraded (the load is best-effort and otherwise leaves no signal).
+_sqlite_vec_loaded: bool = False
+
+
+def sqlite_vec_loaded() -> bool:
+    """Whether the sqlite-vec (vec0) extension successfully loaded on a SQLite
+    connection. Postgres deployments leave this False — there it is irrelevant."""
+    return _sqlite_vec_loaded
+
+
 @event.listens_for(Engine, "connect")
 def _load_sqlite_vec(dbapi_connection: Any, connection_record: Any) -> None:
     if not _is_sqlite_connection(dbapi_connection):
@@ -939,6 +951,8 @@ def _load_sqlite_vec(dbapi_connection: Any, connection_record: Any) -> None:
         raw.enable_load_extension(True)
         try:
             sqlite_vec.load(raw)
+            global _sqlite_vec_loaded
+            _sqlite_vec_loaded = True
         finally:
             raw.enable_load_extension(False)
 

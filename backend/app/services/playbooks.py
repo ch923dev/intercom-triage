@@ -22,6 +22,7 @@ from app.clients.openrouter import OpenRouterClient
 from app.metrics import metrics
 from app.models import NoteEntry, Override, Playbook, Ticket, TicketNote
 from app.services import note_entries as note_entries_svc
+from app.services.categorization_rule import effective_category
 from app.util import naive_utcnow
 
 
@@ -47,10 +48,8 @@ async def list_for_ticket(session: AsyncSession, ticket_id: str) -> list[Playboo
     ticket = await session.get(Ticket, ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"no ticket {ticket_id}")
-    category_id = ticket.category_id
     override = await session.get(Override, ticket_id)
-    if override is not None and ticket.updated_at <= override.set_at:
-        category_id = override.category_id
+    category_id, _, _ = effective_category(ticket, override)
     if category_id is None:
         return []
     return await list_for_category(session, category_id)

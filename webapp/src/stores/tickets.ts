@@ -317,15 +317,21 @@ export const useTicketsStore = defineStore('tickets', () => {
     if (changed) state.value.pendingOverrides = next;
   }
 
-  /** Reload the stored board. Filter settings are applied server-side. */
+  /** Reload the stored board. Filter settings are applied server-side. A manual
+   *  refresh (the `r` shortcut / Topbar) can fire while an optimistic mutation
+   *  is in flight, so it carries the same R.2 guard as `silentRefresh`: discard
+   *  the fetched snapshot if a mutation is in flight or began during the fetch,
+   *  rather than clobbering the operator's optimistic state. */
   async function refresh() {
     state.value.loading = true;
     state.value.error = null;
+    const gen = mutationGen.value;
     try {
       const [open, resolved] = await Promise.all([
         api.listTickets({ resolved: false }),
         api.listTickets({ resolved: true }),
       ]);
+      if (mutating.value > 0 || mutationGen.value !== gen) return;
       state.value.tickets = open;
       resolvedTickets.value = resolved;
       _reconcilePendingOverrides();
@@ -789,8 +795,11 @@ export const useTicketsStore = defineStore('tickets', () => {
           else reverted[id] = prev;
         }
         state.value.pendingOverrides = reverted;
-        // Restore any resolved-row moves whose ids failed.
-        for (const { idx, row } of resolvedMoves) {
+        // Restore any resolved-row moves whose ids failed. resolvedMoves is in
+        // descending original-index order (it was built by a reverse scan), so
+        // restore in ASCENDING order — same as the whole-batch catch below — or
+        // the splices land at the wrong slots when ≥2 adjacent rows fail.
+        for (const { idx, row } of [...resolvedMoves].reverse()) {
           if (!failedSet.has(row.id)) continue;
           state.value.tickets = state.value.tickets.filter((t) => t.id !== row.id);
           resolvedTickets.value.splice(idx, 0, row);

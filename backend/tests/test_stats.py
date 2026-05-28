@@ -76,14 +76,34 @@ async def test_category_breakdown_counts_effective_category(session):
 @pytest.mark.asyncio
 async def test_category_breakdown_override_beats_ai_category(session):
     # AI says cat 1, operator override says cat 2 → effective is cat 2.
+    # `set_at` is stamped explicitly to mirror production (set_override /
+    # bulk both pass naive_utcnow()); the server_default CURRENT_TIMESTAMP is
+    # seconds-precision and would look stale next to the ticket's microsecond
+    # updated_at from the same instant.
     session.add(_ticket("a", category_id=1))
     await session.commit()
-    session.add(Override(ticket_id="a", category_id=2))
+    session.add(Override(ticket_id="a", category_id=2, set_at=naive_utcnow()))
     await session.commit()
 
     out = await svc.get_stats(session, window_days=30)
     by_id = {c.category_id: c.count for c in out.category_breakdown}
     assert by_id == {2: 1}
+
+
+@pytest.mark.asyncio
+async def test_category_breakdown_stale_override_loses_to_ai(session):
+    # Override set BEFORE the ticket's last update → stale → AI category wins,
+    # matching the board / playbooks / clusters rule (invariant #11). The bare
+    # SQL coalesce ignored the timestamp and miscounted this under the override.
+    session.add(_ticket("a", category_id=1))
+    await session.commit()
+    stale = naive_utcnow() - timedelta(hours=1)
+    session.add(Override(ticket_id="a", category_id=2, set_at=stale))
+    await session.commit()
+
+    out = await svc.get_stats(session, window_days=30)
+    by_id = {c.category_id: c.count for c in out.category_breakdown}
+    assert by_id == {1: 1}
 
 
 @pytest.mark.asyncio

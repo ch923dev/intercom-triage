@@ -85,6 +85,18 @@ class _SentenceTransformerEncoder:
         return [float(x) for x in vector.tolist()]
 
 
+def encoder_available() -> bool:
+    """True when an encoder can be obtained without a failing download/import:
+    a test-injected fake, an already-loaded model, or sentence-transformers
+    being importable. Cheap — never triggers the heavy lazy load (uses
+    `find_spec`), so `/health` can probe it on every request."""
+    if _encoder_override is not None or _real_encoder is not None:
+        return True
+    import importlib.util
+
+    return importlib.util.find_spec("sentence_transformers") is not None
+
+
 def _get_encoder() -> Encoder:
     """Return the active encoder: the test override if set, else the lazily
     constructed real model (built once and memoized)."""
