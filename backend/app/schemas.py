@@ -83,6 +83,11 @@ class HealthResponse(BaseModel):
     # can read the calibrated default instead of hardcoding it blind. An open,
     # non-overridden ticket with ai_confidence < this surfaces in the review lane.
     review_confidence_threshold: float
+    # Whether the local semantic layer is operational. The embedding model +
+    # sqlite-vec load best-effort and otherwise fail silently; surfacing this
+    # tells the operator when few-shot / RAG / clustering are quietly off.
+    embeddings_available: bool
+    clustering_available: bool
 
 
 # ── Category ──────────────────────────────────────────────────────────────────
