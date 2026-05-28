@@ -460,6 +460,8 @@ never auto-moves a ticket.
 See `docs/superpowers/specs/2026-05-23-ticket-resolution-design.md` for the full
 design.
 
+**`non_actionable_kind` (roadmap 4.2 / T107, migration 0020):** `tickets.non_actionable_kind` + `ai_cache.non_actionable_kind` — nullable enum (`auto_reply` | `thanks` | `spam` | `out_of_office` | `other`). AI-derived: the categorization structured response returns it only for the `non_actionable` verdict; missing/invalid falls back to `other`. Stamped on ingest's AI auto-mark path; manual marks leave it null; every reopen path clears it (CHECK-coupled to `resolved_source='non_actionable'`). Rides `TicketSchema` (board-state only, not `HydratedTicket` — invariant #2 not involved, same pattern as triage facets T142). Webapp non-actionable column filters by it; both surfaces label the chip.
+
 ## 8d. Bulk actions
 
 Operator selects N tickets and applies one action. Cuts per-ticket click cost.
