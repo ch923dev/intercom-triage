@@ -14,8 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import clustering
-from app.config import AppConfig, get_config
+from app.config import AppConfig
 from app.db import get_session
+from app.deps import get_app_config
 from app.models import TicketCluster, TicketClusterMember
 from app.schemas import ClusterGapRead, ClusterRead
 from app.services import clusters as clusters_svc
@@ -70,7 +71,7 @@ async def list_cluster_gaps(
 @router.post("/recompute", response_model=list[ClusterRead])
 async def recompute_clusters(
     session: AsyncSession = Depends(get_session),
-    config: AppConfig = Depends(get_config),
+    config: AppConfig = Depends(get_app_config),
 ) -> list[ClusterRead]:
     """On-demand recompute (between scheduled background runs). No-op when
     clustering is disabled or there are too few resolved tickets — returns the
