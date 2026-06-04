@@ -7,8 +7,7 @@ it never duplicates* — the linked doc is always the source of truth.
 > **What it is:** a self-hosted tool that pulls recent Intercom conversations
 > server-side, pre-categorizes + summarizes them with AI, and serves one Kanban
 > board so a few agents triage and route from a shared view instead of opening
-> each ticket. Three packages (backend · webapp · extension), all reachable over
-> `localhost` in dev.
+> each ticket. Two packages (backend · webapp), both reachable over `localhost` in dev.
 
 ---
 
@@ -33,7 +32,7 @@ it never duplicates* — the linked doc is always the source of truth.
 | **Know the per-change rules + the 14 invariants** | [root `CLAUDE.md`](../CLAUDE.md) |
 | **Follow the engineering principles** | [`principles.md`](./principles.md) |
 | **Run the stack / quickstart** | [root `README.md`](../README.md) |
-| **Work inside one package** | [`backend/CLAUDE.md`](../backend/CLAUDE.md) · [`webapp/CLAUDE.md`](../webapp/CLAUDE.md) · [`extension/CLAUDE.md`](../extension/CLAUDE.md) |
+| **Work inside one package** | [`backend/CLAUDE.md`](../backend/CLAUDE.md) · [`webapp/CLAUDE.md`](../webapp/CLAUDE.md) |
 | **Understand *why* a feature was built this way** | [`superpowers/specs/`](./superpowers/specs/) + [`superpowers/plans/`](./superpowers/plans/) — the design archive |
 | **Dig through retired/point-in-time artifacts** | [`_archive/`](./_archive/) — history only |
 
@@ -43,8 +42,7 @@ it never duplicates* — the linked doc is always the source of truth.
 
 The backend polls Intercom directly with a workspace Access Token, normalizes
 each conversation server-side, runs the cache-aware AI categorization, and serves
-the board. The webapp and the extension popup are **read-only consumers** of that
-board (the extension no longer touches Intercom).
+the board. The webapp is the sole client surface.
 
 ```mermaid
 flowchart TD
@@ -54,11 +52,9 @@ flowchart TD
     ING["ingest_tickets<br/>AI categorize (cache-aware) → SQLite"]
     BOARD["GET /tickets — the board"]
     WEB["webapp · Vue Kanban"]
-    EXT["extension popup<br/>read-only mini-board + badge"]
 
     IC -->|search updated_at > cursor| POLL --> NORM --> ING --> BOARD
     BOARD --> WEB
-    BOARD --> EXT
     WEB -->|"override · resolve · park · note · bulk"| BOARD
 ```
 

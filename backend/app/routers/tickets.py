@@ -43,7 +43,7 @@ async def list_tickets(
     resolved: bool | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> list[TicketSchema]:
-    """Serve the stored board — extension-ingested tickets, no live Intercom
+    """Serve the stored board — backend-ingested tickets, no live Intercom
     call. Honors the saved filter settings.
 
     Pass ``?resolved=true`` for the Resolved column (shows only resolved
@@ -84,8 +84,7 @@ async def ingest_tickets(
     openrouter: OpenRouterClient | None = Depends(get_openrouter),
     config: AppConfig = Depends(get_app_config),
 ) -> IngestResponse:
-    """Receive conversations the Chrome extension fetched from the operator's
-    Intercom session; categorize (cache-aware) and store them."""
+    """Receive pre-normalized conversations; categorize (cache-aware) and store them."""
     if len(body) > MAX_INGEST_TICKETS:
         raise HTTPException(
             status_code=413,

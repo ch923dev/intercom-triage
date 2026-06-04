@@ -13,9 +13,8 @@ security property that matters for this repo: **no secret ever reaches GitHub.**
     sits alongside it but is **not** a secret (it's the public workspace slug used
     only for deep-link URLs).
 - `backend/.env.example` is the tracked template (empty values only).
-- Both tokens live server-side only — neither is baked into the webapp/extension
-  bundle, logged, or returned in errors. The extension has no Intercom access at
-  all (it's a backend client).
+- Both tokens live server-side only — neither is baked into the webapp
+  bundle, logged, or returned in errors.
 
 If either key is ever committed (even then removed), treat it as compromised and
 rotate it — OpenRouter at <https://openrouter.ai/keys>, the Intercom token in

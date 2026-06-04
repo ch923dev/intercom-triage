@@ -31,8 +31,6 @@ paths = [
   '''\.env\.example$''',
   '''(^|/)backend/tests/''',
   '''(^|/)webapp/.*\.spec\.ts$''',
-  '''(^|/)extension/.*\.test\.js$''',
-  '''(^|/)extension/fixtures/''',
   '''(^|/)docs/_archive/''',
 ]
 # j3dxf22l / testworkspace = public Intercom workspace app_id (not a secret).

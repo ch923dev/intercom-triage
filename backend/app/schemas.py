@@ -17,8 +17,8 @@ from app.util import naive_utcnow
 def _naive_utc(value: datetime) -> datetime:
     """Coerce a datetime to naive UTC — the schema used by every DB column.
 
-    Extension-supplied conversations may carry tz-aware ISO timestamps; the
-    legacy Intercom path produces naive ones. Normalize both to naive UTC.
+    Incoming conversations may carry tz-aware ISO timestamps; the
+    Intercom API path produces naive ones. Normalize both to naive UTC.
     """
     if value.tzinfo is not None:
         return value.astimezone(UTC).replace(tzinfo=None)
@@ -553,7 +553,7 @@ class OverrideResponse(BaseModel):
 
 
 class IngestResponse(BaseModel):
-    """`POST /tickets/ingest` result — counts for the extension's sync UI."""
+    """`POST /tickets/ingest` result — received + categorized counts."""
 
     received: int
     categorized: int  # how many needed a fresh AI call (the rest were cache hits)

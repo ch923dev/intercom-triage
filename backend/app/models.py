@@ -578,9 +578,8 @@ class TicketClusterMember(Base):
 class Ticket(Base):
     """An ingested + categorized conversation — the operator's board data.
 
-    The Chrome extension fetches conversations from Intercom via the operator's
-    logged-in session and pushes them to `POST /tickets/ingest`; the backend
-    categorizes them and stores the result here, so `GET /tickets` serves the
+    The backend polls Intercom server-side and pushes conversations through
+    `ingest_tickets`; the result is stored here so `GET /tickets` serves the
     board without a live Intercom call. `author` + `parts` are JSON blobs of
     the hydrated conversation (parts carry ISO `created_at` strings).
     """
