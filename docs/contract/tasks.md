@@ -203,13 +203,13 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T164 ✓ — Background poller + lifespan wiring (`main:_intercom_poll_loop`, `get_intercom` dep); `intercom_*` config + `intercom_configured`/`missing_secrets` + `/health.intercom_configured`. FR-001, NFR-010.
 - T165 ✓ — Extension reduction: delete `intercom.js` + ember scraping/closure/sync; drop `app.intercom.com` host perm, app_id setup, Sync button; popup = read-only board + badge-only poller. inv #1.
 - T166 ✓ — Docs/charter: invariants #1/#2/#3 rewrite, spec FR-001/FR-031 + NFR-010, plan §2/§4/§6, PROJECT/FEATURES, SECURITY (two secrets) + gitleaks Intercom-token rule, README, sub-package CLAUDE.md.
+- T167 ✓ — Remove the Chrome extension entirely: deleted `extension/`, the CORS `chrome-extension://` regex, `webapp/.../ExtensionCallout.vue` (→ `EmptyBoard.vue`), `qa-extension`, and `check-invariants.ps1` extension rules; scrubbed spec/plan/tasks/PROJECT/FEATURES/README + the 14 invariants (#1/#10/#14). Continuation of T165. spec v1.9, inv #1.
 
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
-- T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to webapp and extension. *(roadmap 4.3 — open)*
+- T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
 - T103 — Multi-user expansion: add a `users` table + simple session cookie auth + per-user overrides and settings. *(out of scope — `CLAUDE.md`)*
 - T104 ✓ — Alembic migrations.
-- T105 — Bulk actions in the extension popup. *(roadmap 4.4 — open)*
 - T107 ✓ — Structured `non_actionable_kind` column on tickets + ai_cache (migration 0020); AI emits/parses + strict schema; cached; stamped on AI non_actionable auto-mark, cleared on every reopen path; surfaced on TicketSchema; webapp chip label + per-kind filter; extension popup chip. FR-062/US-019, plan §8c, migration 0020. Branch feat/t107-non-actionable-kind. *(Cross-package backend+webapp+extension at the API-contract level; HydratedTicket / invariant #2 untouched — non_actionable_kind is board-state on TicketSchema, like triage facets T142.)*
 
 ---
