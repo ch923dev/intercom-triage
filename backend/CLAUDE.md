@@ -7,7 +7,7 @@ Guidance for Claude Code when working in `backend/`.
 ## 1. Think Before Coding (in this repo)
 
 - **The backend owns Intercom.** It polls `api.intercom.io` directly with a workspace Access Token (`INTERCOM_ACCESS_TOKEN` in `.env`) via `clients/intercom.py`, normalizes payloads in `services/intercom_normalizer.py`, and ingests through `services/sync.py:run_sync_cycle`. A background poller (`main._intercom_poll_loop`, interval-gated, default off) + `POST /tickets/sync` drive it. An empty board means "no token / nothing synced yet," and `/health.intercom_configured = false` flags a missing token. The extension is no longer an ingestion path.
-- The contract is `../spec.md` (what) + `../plan.md` (how) + `../tasks.md` (T-numbers cited in module docstrings). If a field's nullability, status code, or PATCH/PUT shape is unclear, read the spec — never guess.
+- The contract is `../docs/contract/spec.md` (what) + `../docs/contract/plan.md` (how) + `../docs/contract/tasks.md` (T-numbers cited in module docstrings). If a field's nullability, status code, or PATCH/PUT shape is unclear, read the spec — never guess.
 - `AppConfig` (config.py) is the runtime config; `Settings` (models.py) is the singleton DB row. They are different. Don't confuse / rename.
 - `_content_signature` (last customer-visible part timestamp) is the AI cache key — NOT Intercom's `updated_at`. Internal teammate notes / assignments / snoozes advance `updated_at` but must not bust cache. Touching this invalidates the FR-008 invariant; flag it.
 - `parts[]` is what the AI sees (customer-visible thread). `internal_notes[]` is the team-only side channel and is never fed to the prompt. Don't merge them.
@@ -96,7 +96,7 @@ Shutdown reverses: cancel loops → close OpenRouter + Intercom → dispose engi
 
 ```
 app/
-├── main.py              lifespan + create_app + CORS (localhost:5173 + chrome-extension://)
+├── main.py              lifespan + create_app + CORS (localhost:5173)
 ├── config.py            pydantic-settings AppConfig (reads .env). MAX_BULK_IDS constant.
 ├── db.py                async engine + session factory + get_session dependency
 ├── deps.py              get_app_config + get_openrouter + get_intercom (read app.state)

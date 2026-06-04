@@ -49,8 +49,6 @@ else
     ':(exclude).env.example' \
     ':(exclude)backend/tests/**' \
     ':(exclude)webapp/**/*.spec.ts' \
-    ':(exclude)extension/**/*.test.js' \
-    ':(exclude)extension/fixtures/**' \
     ':(exclude)docs/_archive/**' \
     | grep -E '^\+' || true)
 

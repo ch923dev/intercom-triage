@@ -68,8 +68,8 @@ export const useSettingsStore = defineStore('settings', () => {
     return update({ include_category_ids: ids });
   }
 
-  /** FR-024 — the mute flag lives in the server settings row so the popup
-   *  sees the same value the webapp wrote. */
+  /** FR-024 — the mute flag lives in the server settings row so it persists
+   *  across reloads and both views read the same value. */
   function setMuteAlarms(v: boolean) {
     return update({ mute_alarms: v });
   }

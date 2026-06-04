@@ -9,7 +9,7 @@ import AlarmBanners from '@/components/AlarmBanners.vue';
 import Board from '@/components/Board.vue';
 import BulkActionBar from '@/components/BulkActionBar.vue';
 import CategoriesPage from '@/components/CategoriesPage.vue';
-import ExtensionCallout from '@/components/ExtensionCallout.vue';
+import EmptyBoard from '@/components/EmptyBoard.vue';
 import FollowupBoard from '@/components/FollowupBoard.vue';
 import PlaybooksPage from '@/components/PlaybooksPage.vue';
 import ProposalsPage from '@/components/ProposalsPage.vue';
@@ -48,7 +48,7 @@ onMounted(async () => {
   await categories.load();
   await Promise.all([followups.load(), notes.load(), noteEntries.load()]);
   // An unreachable backend leaves the board empty + raises an inline error;
-  // the empty-state callout points the operator at the extension to sync.
+  // the empty-state points the operator at the backend sync path.
   await tickets.refresh().catch(() => undefined);
 });
 
@@ -242,7 +242,6 @@ watch(
 <template>
   <div class="app">
     <Topbar />
-    <ExtensionCallout />
 
     <div v-if="categories.loading" class="status mono">Loading…</div>
     <div v-else-if="categories.error" class="status error mono">
@@ -250,7 +249,7 @@ watch(
     </div>
     <template v-else>
       <template v-if="view.view === 'board'">
-        <ExtensionCallout v-if="tickets.isEmpty" mode="empty" />
+        <EmptyBoard v-if="tickets.isEmpty" />
         <Board v-else @board-click="onBoardBackgroundClick" />
       </template>
       <FollowupBoard v-else-if="view.view === 'followups'" />

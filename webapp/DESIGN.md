@@ -259,7 +259,7 @@ Fixed 280px width, `bg` surface (not `panel` — they're channels in the paper, 
 
 There are no traditional buttons in body content. Actions live on chips and icon-only ghost buttons.
 
-- **Primary** — accent background, panel text, `chip` radius. Used sparingly: bulk-action confirms, "Sync now" in the extension callout.
+- **Primary** — accent background, panel text, `chip` radius. Used sparingly: bulk-action confirms, "Sync now" in the empty-board state.
 - **Ghost** — panel background, ink-2 text, `chip` radius, hover lifts to `hover`. Used for dismiss, snooze, settings toggles.
 
 ### Flyout (`TicketFlyout` + `components/ticket/*`)

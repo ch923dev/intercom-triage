@@ -1,12 +1,14 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 1.8 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 1.9 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
 
+**Changes from v1.8:** extension retired — the Chrome extension package is removed. The webapp is the sole client surface; the backend (already the only Intercom ingestion path since v1.7) is unchanged. Deleted US-006 (Chrome-extension mini-board); removed extension/popup mentions from §2 scope, §3 personas, the alarm/non-actionable requirements, and NFR-010. No backend or board behavior removed.
+
 **Changes from v1.7:** ingestion pivot — the backend now fetches Intercom conversations directly from the official `api.intercom.io` REST API using a workspace Access Token, replacing the former Chrome-extension session scrape. A background poller + `POST /tickets/sync` drive ingestion; the extension becomes a read-only mini-board. Rewrote FR-001 + FR-031 and added NFR-010 (Intercom token is a server-side secret). No board behavior removed.
 
-**Changes from v1.6:** reconciliation backfill — the forward roadmap (`docs/ROADMAP.md`) was executed in full through Phase 3 + 4.1, but the shipped capability landed in code ahead of this spec. This version writes the source-of-truth requirements for the 19 shipped-but-undocumented features: triage facets (US-022), aging indicators (US-023), keyboard triage (US-024), saved views (US-025), priority-sorted queue (US-026), stats dashboard (US-027), cost meter (US-028), snippets (US-029), bulk pre-flight diff (US-030), reliable structured AI output (US-031), model cascade (US-032), needs-review lane (US-033), local embedding layer (US-034), few-shot categorization (US-035), RAG draft replies (US-036), recurring-issue clustering (US-037), playbook-gap detection (US-038), playbook auto-match (US-039). Adds FR-043..FR-061 and NFR-009. No capability removed; no behavior changed — code and spec are now in sync.
+**Changes from v1.6:** reconciliation backfill — the forward roadmap (`docs/_archive/ROADMAP.md`) was executed in full through Phase 3 + 4.1, but the shipped capability landed in code ahead of this spec. This version writes the source-of-truth requirements for the 19 shipped-but-undocumented features: triage facets (US-022), aging indicators (US-023), keyboard triage (US-024), saved views (US-025), priority-sorted queue (US-026), stats dashboard (US-027), cost meter (US-028), snippets (US-029), bulk pre-flight diff (US-030), reliable structured AI output (US-031), model cascade (US-032), needs-review lane (US-033), local embedding layer (US-034), few-shot categorization (US-035), RAG draft replies (US-036), recurring-issue clustering (US-037), playbook-gap detection (US-038), playbook auto-match (US-039). Adds FR-043..FR-061 and NFR-009. No capability removed; no behavior changed — code and spec are now in sync.
 
 **Changes from v1.5:** backfilled definitions for two capabilities already shipped in code and traced in `tasks.md` but missing from this spec. Added the **non-actionable tickets** capability — US-019 / FR-037 let the operator (or AI ingest) mark spam / thank-you / out-of-scope tickets as a non-actionable sub-state of resolved, split out at the view layer. Also documented the **reusable playbooks** capability already present as US-020 / FR-038..FR-041.
 
@@ -26,13 +28,13 @@ Reduce the time spent triaging Intercom conversations. The native Intercom UI re
 
 ## 2. Scope
 
-In scope: a local tool with a backend, a webapp surface, and a Chrome extension surface. Intercom integration via the operator's logged-in browser session (extension-driven; no API token). AI categorization and summarization against a curated taxonomy. AI proposal flow for new categories. Manual category override that persists. Dynamic category curation.
+In scope: a local tool with a backend and a webapp surface. Intercom integration server-side via a workspace Access Token (the backend polls `api.intercom.io`). AI categorization and summarization against a curated taxonomy. AI proposal flow for new categories. Manual category override that persists. Dynamic category curation.
 
 Out of scope: multi-user collaboration, multi-tenant SaaS, authentication, hosted deployment, replying to tickets from the tool, long-term analytics, helpdesks other than Intercom, mobile-native surfaces, webhook-driven live updates (backlog).
 
 ## 3. Personas
 
-A single **operator** — the person running the tool on their own machine. They sign in to Intercom in Chrome, install the extension, triage tickets daily, and curate categories as the taxonomy evolves.
+A single **operator** — the person running the tool on their own machine. They configure the Intercom Access Token once, triage tickets daily from the webapp board, and curate categories as the taxonomy evolves.
 
 ## 4. User stories with acceptance criteria
 
@@ -77,16 +79,6 @@ I can jump from a card to the original Intercom conversation in one click.
 Acceptance:
 - Each card exposes a link that opens the corresponding Intercom conversation in a new tab.
 
-### US-006 — Genuine mini-board in the Chrome extension
-I can use a compact but fully functional triage board from the Chrome popup without leaving my current tab.
-
-Acceptance:
-- The popup loads in under 2 seconds on a warm cache.
-- The popup renders the full taxonomy as switchable column tabs.
-- An override action works inside the popup.
-- The popup includes a one-click handoff to the full webapp.
-- The popup and the webapp share filter settings.
-
 ### US-007 — Configurable filter
 I can choose which ticket states and which categories appear on the board.
 
@@ -101,7 +93,7 @@ My Intercom and AI provider credentials live in a local config file and are neve
 
 Acceptance:
 - Credentials are loaded from a `.env` file the backend reads at startup.
-- Neither the webapp nor the extension ever receives the credentials.
+- The webapp never receives the credentials.
 - Rotating a credential takes effect after a backend restart.
 
 ### US-009 — AI proposes new categories
@@ -139,7 +131,7 @@ Acceptance:
 - A follow-up records an optional short reason string (≤ 80 chars).
 - I can clear a follow-up at any time.
 - A ticket has at most one active follow-up at any time; setting a new one overwrites the old.
-- The follow-up survives reloads of both surfaces until cleared or its ticket's `updated_at` advances past `dueAt` AND the reminder has fired.
+- The follow-up survives reloads until cleared or its ticket's `updated_at` advances past `dueAt` AND the reminder has fired.
 - The card displays a follow-up chip: `F/U in 15m` while pending, `Follow up · due now` once due.
 - Due tickets pin to the top of their column.
 
@@ -147,7 +139,7 @@ Acceptance:
 When a follow-up reaches its due time, the surface raises an alarm I can act on without leaving the board.
 
 Acceptance:
-- An alarm banner appears top-right of the webapp board and at the top of the popup.
+- An alarm banner appears top-right of the webapp board.
 - A short audio cue plays once per newly-firing alarm.
 - I can mute the audio cue from a single control in the top bar; the muted state persists across reloads.
 - Each alarm banner exposes actions: open the ticket flyout, snooze 15 m, snooze 1 h, dismiss.
@@ -161,7 +153,7 @@ I can capture how-to-proceed notes on a ticket and append common actions in one 
 Acceptance:
 - The flyout exposes a freeform notes textarea per ticket.
 - A row of one-click chips appends preset actions (`Page @on-call`, `Reply with workaround`, `Escalate to AE`, `Ask for repro / logs`, `Wait for customer`, `Route to Eng triage`, `Refund / credit`) as bullets into the textarea.
-- Notes persist across reloads and across both surfaces.
+- Notes persist across reloads.
 - The card displays a `Notes (N)` chip where N is the number of non-empty bullet lines.
 - Clearing the textarea removes the notes record server-side.
 
@@ -198,7 +190,7 @@ A ticket I previously had as open that flips to `state=closed` in Intercom is
 silently resolved with `source='intercom_closed'`.
 
 Acceptance:
-- The extension's sync flow includes a closure pass: it diffs tracked ids
+- The backend sync cycle includes a closure pass: it diffs tracked ids
   against the open list and pulls just the missing ids from Intercom's closed
   list.
 - The backend `_upsert_ticket` stamps `resolved_at` + `resolved_source` only
@@ -242,7 +234,7 @@ Acceptance:
 - A non-actionable ticket is a sub-state of resolved: it carries `resolved_at`
   with `resolved_source = non_actionable`. Reopening it clears both.
 - Non-actionable tickets are split from genuinely resolved ones at the view
-  layer — their own Kanban column in the webapp and their own popup tab — while
+  layer — their own Kanban column in the webapp — while
   storage stays unified under the resolution flag.
 - When the AI's verdict is non-actionable with confidence at or above the shared
   resolution threshold, ingest auto-marks the ticket; a fallback verdict never
@@ -482,7 +474,7 @@ Acceptance:
 | FR-009 | A user override on a ticket is persisted and supersedes AI categorization until the ticket's `updated_at` advances past the override time. | US-004 |
 | FR-010 | The system exposes a per-ticket deep-link URL to the Intercom conversation. | US-005 |
 | FR-011 | The system accepts filter settings per request: recency, states, included categories. | US-001, US-007 |
-| FR-012 | Filter settings are persisted and read by both surfaces. | US-006, US-007 |
+| FR-012 | Filter settings are persisted and read by the webapp. | US-007 |
 | FR-013 | Tickets returned to a client are sorted by `updated_at` descending. | — |
 | FR-014 | External credentials are loaded from local config and never transmitted to a client. | US-008 |
 | FR-015 | The AI may return a proposal instead of an existing category when no existing category fits with reasonable confidence; the system persists the proposal and groups matching tickets under it. | US-009 |
@@ -494,7 +486,7 @@ Acceptance:
 | FR-021 | A surface plays an audio cue and shows an alarm banner exactly once when a follow-up transitions from pending to due. The mute toggle suppresses the audio cue but not the banner. | US-013 |
 | FR-022 | Snoozing an alarm sets `due_at = now + snooze_minutes` and clears `fired`. Dismissing the alarm does not reschedule the follow-up. | US-013 |
 | FR-023 | Each ticket may carry one notes record with a free-text body. Empty body deletes the record. | US-014 |
-| FR-024 | Settings include a `mute_alarms` boolean; both surfaces read and write through the existing settings endpoint. | US-013 |
+| FR-024 | Settings include a `mute_alarms` boolean; the webapp reads and writes through the existing settings endpoint. | US-013 |
 | FR-025 | Tickets carry `resolved_at` and `resolved_source` as an orthogonal resolution flag, independent of category assignment and Intercom state. | US-015, US-016, US-017 |
 | FR-026 | Resolution source is one of four stored values: `manual` (operator action), `intercom_closed` (sync auto-resolve), `non_actionable` (FR-037), or `ai_resolved` (AI auto-close confirmed under the operator's auto-resolve setting). | US-015, US-016, US-017 |
 | FR-027 | The backend computes `resolution_chip_state` (`ai_resolved` \| `ai_reopened` \| `new_reply` \| `null`) server-side from settings + ticket + AI cache, and includes it in every ticket response. | US-016 |
@@ -507,7 +499,7 @@ Acceptance:
 | FR-034 | Shift+click extends the selection across the contiguous range of cards in the same column (in displayed sort order). Shift+click in a different column toggles only the clicked card. | US-018 |
 | FR-035 | Dragging any selected card propagates the drop to every card in the selection set. Dropping into a category column reassigns all of them; dropping into the Resolved column resolves all of them. | US-018 |
 | FR-036 | A single bulk request is bounded by `MAX_BULK_IDS` (configurable, default 200). The webapp warns and refuses to submit a bulk action over the cap; the backend rejects oversize requests with 422. | US-018 |
-| FR-037 | A ticket may be marked non-actionable, a sub-state of resolved that sets `resolved_at` with `resolved_source = non_actionable` (XOR-constrained against the other resolution sources). The system exposes `POST /tickets/{id}/non-actionable` and `POST /tickets/bulk/non-actionable`; ingest auto-applies the verdict when the AI returns `non_actionable` at or above the shared resolution-confidence threshold, never on a fallback verdict. Non-actionable tickets are surfaced as their own view (Kanban column / popup tab) while storage stays unified; reopen clears the flag. | US-019 |
+| FR-037 | A ticket may be marked non-actionable, a sub-state of resolved that sets `resolved_at` with `resolved_source = non_actionable` (XOR-constrained against the other resolution sources). The system exposes `POST /tickets/{id}/non-actionable` and `POST /tickets/bulk/non-actionable`; ingest auto-applies the verdict when the AI returns `non_actionable` at or above the shared resolution-confidence threshold, never on a fallback verdict. Non-actionable tickets are surfaced as their own view (Kanban column) while storage stays unified; reopen clears the flag. | US-019 |
 | FR-038 | Playbooks are stored in a dedicated `playbooks` table (category_id, label, body, optional source_ticket_id, soft-archive). They are operator-owned and survive ingest / re-sync untouched (never content-keyed). | US-020 |
 | FR-039 | The flyout lists active playbooks for a ticket's *effective* category (override beats AI). Uncategorized tickets show none. | US-020 |
 | FR-040 | `POST /playbooks/draft` returns an ephemeral AI-drafted body from the ticket's customer-visible `parts` + operator notes. It MUST NOT read `internal_notes` (FR-005 / invariant #4). 503 when AI is unconfigured. | US-020 |
@@ -532,7 +524,7 @@ Acceptance:
 | FR-059 | An offline periodic background job clusters resolved tickets' embeddings (gated on the embedding layer), labels each cluster with c-TF-IDF top terms over customer-visible text only, flags outliers rather than force-fitting, and persists a snapshot. `GET /clusters` reads the snapshot; `POST /clusters/recompute` forces a refresh. Never touches `ai_cache` (invariant #6). | US-037 |
 | FR-060 | `GET /clusters/gaps` ranks recurring-issue clusters whose dominant effective category (override beats AI, invariant #13) has no active playbook, most-recurring-first, naming the category to write a playbook for. Read-only local logic over the cluster snapshot + playbooks. | US-038 |
 | FR-061 | `GET /playbooks/suggested?ticket_id=` ranks the ticket's effective-category playbooks by embedding similarity to its customer-visible text, most-relevant-first. Ephemeral; empty when uncategorized or no in-category playbooks; never busts the cache. | US-039 |
-| FR-062 | A non-actionable ticket may carry a structured `non_actionable_kind` (`auto_reply`\|`thanks`\|`spam`\|`out_of_office`\|`other`, nullable) on `tickets` + `ai_cache`. The categorization call returns it (only for the `non_actionable` verdict; null otherwise; missing/invalid → `other`); ingest stamps it on AI auto-mark, manual marks leave it null; every reopen path clears it (XOR with `resolved_source='non_actionable'`). Surfaced on `TicketSchema` (not `HydratedTicket`); the webapp filters the non-actionable view by it and both surfaces label the chip. | US-019 |
+| FR-062 | A non-actionable ticket may carry a structured `non_actionable_kind` (`auto_reply`\|`thanks`\|`spam`\|`out_of_office`\|`other`, nullable) on `tickets` + `ai_cache`. The categorization call returns it (only for the `non_actionable` verdict; null otherwise; missing/invalid → `other`); ingest stamps it on AI auto-mark, manual marks leave it null; every reopen path clears it (XOR with `resolved_source='non_actionable'`). Surfaced on `TicketSchema` (not `HydratedTicket`); the webapp filters the non-actionable view by it and labels the chip. | US-019 |
 
 ## 6. Non-functional requirements
 
@@ -547,7 +539,7 @@ Acceptance:
 | NFR-007 | The webapp surface is keyboard-navigable for column scrolling, refresh, and override. |
 | NFR-008 | The backend runs from a single command (`uvicorn` or equivalent) with no external services required beyond the local database file. |
 | NFR-009 | External-call latency is sampled into in-process histograms; `GET /metrics` exposes per-key p50 / p95 / max over a bounded sample window. Single-operator scope — not a metrics exporter. |
-| NFR-010 | The Intercom Access Token is a server-side secret loaded from the local config file (alongside the AI key); it never reaches the webapp/extension bundle, logs, or error responses. A missing token is reported by `/health`, not fatal at startup. |
+| NFR-010 | The Intercom Access Token is a server-side secret loaded from the local config file (alongside the AI key); it never reaches the webapp bundle, logs, or error responses. A missing token is reported by `/health`, not fatal at startup. |
 
 ## 7. Decisions
 
@@ -559,7 +551,6 @@ All open questions are resolved.
 - **Storage backend:** SQLite by default. Swappable to PostgreSQL by changing one config string; schema is portable.
 - **Update mechanism:** poll-on-open for v1. Webhook deferred to backlog.
 - **Taxonomy mutability:** dynamic. AI may propose, operator curates. "Other" is permanent and non-archivable.
-- **Extension popup depth:** genuine mini-board with override support. The webapp surfaces a callout for installing the extension.
 - **Low-confidence handling:** confidence is displayed on every card; no separate review column.
 
 ## 8. Success metrics

@@ -59,10 +59,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# ── Chrome extension build ────────────────────────────────────────────────────
-extension/dist/
-extension/build/
-
 # ── Editors / OS ──────────────────────────────────────────────────────────────
 .idea/
 .vscode/*

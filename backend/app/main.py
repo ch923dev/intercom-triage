@@ -284,11 +284,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS — webapp on 5173 + Chrome extension origin.
+    # CORS — webapp on 5173.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-        allow_origin_regex=r"chrome-extension://[a-z]{32}",
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],

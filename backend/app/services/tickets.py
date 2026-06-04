@@ -1,8 +1,8 @@
 """Ticket ingest + override + read service. Reference: tasks.md T026.
 
-The Chrome extension fetches conversations from the operator's Intercom
-browser session and pushes them to `ingest_tickets`, which categorizes and
-stores them. `get_tickets` serves the stored board with no live Intercom call.
+`ingest_tickets` receives pre-normalized `HydratedTicket` objects (produced by
+the backend sync cycle), categorizes and stores them. `get_tickets` serves the
+stored board with no live Intercom call.
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ async def set_override(
     return category_id
 
 
-# ── Extension ingest + stored board ───────────────────────────────────────────
+# ── Ingest + stored board ─────────────────────────────────────────────────────
 
 
 def _threshold_datetime(filter_settings: FilterSettings) -> datetime:
@@ -323,7 +323,7 @@ async def ingest_tickets(
     config: AppConfig,
     hydrated: list[HydratedTicket],
 ) -> IngestResponse:
-    """Categorize a batch of extension-supplied conversations and store them.
+    """Categorize a batch of pre-normalized conversations and store them.
 
     Cache-aware (FR-008) — an unchanged conversation skips the AI call. Without
     an OpenRouter client, or with the `use_ai` setting off, every ticket
@@ -463,14 +463,12 @@ async def edit_ticket(
 async def get_sync_state(session: AsyncSession) -> dict[str, datetime]:
     """Return `{ticket_id: updated_at}` for every stored ticket.
 
-    The Chrome extension calls this before a sync: it lists Intercom
-    conversations (cheap) and only fetches the full conversation detail
-    (expensive) for ids whose Intercom `last_updated` is newer than the value
-    here. Tickets already stored with an unchanged conversation are skipped
-    entirely — no Intercom detail call, no re-categorization.
+    Used by the backend sync cycle's skip-known optimization: conversations
+    whose Intercom `last_updated` is not newer than the stored value are
+    skipped — no detail fetch, no re-categorization.
 
     Timestamps are stored naive-UTC; tag them as UTC so the JSON carries an
-    explicit offset and the extension's `Date.parse` agrees on the epoch.
+    explicit offset and `Date.parse` agrees on the epoch.
     """
     rows = (await session.execute(select(Ticket.id, Ticket.updated_at))).all()
     return {row.id: row.updated_at.replace(tzinfo=UTC) for row in rows}

@@ -32,4 +32,4 @@ Build a TodoWrite list from this checklist.
 - Don't make `MAX_BULK_IDS` configurable via env var. It's a deliberate code-level constant — changing it is a code change because both sides ship together.
 - Don't bump above ~1000 without checking the SQLite WAL behavior. Past a few hundred rows the single-commit pattern can hold the write lock long enough to interfere with the AI cache sweep loop in `backend/app/services/cache.py`.
 - Don't lower the cap without checking the webapp's bulk-select UX — if a UI flow routinely needs more than the new limit, lowering the cap will make the product feel broken.
-- Don't update spec.md / plan.md / README.md "later." The 200 figure is cited there too — grep for it and update in the same commit.
+- Don't update docs/contract/spec.md / docs/contract/plan.md / README.md "later." The 200 figure is cited there too — grep for it and update in the same commit.

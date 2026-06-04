@@ -88,7 +88,7 @@ export const api = {
     request<{ ok: true }>(`/proposals/${id}/reject`, { method: 'POST' }),
 
   // ── tickets ───────────────────────────────────────────────────────────────
-  /** The stored board — extension-ingested + categorized tickets.
+  /** The stored board — backend-ingested + categorized tickets.
    *  Pass `resolved: true` to fetch the resolved column; `false` for open only
    *  (default: open only, matching server default). */
   listTickets: (opts: { resolved?: boolean } = {}): Promise<Ticket[]> => {

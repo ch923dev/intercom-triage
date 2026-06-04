@@ -7,7 +7,7 @@ Until the `prompt.py` fix, the categorization call sent a strict `json_schema`
 rejected by the default Anthropic model on OpenRouter. Every categorization
 call 400'd, so every ticket took the per-ticket fallback path: fallback
 category, no subject, no summary, and (invariant #7) no `ai_cache` row. A normal
-re-sync does not heal them — the extension's skip-known optimization never
+re-sync does not heal them — the skip-known optimization never
 re-sends an unchanged conversation.
 
 This replays the real ingest service (`services.tickets.ingest_tickets`) over

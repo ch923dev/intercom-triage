@@ -1,8 +1,7 @@
 """Intercom REST API client. Reference: plan.md §6 (Intercom integration).
 
 The backend polls Intercom's *official, documented* API directly with a
-workspace Access Token (cross-package invariant #1). This replaces the former
-Chrome-extension `ember/` session scrape.
+workspace Access Token (cross-package invariant #1).
 
 Returns raw JSON dicts — normalization to `HydratedTicket` happens downstream in
 `app.services.intercom_normalizer`, keeping this client thin (mirrors how

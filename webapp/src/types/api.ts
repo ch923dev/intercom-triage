@@ -245,7 +245,7 @@ export interface FilterSettings {
   lookback_value: number; // 1..720
   states: TicketState[];
   include_category_ids: number[] | null;
-  mute_alarms: boolean; // FR-024 — shared by webapp + popup
+  mute_alarms: boolean; // FR-024 — server-side so it persists across reloads
   /** When false, ingest skips AI categorization — tickets land in the fallback
    *  category and the operator writes subject/summary by hand. */
   use_ai: boolean;

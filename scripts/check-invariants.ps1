@@ -58,52 +58,20 @@ function Test-StagedPattern {
     }
 }
 
-# Rule 1: The extension must not access Intercom (Invariant #1 — the BACKEND is
-# the only Intercom integration now, via api.intercom.io + INTERCOM_ACCESS_TOKEN).
-# Flag any extension code that talks to Intercom directly.
-Test-StagedPattern `
-    -Pattern "app\.intercom\.com|api\.intercom\.io|ember/inbox" `
-    -PathFilter "^extension/.*\.(js|json)$" `
-    -Message "Invariant #1: extension must not access Intercom (backend owns ingestion)"
-
-# Rule 2: No datetime.utcnow() in backend (Invariant #5).
+# Rule 1: No datetime.utcnow() in backend (Invariant #5).
 Test-StagedPattern `
     -Pattern "datetime\.utcnow\(" `
     -PathFilter "^backend/app/.*\.py$" `
     -Message "Invariant #5: Use app.util.naive_utcnow(), not datetime.utcnow()"
 
-# Rule 3: No Base.metadata.create_all outside init_db.
+# Rule 2: No Base.metadata.create_all outside init_db.
 Test-StagedPattern `
     -Pattern "Base\.metadata\.create_all" `
     -PathFilter "^backend/" `
     -Message "Use Alembic migrations, not Base.metadata.create_all" `
     -ExcludePaths @("^backend/app/models\.py$")
 
-# Rule 4: No importScripts in extension (service worker is type:module).
-Test-StagedPattern `
-    -Pattern "importScripts\(" `
-    -PathFilter "^extension/.*\.js$" `
-    -Message "Extension service worker is type:module - use import, not importScripts"
-
-# Rule 5: host_permissions widening in manifest.json.
-$manifestStaged = git diff --cached --name-only --diff-filter=ACMR 2>$null | Where-Object { $_ -eq "extension/manifest.json" }
-if ($manifestStaged) {
-    $manifestContent = git show ":extension/manifest.json" 2>$null
-    $allowedHosts = @("127.0.0.1:4000", "localhost:4000")
-    $hostMatches = [regex]::Matches($manifestContent, '"https?://[^"]+"')
-    foreach ($match in $hostMatches) {
-        $url = $match.Value.Trim('"')
-        $hit = $false
-        foreach ($h in $allowedHosts) {
-            if ($url -like "*$h*") { $hit = $true; break }
-        }
-        if (-not $hit) {
-            $violations += "[host_permissions widening] extension/manifest.json contains unrecognised URL: $url"
-        }
-    }
-}
-
-# Rule 6: defence-in-depth — never commit secrets / DB / local settings.
+# Rule 3: defence-in-depth — never commit secrets / DB / local settings.
 $forbidden = git diff --cached --name-only --diff-filter=ACMR 2>$null | Where-Object {
     $_ -match "(^|/)\.env(\.|$)" -or
     $_ -match "\.db(-journal|-wal|-shm)?$" -or

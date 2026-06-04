@@ -21,7 +21,7 @@ webapp/
     │   ├── CatDot.vue           8px category swatch
     │   ├── CategoriesPage.vue   Category management UI
     │   ├── Column.vue           Header + draggable cards
-    │   ├── ExtensionCallout.vue Banner + empty-state placeholder
+    │   ├── EmptyBoard.vue         Empty-board placeholder
     │   ├── FollowupBoard.vue    Follow-up Kanban (overdue/within1h/today/later/fired)
     │   ├── FollowupCard.vue     Per-followup card
     │   ├── FollowupColumn.vue   Follow-up bucket column

@@ -1,4 +1,4 @@
-"""Extension ingest + stored board — `POST /tickets/ingest`, `GET /tickets`."""
+"""Ticket ingest + stored board — `POST /tickets/ingest`, `GET /tickets`."""
 
 from __future__ import annotations
 
