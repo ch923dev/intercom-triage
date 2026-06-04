@@ -288,6 +288,45 @@ class Settings(Base):
     )
 
 
+class User(Base):
+    """Mirror of an OnlySales identity. NOT a credential store — no password."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    onlysales_id: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str | None] = mapped_column(Text)
+    scope: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("1"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=text("CURRENT_TIMESTAMP"), nullable=False
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class Session(Base):
+    """Refresh-token store + revocation ledger. PK is an opaque session id."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    refresh_token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    onlysales_refresh_encrypted: Mapped[str | None] = mapped_column(Text)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        Index("ix_sessions_refresh_hash", "refresh_token_hash"),
+        Index("ix_sessions_user_id", "user_id"),
+    )
+
+
 class RejectedProposalSignature(Base):
     """Prevents the AI from re-proposing the same category after the user rejects it."""
 
