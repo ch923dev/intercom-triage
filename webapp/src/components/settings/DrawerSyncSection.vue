@@ -21,10 +21,7 @@ function onAutoSyncChange(event: Event) {
         <option :value="300">5m</option>
       </select>
     </div>
-    <p class="hint">
-      Refreshes the board silently when the extension or another browser session ingests new
-      tickets.
-    </p>
+    <p class="hint">Refreshes the board silently when the backend poller ingests new tickets.</p>
   </section>
 </template>
 

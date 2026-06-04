@@ -1,9 +1,9 @@
 // Tickets store. Per tasks.md T031; ingest-pivot Slice C.
 //
-// The operator has no Intercom Access Token, so the board is served from the
-// stored `tickets` table the Chrome extension ingests into (`GET /tickets`).
+// The backend polls Intercom directly, so the board is served from the
+// stored `tickets` table the backend ingests into (`GET /tickets`).
 // An empty board means the operator hasn't synced yet — the UI surfaces the
-// extension callout instead of mock data.
+// empty-state instead of mock data.
 
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
