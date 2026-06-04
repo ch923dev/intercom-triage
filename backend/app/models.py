@@ -304,6 +304,11 @@ class User(Base):
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
 
+    __table_args__ = (
+        Index("ix_users_onlysales_id", "onlysales_id", unique=True),
+        Index("ix_users_email", "email", unique=True),
+    )
+
 
 class Session(Base):
     """Refresh-token store + revocation ledger. PK is an opaque session id."""
