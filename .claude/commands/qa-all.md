@@ -28,5 +28,3 @@ Stop at the first failure and surface the output to the user. Don't silently fix
 If a format check fails, ask the user whether to apply the write variant (`ruff format app tests` for backend, `npm run format` for webapp). Don't auto-format without consent.
 
 When both gates pass, report `qa-all: green` with a one-line summary (`backend: N tests, webapp: M tests`).
-
-For the extension package, there is no automated gate — `/qa-extension` covers the manual reload-and-verify checklist.

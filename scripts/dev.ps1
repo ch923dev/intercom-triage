@@ -7,7 +7,6 @@
 #
 # Backend:   127.0.0.1:4000  (uvicorn --reload)
 # Webapp:    127.0.0.1:5173  (Vite, proxies /api -> :4000)
-# Extension: load manually once via chrome://extensions
 #
 # Requires Windows Terminal (wt.exe). Default on Windows 11.
 
