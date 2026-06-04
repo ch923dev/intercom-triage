@@ -37,6 +37,10 @@ scikit-learn==1.6.1
 # Multipart form parsing for /attachments uploads
 python-multipart==0.0.29
 
+# Auth (Phase 1: hosted multi-user)
+PyJWT==2.10.1
+cryptography==44.0.0
+
 # Optional Postgres swap (uncomment to enable):
 # asyncpg==0.30.0
 

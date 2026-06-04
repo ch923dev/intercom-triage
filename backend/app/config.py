@@ -161,6 +161,27 @@ class AppConfig(BaseSettings):
     # ── Server ────────────────────────────────────────────────────────────────
     log_level: str = "INFO"
 
+    # ── Auth / sessions (Phase 1: hosted multi-user) ──────────────────────────
+    # Required in production — boot hard-fails if empty (see main.lifespan).
+    session_jwt_secret: str = ""
+    session_access_ttl_seconds: int = Field(default=1800, ge=60)
+    session_refresh_ttl_seconds: int = Field(default=30 * 24 * 3600, ge=300)
+    # Fernet key (urlsafe-base64, 32 bytes) used to encrypt the stored OnlySales
+    # refresh token at rest. Empty → upstream refresh is not stored.
+    session_refresh_encryption_key: str = ""
+    onlysales_auth_base: str = "https://pyapi.onlysales.io"
+    session_cookie_name: str = "triage_refresh"
+    session_cookie_secure: bool = True  # set False for plain-http local dev
+    session_cookie_samesite: str = "lax"
+    login_rate_max_attempts: int = Field(default=10, ge=1)
+    login_rate_window_seconds: int = Field(default=300, ge=1)
+    cors_allowed_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+    )
+
     # ── Derived helpers ───────────────────────────────────────────────────────
     @property
     def openrouter_configured(self) -> bool:
@@ -169,6 +190,10 @@ class AppConfig(BaseSettings):
     @property
     def intercom_configured(self) -> bool:
         return bool(self.intercom_access_token.strip())
+
+    @property
+    def session_secret_configured(self) -> bool:
+        return bool(self.session_jwt_secret.strip())
 
     @property
     def missing_secrets(self) -> list[str]:
