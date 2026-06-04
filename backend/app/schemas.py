@@ -8,7 +8,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    field_validator,
+    model_validator,
+)
 
 from app.config import MAX_BULK_IDS
 from app.util import naive_utcnow
@@ -756,3 +764,33 @@ class StatsResponse(BaseModel):
     resolution_mix: ResolutionMix
     resolve_time_buckets: list[ResolveTimeBucket]
     median_resolve_hours: float | None
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=1)
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class UserOut(BaseModel):
+    id: int
+    onlysales_id: str
+    email: str
+    name: str | None
+    scope: str | None
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    user: UserOut
+
+
+class MeResponse(BaseModel):
+    user: UserOut
