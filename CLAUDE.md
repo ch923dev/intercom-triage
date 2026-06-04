@@ -5,7 +5,6 @@ Repo-wide guidance for Claude Code. Top-level entry point — read first, then d
 > Sub-package guides:
 > - [`backend/CLAUDE.md`](./backend/CLAUDE.md) — FastAPI + async SQLAlchemy + OpenRouter
 > - [`webapp/CLAUDE.md`](./webapp/CLAUDE.md) — Vue 3 + Pinia + Vite
-> - [`extension/CLAUDE.md`](./extension/CLAUDE.md) — Chrome MV3 popup + service worker
 
 ## Read first
 
@@ -23,7 +22,6 @@ Repo-wide guidance for Claude Code. Top-level entry point — read first, then d
 intercom-ticket-management/
 ├── backend/        FastAPI service + SQLite + OpenRouter integration       ← see backend/CLAUDE.md
 ├── webapp/         Vue 3 SPA — the kanban board + admin pages              ← see webapp/CLAUDE.md
-├── extension/      Chrome MV3 popup + background service worker            ← see extension/CLAUDE.md
 ├── docs/           📚 Hub (docs/README.md) · handbook (PROJECT/FEATURES) · contract/ (spec·plan·tasks) · principles · superpowers/ design records
 ├── scripts/        dev.ps1 (single-command launcher), seed-db.ps1/.sh
 ├── design_bundle/  Static design assets referenced by DESIGN.md
@@ -36,14 +34,13 @@ intercom-ticket-management/
 |------------|---------------------------------------------------------------------------------------------------------------|
 | backend    | `ruff check app tests && ruff format --check app tests && mypy app && pytest -q`                              |
 | webapp     | `npm run lint && npm run format:check && npm run typecheck && npm test && npm run build`                      |
-| extension  | Reload unpacked in `chrome://extensions` → sync → confirm popup renders + badge count + no console errors      |
 
 ## Cross-package invariants
 
 The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 
-1. **Backend owns Intercom ingestion via an Access Token.** The backend polls the official `api.intercom.io` REST API with a workspace Bearer token from `backend/.env` (`INTERCOM_ACCESS_TOKEN`), normalizes payloads in `backend/app/services/intercom_normalizer.py`, and ingests them through `run_sync_cycle` (`backend/app/services/sync.py`). A background poller (interval-gated, default off) + `POST /tickets/sync` drive it. **The extension no longer touches Intercom** — it is a read-only mini-board + badge over the backend. (This reverses the former session-scrape model; the extension `ember/` path is gone.)
-2. **`HydratedTicket` shape spans two packages** (`backend/app/schemas.py:HydratedTicket` → `webapp/src/types/api.ts`). The producer is the backend normalizer (`backend/app/services/intercom_normalizer.py:normalize_conversation`), not the extension. Edit the backend schema + webapp type together or break the board.
+1. **Backend owns Intercom ingestion via an Access Token.** The backend polls the official `api.intercom.io` REST API with a workspace Bearer token from `backend/.env` (`INTERCOM_ACCESS_TOKEN`), normalizes payloads in `backend/app/services/intercom_normalizer.py`, and ingests them through `run_sync_cycle` (`backend/app/services/sync.py`). A background poller (interval-gated, default off) + `POST /tickets/sync` drive it. The backend `IntercomClient` is the only ingestion path; no client surface touches Intercom.
+2. **`HydratedTicket` shape spans two packages** (`backend/app/schemas.py:HydratedTicket` → `webapp/src/types/api.ts`). The producer is the backend normalizer (`backend/app/services/intercom_normalizer.py:normalize_conversation`), not any client surface. Edit the backend schema + webapp type together or break the board.
 3. **`part_type` mapping (official API).** Intercom conversation parts carry a `part_type` string: `comment` (+ customer author → `parts[]`, admin/bot author → `parts[]` with `is_admin`), `note` → `internal_notes[]`, `assignment`/`open`/`close`/`snoozed`/… → skipped. The opening message lives on `source` and is emitted as the first part. Unknown `part_type` → skipped + logged (`intercom.unknown_part_type`). Stable + documented (replaces the old reverse-engineered numeric `renderable_type` codes).
 4. **`parts[]` is customer-visible (fed to AI); `internal_notes[]` is team-only (never fed to AI).** Keep them separated end-to-end. The normalizer enforces this via `part_type='note'` → `internal_notes[]`.
 5. **Naive UTC in DB; `Z`-suffixed ISO on the wire.** Pydantic `UTCDatetime` / `NaiveUTCDatetime` enforce this; JS clients depend on it.
@@ -51,7 +48,7 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 7. **Fallback `CategorizationResult` rows are never cached.** Caching a fallback poisons the ticket until a new customer message arrives.
 8. **`title_user_edited` / `summary_user_edited` are sticky across re-syncs.** Backend ingest (`_upsert_ticket`) must preserve operator edits when the poller re-fetches a conversation.
 9. **`MAX_BULK_IDS = 200`.** Backend constant (`backend/app/config.py`), webapp pre-flight warning. Bump together.
-10. **`tickets.resolved_at` ⇔ `resolved_source`** (XOR CheckConstraint). `resolved_source ∈ {'manual', 'intercom_closed', 'non_actionable', 'ai_resolved'}` (`ai_resolved` = AI auto-close under the operator's auto-resolve toggle, migration 0012). Non-actionable renders as its own Kanban column (webapp) / its own popup tab (extension) — split from Resolved at the view layer (`tickets.nonActionableTickets` / `pureResolvedTickets` getters); storage stays unified. Reopen path clears both. A non-actionable ticket may carry a structured `non_actionable_kind` (`auto_reply`/`thanks`/`spam`/`out_of_office`/`other`) on `tickets` + `ai_cache` (AI-derived, board-state only — not on `HydratedTicket`; invariant #2 untouched); it is CHECK-coupled to `resolved_source='non_actionable'` and cleared on every reopen path with the resolution pair (migration 0020 / T107).
+10. **`tickets.resolved_at` ⇔ `resolved_source`** (XOR CheckConstraint). `resolved_source ∈ {'manual', 'intercom_closed', 'non_actionable', 'ai_resolved'}` (`ai_resolved` = AI auto-close under the operator's auto-resolve toggle, migration 0012). Non-actionable renders as its own Kanban column (webapp) — split from Resolved at the view layer (`tickets.nonActionableTickets` / `pureResolvedTickets` getters); storage stays unified. Reopen path clears both. A non-actionable ticket may carry a structured `non_actionable_kind` (`auto_reply`/`thanks`/`spam`/`out_of_office`/`other`) on `tickets` + `ai_cache` (AI-derived, board-state only — not on `HydratedTicket`; invariant #2 untouched); it is CHECK-coupled to `resolved_source='non_actionable'` and cleared on every reopen path with the resolution pair (migration 0020 / T107).
 11. **Drag-out reopen is atomic.** Setting an override on a resolved ticket clears `resolved_at` + `resolved_source` in the same transaction.
 12. **Singleton `Settings` row enforced by `CHECK (id = 1)`.** `init_db` inserts it on first boot.
 13. **Playbooks are durable operator knowledge, not cache.** `playbooks` rows
@@ -61,8 +58,7 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     *effective* category (override beats AI).
 14. **Parked is board-state, not a conversation field.** `parked_at` /
     `parked_until` / `parked_reason` live on `TicketSchema` (the board
-    response), never on `HydratedTicket` — so the extension's
-    `normalizeConversation` does not carry them (invariant #2 untouched). The
+    response), never on `HydratedTicket` (invariant #2 untouched). The
     trio is XOR-locked (all-set or all-null) and a ticket is never both parked
     and resolved; every resolve path calls `clear_parked`. "Ready to resume"
     (`parked_until ≤ now`) is derived on read, never stored — no scheduler.
@@ -82,9 +78,9 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 ## Scope guardrails
 
 - Single-operator local tool, not a SaaS. One workspace, one taxonomy, one operator, one machine. No multi-tenancy, auth, deployment infra, hosted observability, public surfaces.
-- Three packages, three stacks, intentionally. **Don't merge them.** Extension = plain ES modules (MV3); webapp = Vue 3 + Vite (SPA); backend = FastAPI (HTTP). No monorepo tool, shared package, codegen step.
-- `localhost:4000` (backend) + `localhost:5173` (webapp dev) + `chrome-extension://…` (popup). Vite proxies `/api/*` → `127.0.0.1:4000`. No reverse proxy, Docker, nginx.
-- Cross-package changes (schema, ingest shape, API contract) ship in one PR. Don't merge backend half of a contract change without webapp + extension half.
+- Two packages, two stacks, intentionally. **Don't merge them.** webapp = Vue 3 + Vite (SPA); backend = FastAPI (HTTP). No monorepo tool, shared package, codegen step.
+- `localhost:4000` (backend) + `localhost:5173` (webapp dev). Vite proxies `/api/*` → `127.0.0.1:4000`. No reverse proxy, Docker, nginx.
+- Cross-package changes (schema, ingest shape, API contract) ship in one PR. Don't merge backend half of a contract change without the webapp half.
 
 ## When in doubt
 
@@ -92,11 +88,11 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 2. Read `docs/contract/plan.md` for the *how*.
 3. Read the sub-package `CLAUDE.md` for stack-specific rules.
 4. Grep for the relevant T-number in `docs/contract/tasks.md` to find the implementation footprint.
-5. If still unclear — ask. Cost of a clarifying question = one round-trip; cost of a wrong guess across three packages = much higher.
+5. If still unclear — ask. Cost of a clarifying question = one round-trip; cost of a wrong guess across two packages = much higher.
 
 ## Don't
 
-- Don't add a SECOND Intercom integration. The backend `IntercomClient` (`backend/app/clients/intercom.py`) is the only ingestion path; don't give the extension or webapp Intercom access again.
+- Don't add a SECOND Intercom integration. The backend `IntercomClient` (`backend/app/clients/intercom.py`) is the only ingestion path; don't give the webapp Intercom access.
 - Don't introduce a monorepo tool / shared package / codegen step.
 - Don't deploy this anywhere (no Dockerfile, no CI/CD, no production config).
 - Don't add user auth / RBAC / tenants.
