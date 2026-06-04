@@ -14,7 +14,7 @@
 
 `**Feature** — what it does. (surface · code anchor · spec IDs / invariants)`
 
-- **surface**: `backend` (HTTP) · `ai` (OpenRouter/embeddings) · `webapp` · `extension` · `both` (webapp+extension)
+- **surface**: `backend` (HTTP) · `ai` (OpenRouter/embeddings) · `webapp`
 - **status**: everything below is **shipped to `main`** unless tagged **[OPEN]**.
 - Counts: ~66 backend endpoints · 20 AI/ML features · ~50 user-facing UI features.
 
@@ -37,35 +37,35 @@ The core loop: ingest → AI categorize against the operator's taxonomy → boar
 
 ## B. Resolution & workflow state
 
-- **Manual resolve** — mark a ticket resolved (`resolved_source='manual'`); clears any parked state. (both · `POST /tickets/{id}/resolve` → `services/resolution.py:resolve`)
-- **Reopen (atomic)** — clears `resolved_at` + `resolved_source` + `non_actionable_kind` + stamps `resolution_cleared_at` in one transaction. (both · `POST /tickets/{id}/reopen` · inv #11)
-- **Mark non-actionable** — resolve as a non-actionable sub-state (spam/thanks/auto-reply/out-of-office/other); its own board column / popup tab. (both · `POST /tickets/{id}/non-actionable` · US-019/FR-037, inv #10)
+- **Manual resolve** — mark a ticket resolved (`resolved_source='manual'`); clears any parked state. (webapp · `POST /tickets/{id}/resolve` → `services/resolution.py:resolve`)
+- **Reopen (atomic)** — clears `resolved_at` + `resolved_source` + `non_actionable_kind` + stamps `resolution_cleared_at` in one transaction. (webapp · `POST /tickets/{id}/reopen` · inv #11)
+- **Mark non-actionable** — resolve as a non-actionable sub-state (spam/thanks/auto-reply/out-of-office/other); its own board column. (webapp · `POST /tickets/{id}/non-actionable` · US-019/FR-037, inv #10)
 - **Intercom-closed auto-resolve** — the backend closure pass (in `run_sync_cycle`) detects open→closed in Intercom; ingest stamps `resolved_source='intercom_closed'`. (backend · `services/sync.py`, `services/tickets.py:_upsert_ticket`)
 - **AI auto-resolve** — under the operator's toggle + confidence threshold, a high-confidence `resolved`/`non_actionable` verdict auto-resolves (`resolved_source='ai_resolved'`); never overrides an existing resolution. (ai/backend · `services/tickets.py:_maybe_auto_resolve_from_ai` · US-016, FR-026/FR-029/FR-030, inv #10)
-- **Per-ticket AI-resolve toggle (tri-state)** — `null` inherits the global default; `true`/`false` override per ticket. (both · `PATCH /tickets/{id}/ai-resolve` → `services/resolution.py:set_ai_resolve`)
+- **Per-ticket AI-resolve toggle (tri-state)** — `null` inherits the global default; `true`/`false` override per ticket. (webapp · `PATCH /tickets/{id}/ai-resolve` → `services/resolution.py:set_ai_resolve`)
 - **Resolution chip + dismiss** — server-computed advisory chip (`ai_resolved`/`ai_reopened`/`new_reply`); dismissible until the customer-visible thread advances. (backend/webapp · `services/tickets.py:_chip_state`, `POST /tickets/{id}/dismiss-chip`, `ResolutionChip.vue` · US-016/FR-027)
-- **Parked / snoozed state** — defer a ticket "waiting on customer / third party / internal / other" with a wake time + optional note; XOR-locked trio, never co-resolved, "ready to resume" derived on read (no scheduler). (both · `POST /tickets/{id}/{park|unpark}` → `services/resolution.py`, `ParkMenu.vue` · roadmap 4.1/T106, inv #14)
+- **Parked / snoozed state** — defer a ticket "waiting on customer / third party / internal / other" with a wake time + optional note; XOR-locked trio, never co-resolved, "ready to resume" derived on read (no scheduler). (webapp · `POST /tickets/{id}/{park|unpark}` → `services/resolution.py`, `ParkMenu.vue` · roadmap 4.1/T106, inv #14)
 - **Operator title/summary edits (sticky)** — edited title + summary survive re-syncs; empty value clears the edit. (backend/webapp · `PATCH /tickets/{id}` → `edit_ticket` · inv #8)
 
 ## C. Bulk operations (cap 200/request, per-id ok/failed)
 
 Every bulk endpoint returns `{ok_ids, failed:[{id, reason}]}` — a per-id failure never aborts the batch. Cap = `MAX_BULK_IDS=200` (inv #9).
 
-- **Bulk resolve / reopen** — (both · `POST /tickets/bulk/{resolve|reopen}` → `services/bulk.py`)
-- **Bulk recategorize** — assign one category to N tickets via overrides; atomically reopens resolved rows (drag-out). (both · `PATCH /tickets/bulk/category`)
-- **Bulk mark non-actionable** — (both · `POST /tickets/bulk/non-actionable`)
+- **Bulk resolve / reopen** — (webapp · `POST /tickets/bulk/{resolve|reopen}` → `services/bulk.py`)
+- **Bulk recategorize** — assign one category to N tickets via overrides; atomically reopens resolved rows (drag-out). (webapp · `PATCH /tickets/bulk/category`)
+- **Bulk mark non-actionable** — (webapp · `POST /tickets/bulk/non-actionable`)
 - **Bulk park / unpark** — park N until a wake time with reason + note; unpark N. (webapp · `POST /tickets/bulk/{park|unpark}`)
-- **Bulk dismiss chip** — (both · `POST /tickets/bulk/dismiss-chip`)
+- **Bulk dismiss chip** — (webapp · `POST /tickets/bulk/dismiss-chip`)
 - **Bulk follow-up set / clear** — apply or clear one follow-up across N tickets. (webapp · `PUT|DELETE /followups/bulk`)
 - **Multi-select + bulk drag** — Cmd/Ctrl-click toggles selection, Shift-click range within a column, dragging one selected card moves the whole set. (webapp · `selection.ts`, `Column.vue`, `BulkActionBar.vue`)
 - **Pre-flight diff** — "N will resolve, M skipped" on hover, with an over-cap warning past 200. (webapp · `utils/bulkPreview.ts` · US-030/FR-036)
 
 ## D. Follow-ups & alarms
 
-- **Set / snooze / clear follow-up** — per-ticket reminder (`due_at` + reason); snooze reschedules + re-arms; clear is idempotent. (both · `PUT /followups/{id}`, `POST /{id}/snooze`, `DELETE /{id}` · T046)
+- **Set / snooze / clear follow-up** — per-ticket reminder (`due_at` + reason); snooze reschedules + re-arms; clear is idempotent. (webapp · `PUT /followups/{id}`, `POST /{id}/snooze`, `DELETE /{id}` · T046)
 - **Mark-fired guard** — a rung alarm is flagged so a client reload doesn't re-ring it. (backend · `POST /followups/{id}/mark-fired`)
-- **Live countdown chip (1 Hz)** — per-card "F/U in 15m" → "due now" tick. (both · `TicketCard.vue`, `popup.js`)
-- **Alarm banners** — stacked top-right banners on fire: open / snooze (15m, 1h) / dismiss, with an audio ping (gated by `mute_alarms`) and desktop notification (gated by `tweaks.desktopNotifications`). (both · `AlarmBanners.vue`, `popup.js`)
+- **Live countdown chip (1 Hz)** — per-card "F/U in 15m" → "due now" tick. (webapp · `TicketCard.vue`)
+- **Alarm banners** — stacked top-right banners on fire: open / snooze (15m, 1h) / dismiss, with an audio ping (gated by `mute_alarms`) and desktop notification (gated by `tweaks.desktopNotifications`). (webapp · `AlarmBanners.vue`)
 - **Follow-ups page (5 time buckets)** — overdue / within 1h / today / later / fired; cards re-bucket live. (webapp · `FollowupBoard.vue`/`FollowupColumn.vue`)
 - **Timer-triggered follow-up from a note** — adding a note entry with `timer_min` upserts the follow-up in the same transaction. (backend · `services/note_entries.py:add_entry`)
 
@@ -121,7 +121,7 @@ All enforce inv #4 (never feed/embed `internal_notes`) and inv #6 (embeddings li
 - **Saved views / smart filters** — persisted filter presets (e.g. "urgent + unresolved + >4h"); create/edit/delete in the drawer. (webapp · `savedViews.ts`, `DrawerSavedViewsSection.vue` · US-025/roadmap 1.1)
 - **Optimistic updates + auto-sync** — every mutation snapshots→mutates→rolls back on failure; a silent background refresh (configurable interval) is guarded against in-flight mutations (race fix R.2). (webapp · `tickets.ts:mutating`/`mutationGen`, `App.vue`)
 - **Display tweaks** — dark mode, accent color, density (normal/compact/comfy), show-summary, show-confidence; client-only `localStorage`. (webapp · `tweaks.ts`, `DrawerDisplaySection.vue`)
-- **Extension callout** — empty state ("operator hasn't synced") vs backend-unreachable error; never mocks data. (webapp · `ExtensionCallout.vue`)
+- **Empty / error states** — empty state ("operator hasn't synced") vs backend-unreachable error; never mocks data. (webapp · `EmptyBoard.vue`)
 - **Admin pages** — Categories (CRUD/recolor/reorder/archive/merge), Proposals (approve/merge/reject), Playbooks, Snippets, Stats. (webapp · `CategoriesPage.vue` etc.)
 - **Settings drawer (7 sections)** — Display, Filters (lookback/states/keywords/hide-empty), AI (categorize toggle, auto-resolve, confidence threshold), Notifications (mute alarms, desktop notifs), Cost meter, Sync interval, Saved views. (webapp · `SettingsDrawer.vue` + `settings/*` · T027)
 
@@ -131,13 +131,6 @@ All enforce inv #4 (never feed/embed `internal_notes`) and inv #6 (embeddings li
 - **Normalizer** — maps the official payload to `HydratedTicket`: `part_type` (`comment`→`parts[]`, `note`→`internal_notes[]`, events skipped), `source` as the first part, priority coercion, HTML strip, `[attachment: …]` fallback (R.5), customer panel fields from the contact. (backend · `services/intercom_normalizer.py` · inv #2/#3/#4, R.1/R.5)
 - **Sync cycle** — `run_sync_cycle`: server-side skip-known (internal `get_sync_state`), search → detail/contact fetch for changed/new, closure pass for open→closed, then the existing cache-aware ingest. (backend · `services/sync.py`)
 - **Poller + manual sync** — background poller (interval-gated, default off) + `POST /tickets/sync` (503 without a token); returns `{received, categorized, skipped_known, closed_detected}`. (backend · `main:_intercom_poll_loop`, `routers/tickets.py`)
-
-## K. Extension (Chrome MV3 popup)
-
-- **Popup mini-board** — category/proposal/resolved/non-actionable/parked tabs with counts; same taxonomy as the webapp. Read-only over the backend (no Intercom access). (extension · `popup.js`)
-- **Popup per-ticket actions** — move category, resolve, reopen, non-actionable, park, unpark; follow-up countdown chip + due banner with snooze. (extension · `popup.js`)
-- **Refresh** — reload the stored board from the backend. (extension · `popup.js`)
-- **Background badge poll** — optional interval poll (off by default) that badges the toolbar with the Urgent count from the backend board (no Intercom fetch). (extension · `background.js`)
 
 ## L. Platform & ops
 
@@ -152,8 +145,7 @@ All enforce inv #4 (never feed/embed `internal_notes`) and inv #6 (embeddings li
 
 ## Open backlog (not yet shipped)
 
-- **[OPEN] Webhook + SSE live updates** — `conversation.user.created`/`replied` → push to webapp + popup instead of poll-on-open. The heaviest deferred feature. (roadmap 4.3 / T100)
-- **[OPEN] Bulk actions in the extension popup** — mirror the webapp bulk bar; deferred for popup ergonomics. (roadmap 4.4 / T105)
+- **[OPEN] Webhook + SSE live updates** — `conversation.user.created`/`replied` → push to the webapp instead of poll-on-open. The heaviest deferred feature. (roadmap 4.3 / T100)
 
 ---
 
