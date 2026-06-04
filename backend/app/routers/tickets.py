@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients.intercom import IntercomClient
 from app.clients.openrouter import OpenRouterClient
 from app.config import MAX_INGEST_TICKETS, AppConfig
 from app.db import get_session
-from app.deps import get_app_config, get_openrouter
+from app.deps import get_app_config, get_intercom, get_openrouter
 from app.schemas import (
     AIResolveSet,
     BulkCategoryUpdate,
@@ -26,12 +25,14 @@ from app.schemas import (
     ParkResponse,
     ReopenResponse,
     ResolveResponse,
+    SyncResponse,
     TicketEdit,
     TicketSchema,
     UnparkResponse,
 )
 from app.services import bulk as bulk_svc
 from app.services import resolution as resolution_svc
+from app.services import sync as sync_svc
 from app.services import tickets as svc
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -53,11 +54,27 @@ async def list_tickets(
     return await svc.get_tickets(session, resolved=effective)
 
 
-@router.get("/sync-state", response_model=dict[str, datetime])
-async def sync_state(session: AsyncSession = Depends(get_session)) -> dict[str, datetime]:
-    """`{ticket_id: updated_at}` for every stored ticket — lets the extension
-    skip Intercom detail fetches for conversations it already has unchanged."""
-    return await svc.get_sync_state(session)
+@router.post("/sync", response_model=SyncResponse)
+async def sync_now(
+    session: AsyncSession = Depends(get_session),
+    openrouter: OpenRouterClient | None = Depends(get_openrouter),
+    intercom: IntercomClient | None = Depends(get_intercom),
+    config: AppConfig = Depends(get_app_config),
+) -> SyncResponse:
+    """Run one Intercom fetch+ingest cycle now (the same cycle the background
+    poller runs). 503 when no Access Token is configured — there's nothing to
+    poll. Exists for scripts/curl; there is no UI button (the poller is the
+    primary trigger)."""
+    if intercom is None:
+        raise HTTPException(
+            status_code=503, detail="Intercom not configured (set INTERCOM_ACCESS_TOKEN)"
+        )
+    return await sync_svc.run_sync_cycle(
+        session=session,
+        openrouter=openrouter,
+        intercom=intercom,
+        config=config,
+    )
 
 
 @router.post("/ingest", response_model=IngestResponse)

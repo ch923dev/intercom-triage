@@ -7,8 +7,8 @@ Guidance for Claude Code when working in `webapp/`.
 ## 1. Think Before Coding (in this repo)
 
 - Backend contracts live in `src/types/api.ts` + `src/api/client.ts`. If a field's nullability or PATCH/PUT shape is unclear, check `../plan.md` / `../spec.md` or ask — never guess a wire format.
-- The Intercom `renderable_type` mapping (1/12 customer, 2/24 admin, 3 internal note) is reverse-engineered and unstable. Flag any change.
-- The backend has **no Intercom Access Token**. All ticket data arrives via the Chrome extension POSTing to `/tickets/ingest`. An empty board means "operator hasn't synced," not "fetch failed." Don't add fallbacks or mock data.
+- `ConversationPart.is_admin` comes from the official Intercom `part_type` + author type (mapped backend-side in `intercom_normalizer.py`); `note` parts live in `Ticket.internal_notes`, never `parts`. Flag any contract change.
+- The **backend** polls Intercom directly (Access Token in `backend/.env`); the webapp never touches Intercom. An empty board means "no token / nothing synced yet" (check `/health.intercom_configured`), not "fetch failed." Don't add fallbacks or mock data.
 
 ## 2. Simplicity First (in this repo)
 
@@ -67,12 +67,12 @@ Vue 3 + Pinia + TypeScript SPA. One page, multiple "views" toggled via `view.vie
 
 ### Data-flow pivot
 
-No Intercom Access Token. Backend cannot call `api.intercom.io`. The sibling Chrome extension (`../extension/`) scrapes Intercom's internal Ember API using the operator's logged-in session and POSTs to `/tickets/ingest`. The webapp only reads from the stored `tickets` table via `GET /tickets`.
+The **backend** polls Intercom's official `api.intercom.io` REST API with an Access Token (`backend/app/services/sync.py`) — no extension or browser involvement. The webapp only reads from the stored `tickets` table via `GET /tickets`.
 
 Consequences:
-- Empty DB → `ExtensionCallout mode="empty"` tells the operator to sync. Never mock data.
+- Empty DB → `ExtensionCallout mode="empty"` tells the operator the board is empty. The actionable cause is now "no token / nothing synced yet" (`/health.intercom_configured`), not "open the extension and sync." Never mock data. (Copy may still mention the extension as a quick-glance board — it's no longer the ingestion path.)
 - `tickets.refresh()` failure leaves the board empty and surfaces the error inline — no retry, no fallback.
-- `ConversationPart.is_admin` derives from Intercom `renderable_type`; internal notes (type 3) live in `Ticket.internal_notes`, never `parts`.
+- `ConversationPart.is_admin` comes from the backend normalizer's `part_type` + author-type mapping; `note` parts live in `Ticket.internal_notes`, never `parts`.
 
 ### State: Pinia stores (`src/stores/`)
 

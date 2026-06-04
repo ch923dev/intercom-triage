@@ -1,17 +1,17 @@
 # Chrome Extension — Intercom Triage
 
-Manifest V3 popup mini-board + background sync. Scrapes Intercom conversations
-via the operator's logged-in browser session (no Access Token) and ships
-them to the backend at `http://localhost:4000` via `POST /tickets/ingest`.
+Manifest V3 popup mini-board over the backend at `http://localhost:4000`. It is
+**read-only with respect to Intercom** — ingestion is the backend's job (it polls
+Intercom directly with an Access Token). The popup reads `GET /tickets` and
+mutates via the same API; the background alarm only refreshes the toolbar badge.
 
 ## Layout
 
 ```
 extension/
-├── manifest.json     MV3 manifest — popup + service worker + host_permissions
-├── background.js     Service worker — alarms (sync + badge poll)
-├── intercom.js       Browser-session scraper (workspace ember/ endpoints)
-├── api.js            Shared backend client (ingest, categories, followups…)
+├── manifest.json     MV3 manifest — popup + service worker + host_permissions (backend only)
+├── background.js     Service worker — alarm-driven badge refresh
+├── api.js            Shared backend client (tickets, categories, followups…)
 ├── popup.html        Popup mini-board markup
 ├── popup.css         Popup styles
 ├── popup.js          Popup controller (mini-board, resolved tab, alarms)
@@ -31,4 +31,5 @@ extension/
 - Follow-up alarm mirror — due banner, per-row countdown chip, audio cue,
   shared mute via `GET /settings`.
 - Background polling (off by default) updates the toolbar badge with the
-  Urgent count when enabled.
+  Urgent count when enabled (reads the backend board — it does not fetch from
+  Intercom).

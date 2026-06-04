@@ -6,12 +6,12 @@ Guidance for Claude Code when working in `backend/`.
 
 ## 1. Think Before Coding (in this repo)
 
-- **No Intercom Access Token.** The backend cannot call `api.intercom.io`. Conversations arrive via `POST /tickets/ingest` from the Chrome extension scraping the operator's logged-in session. Don't add Intercom HTTP clients, retries, or polling. An empty board means "operator hasn't synced," not "fetch failed."
+- **The backend owns Intercom.** It polls `api.intercom.io` directly with a workspace Access Token (`INTERCOM_ACCESS_TOKEN` in `.env`) via `clients/intercom.py`, normalizes payloads in `services/intercom_normalizer.py`, and ingests through `services/sync.py:run_sync_cycle`. A background poller (`main._intercom_poll_loop`, interval-gated, default off) + `POST /tickets/sync` drive it. An empty board means "no token / nothing synced yet," and `/health.intercom_configured = false` flags a missing token. The extension is no longer an ingestion path.
 - The contract is `../spec.md` (what) + `../plan.md` (how) + `../tasks.md` (T-numbers cited in module docstrings). If a field's nullability, status code, or PATCH/PUT shape is unclear, read the spec — never guess.
 - `AppConfig` (config.py) is the runtime config; `Settings` (models.py) is the singleton DB row. They are different. Don't confuse / rename.
 - `_content_signature` (last customer-visible part timestamp) is the AI cache key — NOT Intercom's `updated_at`. Internal teammate notes / assignments / snoozes advance `updated_at` but must not bust cache. Touching this invalidates the FR-008 invariant; flag it.
 - `parts[]` is what the AI sees (customer-visible thread). `internal_notes[]` is the team-only side channel and is never fed to the prompt. Don't merge them.
-- Intercom `renderable_type` mapping (1/12 customer, 2/24 admin, 3 internal note) is reverse-engineered. Don't extend it without checking the extension code.
+- Intercom `part_type` mapping lives in `services/intercom_normalizer.py`: `comment` → `parts[]` (customer or admin author), `note` → `internal_notes[]`, events skipped, `source` is the first part. Official + documented (not the old reverse-engineered numeric codes). Pin `INTERCOM_API_VERSION`; re-verify a live payload before changing the mapping.
 
 ## 2. Simplicity First (in this repo)
 
@@ -35,7 +35,7 @@ Guidance for Claude Code when working in `backend/`.
 - AI cache rows are **never** populated with a fallback result (`CategorizationResult.fallback = True`). Caching a fallback would pin the ticket to the fallback category until a new customer message arrives. Preserve this guard in `services/tickets.ingest_tickets`.
 - `tickets.title_user_edited` / `summary_user_edited` are sticky flags: the ingest path must not overwrite operator edits. Any change to `_upsert_ticket` keeps these.
 - Tests use in-memory SQLite via the same `init_db` path (see `tests/conftest.py`). The `_run_migrations_sync` helper exists specifically because `alembic.command.upgrade` opens a fresh connection — never replace it with the convenience command.
-- Background tasks (`_cache_sweep_loop`, `_attachment_sweep_loop`) catch broad `Exception` on purpose — they must survive transient DB / disk errors and keep ticking. Don't narrow this.
+- Background tasks (`_cache_sweep_loop`, `_attachment_sweep_loop`, `_clustering_loop`, `_intercom_poll_loop`) catch broad `Exception` on purpose — they must survive transient DB / disk / network errors (a bad Intercom token included) and keep ticking. Don't narrow this.
 
 ## 4. Goal-Driven Execution (in this repo)
 
@@ -87,10 +87,10 @@ FastAPI + async SQLAlchemy 2.0 + SQLite (default) / Postgres (swap `DATABASE_URL
 2. `make_engine(database_url)` + `make_session_factory(engine)`.
 3. `init_db` — Alembic `upgrade head` (or `stamp head` on a pre-Alembic DB) + seed `DEFAULT_CATEGORIES` + insert singleton `Settings(id=1)` row. Idempotent.
 4. Create `attachments_dir` + `attachments_dir/thumbs`.
-5. Conditionally build `OpenRouterClient` — only when `OPENROUTER_API_KEY` is set. **Missing secrets do not block startup** (FR-014); `/health` reports `missing_secrets`.
-6. Spawn background loops: `_cache_sweep_loop` (hourly), `_attachment_sweep_loop` (daily, GCs orphaned files after `ATTACHMENT_GC_DAYS`).
+5. Conditionally build `OpenRouterClient` (when `OPENROUTER_API_KEY` set) + `IntercomClient` (when `INTERCOM_ACCESS_TOKEN` set). **Missing secrets do not block startup** (FR-014); `/health` reports `missing_secrets` + `intercom_configured`.
+6. Spawn background loops: `_cache_sweep_loop` (hourly), `_attachment_sweep_loop` (daily), `_clustering_loop` (when enabled), `_intercom_poll_loop` (only when a token is set AND `INTERCOM_POLL_INTERVAL_SECONDS > 0`).
 
-Shutdown reverses: cancel sweeps → close OpenRouter → dispose engine.
+Shutdown reverses: cancel loops → close OpenRouter + Intercom → dispose engine.
 
 ### Layout
 
@@ -99,7 +99,7 @@ app/
 ├── main.py              lifespan + create_app + CORS (localhost:5173 + chrome-extension://)
 ├── config.py            pydantic-settings AppConfig (reads .env). MAX_BULK_IDS constant.
 ├── db.py                async engine + session factory + get_session dependency
-├── deps.py              get_app_config + get_openrouter (read app.state)
+├── deps.py              get_app_config + get_openrouter + get_intercom (read app.state)
 ├── models.py            SQLAlchemy 2.0 + DEFAULT_CATEGORIES + init_db + SQLite PRAGMA listener
 ├── schemas.py           pydantic wire format. UTCDatetime / NaiveUTCDatetime Annotated types.
 ├── util.py              naive_utcnow()
@@ -109,10 +109,11 @@ app/
 │   ├── prompt.py        SYSTEM_PROMPT + build_messages
 │   └── pipeline.py      parse_response → resolve → categorize_many (semaphore-bounded)
 ├── clients/openrouter.py  OpenRouter HTTP client (retries 429/5xx + jittered backoff)
+├── clients/intercom.py    Intercom REST client (search/detail/contact; retries 429/5xx, rate-limit aware)
 ├── routers/             health · categories · proposals · tickets · settings · followups ·
 │                        notes · note_entries · attachments · metrics
 └── services/            attachments · bulk · cache · categories · followups · note_entries ·
-                         notes · proposals · resolution · settings · tickets
+                         notes · proposals · resolution · settings · sync · intercom_normalizer · tickets
 ```
 
 ### Data model (key invariants)
@@ -168,7 +169,8 @@ Tests bypass the OpenRouter network entirely (`pytest-httpx` mocks where AI call
 ## Configuration
 
 `backend/.env` (gitignored). See `.env.example`. Key fields:
-- `OPENROUTER_API_KEY` — empty → backend boots degraded; ingest writes every ticket to fallback. `/health.openrouter_configured = false`, `missing_secrets = ["OPENROUTER_API_KEY"]`.
+- `INTERCOM_ACCESS_TOKEN` — workspace Bearer token the backend polls `api.intercom.io` with. Empty → no poller, `POST /tickets/sync` → 503, `/health.intercom_configured = false`, `missing_secrets` includes `INTERCOM_ACCESS_TOKEN`. `INTERCOM_WORKSPACE_APP_ID` (deep-link URLs, not a secret), `INTERCOM_API_VERSION` (pinned, default `2.13`), `INTERCOM_POLL_INTERVAL_SECONDS` (0 = off), `INTERCOM_POLL_CONCURRENCY`, `INTERCOM_CLOSURE_LOOKBACK_SECONDS`, `INTERCOM_CONTACT_CACHE_TTL_SECONDS`.
+- `OPENROUTER_API_KEY` — empty → backend boots degraded; ingest writes every ticket to fallback. `/health.openrouter_configured = false`, `missing_secrets` includes `OPENROUTER_API_KEY`.
 - `OPENROUTER_MODEL` — default `anthropic/claude-sonnet-4.5`.
 - `DATABASE_URL` — default SQLite. Swap to `postgresql+asyncpg://...` for Postgres (uncomment `asyncpg` in `requirements.txt`). No dialect-specific types are used.
 - `AI_CONCURRENCY` (default 4), `CACHE_TTL_SECONDS` (300), `MAX_TICKETS_PER_FETCH` (100).
@@ -177,7 +179,7 @@ Tests bypass the OpenRouter network entirely (`pytest-httpx` mocks where AI call
 
 ## Don't
 
-- Don't add Intercom-API integration. The extension is the only ingestion path.
+- Don't add a SECOND Intercom client. `clients/intercom.py` is the one integration; route all Intercom calls through it.
 - Don't bypass Alembic by adding columns directly on the model — every schema change is a new revision.
 - Don't cache fallback `CategorizationResult` rows.
 - Don't use `datetime.utcnow()` (deprecated) or aware UTC datetimes for DB writes — use `naive_utcnow()`.

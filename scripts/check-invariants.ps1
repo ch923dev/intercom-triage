@@ -58,12 +58,13 @@ function Test-StagedPattern {
     }
 }
 
-# Rule 1: No backend Intercom API client (Invariant #1).
+# Rule 1: The extension must not access Intercom (Invariant #1 — the BACKEND is
+# the only Intercom integration now, via api.intercom.io + INTERCOM_ACCESS_TOKEN).
+# Flag any extension code that talks to Intercom directly.
 Test-StagedPattern `
-    -Pattern "api\.intercom\.io|INTERCOM_ACCESS_TOKEN" `
-    -PathFilter "^backend/app/" `
-    -Message "Invariant #1: No backend Intercom client / no Access Token" `
-    -ExcludePaths @("\.env\.example$")
+    -Pattern "app\.intercom\.com|api\.intercom\.io|ember/inbox" `
+    -PathFilter "^extension/.*\.(js|json)$" `
+    -Message "Invariant #1: extension must not access Intercom (backend owns ingestion)"
 
 # Rule 2: No datetime.utcnow() in backend (Invariant #5).
 Test-StagedPattern `
@@ -88,7 +89,7 @@ Test-StagedPattern `
 $manifestStaged = git diff --cached --name-only --diff-filter=ACMR 2>$null | Where-Object { $_ -eq "extension/manifest.json" }
 if ($manifestStaged) {
     $manifestContent = git show ":extension/manifest.json" 2>$null
-    $allowedHosts = @("127.0.0.1:4000", "localhost:4000", "app.intercom.com")
+    $allowedHosts = @("127.0.0.1:4000", "localhost:4000")
     $hostMatches = [regex]::Matches($manifestContent, '"https?://[^"]+"')
     foreach ($match in $hostMatches) {
         $url = $match.Value.Trim('"')

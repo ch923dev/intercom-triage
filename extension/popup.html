@@ -10,30 +10,8 @@
       <span class="brand-dot"></span>
       <span class="wordmark">Triage</span>
       <span id="count" class="mono muted"></span>
-      <button id="sync" class="ghost" type="button" title="Pull from Intercom + categorize">
-        Sync
-      </button>
       <button id="refresh" class="ghost" type="button">Refresh</button>
     </header>
-
-    <div id="setup" class="setup" hidden>
-      <label class="mono muted" for="appIdInput">Intercom workspace (app_id)</label>
-      <div class="setup-row">
-        <input
-          id="appIdInput"
-          class="setup-input"
-          type="text"
-          spellcheck="false"
-          placeholder="e.g. j3dxf22l"
-        />
-        <button id="saveAppId" class="ghost" type="button">Save</button>
-      </div>
-      <p id="setupHint" class="setup-hint mono muted">
-        Find it in your Intercom URL: app.intercom.com/a/inbox/<b>&lt;app_id&gt;</b>/…
-      </p>
-    </div>
-
-    <div id="syncStatus" class="sync-status mono muted" hidden></div>
 
     <nav id="tabs" class="tabs" aria-label="Categories"></nav>
 

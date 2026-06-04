@@ -78,6 +78,9 @@ class HealthResponse(BaseModel):
     version: str
     model: str
     openrouter_configured: bool
+    # Whether a workspace Access Token is set so the backend can poll Intercom
+    # (cross-package invariant #1). False → no poller, `/tickets/sync` → 503.
+    intercom_configured: bool
     missing_secrets: list[str]
     # Roadmap 2.3 — the AppConfig needs-review threshold, surfaced so the webapp
     # can read the calibrated default instead of hardcoding it blind. An open,
@@ -418,8 +421,8 @@ class ConversationPartSchema(BaseModel):
     author: TicketAuthorSchema
     body: str
     created_at: NaiveUTCDatetime
-    # True for admin replies visible to the customer (Intercom
-    # `renderable_type` 2 or 24). Inbound customer messages → False.
+    # True for admin/bot replies visible to the customer (Intercom `part_type`
+    # `comment` with an admin/bot/team author). Inbound customer messages → False.
     is_admin: bool = False
 
 
@@ -428,7 +431,7 @@ class HydratedTicket(BaseModel):
 
     `parts` is what the AI sees: the customer-visible thread (inbound messages
     + admin replies). `internal_notes` is the team-only side-channel (Intercom
-    `renderable_type` 3 — distinct from the operator's local `TicketNote` jot)
+    `part_type` `note` — distinct from the operator's local `TicketNote` jot)
     and is NOT fed to the AI prompt; only the UI surfaces it.
     """
 
@@ -554,6 +557,21 @@ class IngestResponse(BaseModel):
 
     received: int
     categorized: int  # how many needed a fresh AI call (the rest were cache hits)
+
+
+class SyncResponse(BaseModel):
+    """`POST /tickets/sync` result — counts for one backend-driven poll cycle.
+
+    Superset of `IngestResponse`: `received` / `categorized` come straight from
+    the ingest the cycle performed; `skipped_known` is how many conversations
+    were skipped without a detail fetch (unchanged since last sync), and
+    `closed_detected` is how many tracked-open tickets were stamped
+    `intercom_closed` this cycle (the closure pass)."""
+
+    received: int
+    categorized: int
+    skipped_known: int
+    closed_detected: int
 
 
 # ── Filter + settings ─────────────────────────────────────────────────────────

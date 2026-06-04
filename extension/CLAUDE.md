@@ -6,50 +6,42 @@ Guidance for Claude Code when working in `extension/`.
 
 ## 1. Think Before Coding (in this repo)
 
-- **The extension is the only Intercom integration.** The backend has no Intercom Access Token. Conversations are scraped from the operator's logged-in browser session against undocumented `ember/` endpoints and POSTed to `/tickets/ingest`. If you're tempted to add an Access-Token path or a backend-side Intercom client, stop and ask — that path doesn't exist.
-- Intercom's `ember/` endpoints (`/ember/inbox/conversations/list`, `/ember/inbox/conversations/{id}`) are **undocumented and may change without notice**. Any code touching them is brittle. Flag changes to `intercom.js` accordingly; verify against live conversations before merging.
-- The `renderable_type` mapping is reverse-engineered: `1`/`12` = inbound customer, `2`/`24` = admin reply (customer-visible), `3` = internal team note (admin-only). `5`/`6`/`14`/`21`/`26`/`31`/`71` are events and must be skipped (`21` priority-change, `26` participant-added, `31` bot/workflow-rule — confirmed via 2026-05-28 live capture). Adding a new type means inspecting a live payload — never guess.
-- `parts[]` is customer-visible (fed to AI). `internal_notes[]` is team-only (never fed to AI). Don't merge them.
-- Two clocks: Intercom timestamps can be ISO strings *or* unix seconds depending on endpoint/version. `toIso` accepts both. Don't drop the coercion.
-- `summary.last_updated` ≠ `summary.updated_at` ≠ `summary.sorting_updated_at`. `summaryUpdatedMs` walks all three for the same reason. Don't simplify it without verifying the list response shape.
-- 401/403 ≠ generic failure. Auth errors must bubble (`IntercomSessionError`) so the popup surfaces a "log in" hint; other errors degrade silently (best-effort badge / sync).
+- **The extension no longer touches Intercom.** The backend polls Intercom directly with an Access Token (cross-package invariant #1). The extension is a **read-only mini-board + toolbar badge** over the backend (`localhost:4000`). There is no Intercom fetch, no `app.intercom.com` host permission, no workspace `app_id` setup. If you're tempted to add Intercom access back here, stop — it lives in `backend/app/clients/intercom.py`.
+- The popup reads the backend board (`GET /tickets`, `/categories`, `/followups`, …) and mutates through the same API (override / resolve / park / reopen). It is a thin client; the source of truth is the backend.
+- There is **no Sync button** — the backend's background poller keeps the board fresh. A manual one-shot exists only as `POST /tickets/sync` (curl/scripts), not in the popup.
+- `parts[]` / `internal_notes[]` separation (invariant #4) is enforced backend-side now; the popup just displays what `GET /tickets` returns.
 
 ## 2. Simplicity First (in this repo)
 
 - **No build step.** Plain ES modules loaded by MV3 (`background.service_worker.type = "module"`, `<script type="module">` in `popup.html`). Don't introduce webpack / rollup / TypeScript / a bundler. Don't add npm dependencies. Plain `.js` files only.
 - **No frameworks.** Popup DOM is built with `node(tag, className, text)` + `element.append(...)`. Don't introduce Vue / React / Preact / lit. The webapp is the place for a framework; this popup is intentionally minimal.
-- One `api.js` (backend client). One `intercom.js` (Intercom session scraper). One `background.js` (service worker). One `popup.js` (mini-board controller). Don't carve a fifth module unless a new surface justifies it.
+- One `api.js` (backend client). One `background.js` (service worker, badge only). One `popup.js` (mini-board controller). Don't carve a fourth module unless a new surface justifies it.
 - The popup polls in-memory state at 1Hz via `alarmTick`. Don't replace it with reactive state, observables, or a store layer. A `state` object + targeted `render*` functions is the pattern.
-- Permissions in `manifest.json` are deliberately narrow: `storage`, `alarms`, and host permissions for `127.0.0.1:4000` / `localhost:4000` / `app.intercom.com`. Don't add `tabs`, `cookies`, `webRequest`, or broader hosts unless a feature *requires* them.
+- Permissions in `manifest.json` are deliberately narrow: `storage`, `alarms`, and host permissions for `127.0.0.1:4000` / `localhost:4000` only. Don't add `tabs`, `cookies`, `webRequest`, `app.intercom.com`, or broader hosts — the extension never calls Intercom.
 
 ## 3. Surgical Changes (in this repo)
 
 - Style: 2-space indent, single quotes, trailing commas, semicolons, `const`/`let` only, JSDoc on exported functions. Match it.
 - Service worker is `type: "module"` — use `import` / `export`, not `importScripts`. The service worker may be killed and restarted between alarms; nothing persists across ticks except `chrome.storage.local`. Don't add module-level state that you expect to survive (counters, caches, timers).
-- `chrome.storage.local` is the only persistence. Current keys: `intercomAppId` (workspace), `pollMinutes` (background interval). Document any new key in this file before adding it.
+- `chrome.storage.local` is the only persistence. Current key: `pollMinutes` (badge-refresh interval). Document any new key in this file before adding it.
 - `chrome.alarms` minimum period in production builds is 1 minute — values < 1 are silently clamped. Don't add sub-minute polling.
 - Backend client lives in `api.js`. Don't inline `fetch(API_BASE + …)` into `popup.js` / `background.js`.
-- Intercom client lives in `intercom.js`. Don't import its internals from elsewhere — only the named exports (`fetchHydratedBatch`, `getAppId`, `setAppId`, `getConversation`, `listClosedConversations`, `normalizeConversation`, `IntercomSessionError`, `LOOKBACK_SECONDS`).
-- `normalizeConversation` produces a `HydratedTicket` matching the backend's pydantic schema (`backend/app/schemas.py:HydratedTicket`). Any new field on either side must be added on both — or the backend rejects the ingest. Cross-check before editing the shape.
-- The skip-known optimization in `fetchHydratedBatch` is load-bearing: it reads `GET /tickets/sync-state` and bypasses the per-conversation detail fetch when the summary's `last_updated` is `<=` the stored value. Don't remove it.
-- The closure pass in `background.js:ingestFromIntercom` exists so `state: open → closed` transitions get caught (Intercom drops closed conversations from `state=open` listings). Don't simplify it away.
-- Fallback caching in the backend skips `result.fallback` rows — the extension's ingest call doesn't influence that. If you change the ingest shape, do not assume the backend will retry.
+- The `HydratedTicket`/board shape is owned by the backend (`backend/app/schemas.py`); the popup only reads `GET /tickets`. Don't reintroduce an extension-side normalizer.
+- The skip-known optimization + the open→closed closure pass now live in the backend (`backend/app/services/sync.py`). The extension has no part in ingestion.
 
 ## 4. Goal-Driven Execution (in this repo)
 
 Examples of verifiable goals (no automated test suite for the extension — every change is verified manually):
 - "Fix the popup not loading" → "Open the popup, see N tickets render."
-- "Skip already-stored conversations" → "Sync, see `received - cache_hits == 0` in `/metrics`."
-- "Refactor `intercom.js`" → "Reload unpacked, sync, see same ticket set in `/tickets`."
+- "Refresh the badge" → "Set interval in popup footer, wait ≥ 1 tick, check toolbar Urgent count."
 
 Verification table:
 
 | Change                          | Verify with                                                                 |
 |---------------------------------|-----------------------------------------------------------------------------|
 | `popup.js` UI                   | `chrome://extensions` → reload → open popup → click through                  |
-| `intercom.js` scrape / parse    | Open popup → "Sync now" → check `GET /tickets` count + sample parts          |
-| `background.js` polling         | Set interval in popup footer → wait ≥ 1 tick → check toolbar badge          |
-| Backend schema change           | Coordinate with `backend/app/schemas.py:HydratedTicket` — both sides ship together |
+| `background.js` badge poll      | Set interval in popup footer → wait ≥ 1 tick → check toolbar badge          |
+| Board shape change              | Backend owns `GET /tickets`; the popup just reads it — no extension ship     |
 | Manifest / permission change    | Reload unpacked — Chrome surfaces permission deltas in a confirm dialog     |
 
 ---
@@ -64,22 +56,19 @@ Verification table:
 
 Reload after every code change — Chrome doesn't watch files. (Right-click extension icon → Manage → reload icon, or the refresh arrow on the `chrome://extensions` card.)
 
-Operator must enter the workspace `app_id` (e.g. `j3dxf22l`) in the popup setup screen on first run. It's stored in `chrome.storage.local.intercomAppId`.
+No setup screen — the operator points the backend at Intercom (`INTERCOM_ACCESS_TOKEN` in `backend/.env`); the popup just needs the backend running on `:4000`.
 
 ## Architecture
 
-Manifest V3 extension. One popup window, one service worker. Talks to:
-- Backend on `http://127.0.0.1:4000` (CORS-allowed via `chrome-extension://[a-z]{32}` regex in `backend/app/main.py`).
-- `https://app.intercom.com/ember/inbox/…` via the operator's session cookies (`credentials: 'include'`, host permission granted in `manifest.json`).
+Manifest V3 extension. One popup window, one service worker. Talks to the backend on `http://127.0.0.1:4000` only (CORS-allowed via `chrome-extension://[a-z]{32}` regex in `backend/app/main.py`). It does **not** talk to Intercom — the backend does that.
 
 ### Files
 
 ```
 extension/
-├── manifest.json     MV3 — popup + service worker + host_permissions (3 origins)
-├── background.js     Service worker — chrome.alarms ticker, ingest + badge
-├── intercom.js       Session-cookie scraper for Intercom's ember/ endpoints
-├── api.js            Backend client — fetchSettings, ingestTickets, getStoredTickets, …
+├── manifest.json     MV3 — popup + service worker + host_permissions (backend only)
+├── background.js     Service worker — chrome.alarms ticker, badge refresh
+├── api.js            Backend client — fetchSettings, getStoredTickets, resolve/park/…
 ├── popup.html        Popup markup (tabs + list + footer)
 ├── popup.css         Popup styles (mirrors webapp's broadsheet aesthetic)
 ├── popup.js          Popup controller — render + state + alarm tick
@@ -89,19 +78,9 @@ extension/
 ### Data flow
 
 ```
-                  Intercom (browser session, ember/ API)
-                        │  list + detail per state
-                        ▼
-   ┌──────────────────────────────────────┐
-   │ fetchHydratedBatch + closure pass    │  background.js / popup.js
-   │   ↳ skip if summary.last_updated     │
-   │     ≤ knownState[id]                 │
-   └──────────────────┬───────────────────┘
-                      │ HydratedTicket[]
-                      ▼
-              POST /tickets/ingest          api.js → backend
-                      │
-                      ▼ (server categorizes, stores)
+   Intercom ──(Access Token)──> BACKEND poller   (no extension involvement)
+                                     │ stores the categorized board
+                                     ▼
               GET /tickets → render          api.js → popup mini-board
               GET /tickets?resolved=true     resolved tab
               GET /categories                tabs + move-picker
@@ -113,27 +92,12 @@ extension/
               POST /followups/{id}/mark-fired  alarm dedupe
 ```
 
-### Sync pipeline
+### Background polling (badge only)
 
-`fetchHydratedBatch({ appId, state, count, concurrency, knownState, maxPages })`:
-
-1. `listConversations` → one page of summaries (newest-first, sorted by `sorting_updated_at`) + a `nextCursor` (`pages.next.starting_after`).
-2. Per summary: if `summaryUpdatedMs(summary) <= Date.parse(knownState[id])` → skip (no detail fetch, no AI call).
-3. Otherwise: `getConversation(appId, summary.id)` → `normalizeConversation` → push to result.
-4. Concurrency-bounded worker pool (default 4 parallel detail fetches) per page.
-5. **Paginate** via `nextCursor`. Stop when a full page yields nothing new/changed (newest-first ⇒ everything older is unchanged too; a brand-new convo is never skip-known so it can't hide below an all-skipped page) or `nextCursor` is null. `maxPages` (default 20) is a runaway guard — hitting it logs a warning, never a silent truncation.
-6. Per-conversation errors are logged + skipped; auth errors (401/403) bubble as `IntercomSessionError` so the popup can surface the login hint.
-
-`background.js:ingestFromIntercom` calls `fetchHydratedBatch` once per `settings.states` value (default `['open']`), then runs the **closure pass**: for every backend-tracked id that isn't in the open list, search `listClosedConversations` until found or the lookback window (`LOOKBACK_SECONDS = 7 days`) is exhausted. Found ids are hydrated and included in the ingest so the backend's `_upsert_ticket` stamps `resolved_at` / `resolved_source = 'intercom_closed'`.
-
-### Background polling
-
-OFF by default (`pollMinutes = 0`). The popup writes a value to `chrome.storage.local.pollMinutes` and sends `{ type: 'reschedule' }` to the service worker, which clears the alarm and (if `> 0`) creates a new one + does one immediate tick.
+OFF by default (`pollMinutes = 0`). The popup writes a value to `chrome.storage.local.pollMinutes` and sends `{ type: 'reschedule' }` to the service worker, which clears the alarm and (if `> 0`) creates a new one + does one immediate tick. The backend — not this alarm — keeps the board fresh; the alarm only refreshes the toolbar badge.
 
 Each `poll()`:
-1. `fetchSettings()`.
-2. `ingestFromIntercom(settings)` — best-effort; errors leave the badge stale.
-3. `fetchCategories()` + `getStoredTickets()` → count Urgent → write to `chrome.action` badge.
+1. `fetchCategories()` + `getStoredTickets()` → count Urgent → write to `chrome.action` badge.
 
 ### Popup state model
 
@@ -159,11 +123,9 @@ Each `poll()`:
 
 ## Don't
 
-- Don't add an Intercom Access Token path. Session-cookie scraping is the only ingestion model.
+- Don't give the extension Intercom access. Ingestion lives in `backend/app/clients/intercom.py`; the popup is a backend client only.
 - Don't introduce a build tool / bundler / TypeScript. The repo invariant is "plain ES modules, no transpile."
-- Don't widen `host_permissions`. The three origins listed are the complete attack surface.
+- Don't widen `host_permissions`. The backend origins (`127.0.0.1:4000` / `localhost:4000`) are the complete attack surface — no `app.intercom.com`.
 - Don't read or write to a `chrome.storage.local` key without documenting it under "Architecture → chrome.storage.local" above.
 - Don't poll the backend more than once per minute (Chrome alarms clamp anyway, but plan for it).
-- Don't strip the `credentials: 'include'` on Intercom fetches — that's how the operator's session cookie reaches the server.
-- Don't feed `internal_notes[]` into anything fed to the backend's AI prompt path. Backend rules already guard this — extension just needs to keep the two arrays separate in the normalized output.
-- Don't cache hydrated tickets in the popup across sessions. The backend is the source of truth; the popup re-reads `GET /tickets` on open.
+- Don't cache tickets in the popup across sessions. The backend is the source of truth; the popup re-reads `GET /tickets` on open.

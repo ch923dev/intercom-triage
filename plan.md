@@ -41,13 +41,13 @@ This document defines **how** the system is built. Each section maps back to one
 
 Three components. All run locally; backend listens on `localhost` only.
 
-The **backend** is a FastAPI service. It owns the AI integration, the SQLite persistence layer, and the public API surface. Reads its OpenRouter key from `.env`. The backend does NOT call Intercom directly — the extension owns Intercom access via the operator's browser session.
+The **backend** is a FastAPI service. It owns the Intercom integration, the AI integration, the SQLite persistence layer, and the public API surface. Reads its OpenRouter key + Intercom Access Token from `.env`. It polls Intercom's official `api.intercom.io` REST API directly (`app/clients/intercom.py`) — there is no extension/browser involvement in ingestion.
 
-The **webapp** is a Vue 3 SPA. It calls the backend at `http://localhost:<port>`. Owns the Kanban UI, drag-and-drop, settings UI, category admin pages, proposals review queue, and the extension-discovery callout.
+The **webapp** is a Vue 3 SPA. It calls the backend at `http://localhost:<port>`. Owns the Kanban UI, drag-and-drop, settings UI, category admin pages, proposals review queue, and the not-connected callout.
 
-The **Chrome extension** is a Manifest V3 extension. It owns Intercom access — scrapes conversations from the logged-in `app.intercom.com` session, strips HTML, and pushes them to the backend. Also calls the localhost backend for the popup mini-board (full taxonomy as column tabs, override-capable), optional background polling, badge, and "Open full board" handoff.
+The **Chrome extension** is a Manifest V3 extension. It is a read-only mini-board over the backend (full taxonomy as column tabs, override-capable) + a toolbar badge + "Open full board" handoff. It has **no** Intercom access — ingestion is entirely backend-side.
 
-Ingest data flow: extension calls `GET /tickets/sync-state` to read `{id: updated_at}` for stored tickets → walks the operator's Intercom inbox via the ember endpoints → fetches detail only for changed/new conversations → strips HTML (FR-003) → `POST /tickets/ingest` with hydrated conversations → backend checks the AI cache (FR-008); on miss, calls OpenRouter with a prompt built from the current taxonomy → resolves AI output into either an existing category id, an existing pending proposal id, or a newly-created proposal (FR-015) → stores. Reads: `GET /tickets` serves the stored board with overrides applied (FR-009) and sorted (FR-013).
+Ingest data flow: a background poller (or `POST /tickets/sync`) runs `run_sync_cycle` → reads stored `{id: updated_at}` (internal `get_sync_state`) → searches the operator's Intercom inbox via `POST /conversations/search` → fetches detail (+ contact for panel fields) only for changed/new conversations → normalizes to `HydratedTicket`, strips HTML (FR-003) → backend checks the AI cache (FR-008); on miss, calls OpenRouter with a prompt built from the current taxonomy → resolves AI output into an existing category id, an existing pending proposal id, or a newly-created proposal (FR-015) → stores. Reads: `GET /tickets` serves the stored board with overrides applied (FR-009) and sorted (FR-013).
 
 ## 3. Data contracts
 
@@ -154,8 +154,8 @@ No auth header. Backend listens on `127.0.0.1` only.
 | POST | `/proposals/{id}/approve` | optional `{color, sort_order}` | resulting Category | FR-016 |
 | POST | `/proposals/{id}/merge-into/{category_id}` | — | `{ok, moved_count}` | FR-016 |
 | POST | `/proposals/{id}/reject` | — | `{ok}` | FR-016 |
-| POST | `/tickets/ingest` | `HydratedTicket[]` (from extension) | `{received, categorized}` | FR-001, FR-004, FR-005, FR-006, FR-008, FR-011, FR-013 |
-| GET | `/tickets/sync-state` | — | `{ticket_id: updated_at}` | FR-001 |
+| POST | `/tickets/sync` | — | `{received, categorized, skipped_known, closed_detected}` | FR-001, FR-031 |
+| POST | `/tickets/ingest` | `HydratedTicket[]` (internal) | `{received, categorized}` | FR-004, FR-005, FR-006, FR-008, FR-011, FR-013 |
 | PATCH | `/tickets/{id}/category` | `CategoryUpdate` | `{ok, category_id}` | FR-009 |
 | PATCH | `/tickets/{id}` | `TicketEdit` | `{ok}` | FR-009 |
 | GET | `/settings` | — | stored `FilterSettings` + `mute_alarms` | FR-012, FR-024 |
@@ -306,14 +306,23 @@ Behavioral notes. `ai_cache` enforces "exactly one of `category_id`, `proposal_i
 
 ## 6. Intercom integration
 
-The operator has no Intercom API token. The Chrome extension scrapes
-conversations from the logged-in `app.intercom.com` session — workspace
-`j3dxf22l` via the internal `ember/` endpoints — strips HTML, and pushes
-hydrated conversations to the backend via `POST /tickets/ingest`. The extension
-first calls `GET /tickets/sync-state` to skip unchanged conversations
-(NFR-003). Deep links resolve client-side: the extension already knows the
-workspace id from the session URL. The backend owns categorization + storage
-only; no upstream HTTP call to Intercom from the server.
+The backend polls Intercom's official `api.intercom.io` REST API directly with a
+workspace Access Token (`INTERCOM_ACCESS_TOKEN` in `.env`; cross-package
+invariant #1). `app/clients/intercom.py` is a thin async client (search / detail
+/ contact, retry + rate-limit aware); `app/services/intercom_normalizer.py`
+maps the official payload to `HydratedTicket` — `part_type` (`comment` →
+`parts[]`, `note` → `internal_notes[]`, events skipped), `source` as the first
+part, customer panel fields from a TTL-cached `GET /contacts/{id}`.
+`app/services/sync.py:run_sync_cycle` orchestrates one pass: `get_sync_state`
+(internal) for server-side skip-known → `POST /conversations/search` for active
+states → detail+contact fetch for changed/new → a closure pass (tracked-open
+ids absent from the search are re-fetched so `_upsert_ticket` stamps
+`intercom_closed`) → the existing `ingest_tickets`. It is driven by a background
+poller (`main._intercom_poll_loop`, gated on a token + `INTERCOM_POLL_INTERVAL_SECONDS
+> 0`, default off) and a manual `POST /tickets/sync` (503 without a token).
+Deep-link URLs use `INTERCOM_WORKSPACE_APP_ID` (the public workspace slug, not a
+secret). The extension has no Intercom access — ingestion is entirely
+backend-side.
 
 ## 7. AI specification
 
@@ -604,7 +613,7 @@ Plan: `docs/superpowers/plans/2026-05-27-parked-snoozed-state.md`. Roadmap 4.1 /
 - "Ready to resume" (`parked_until <= now`) is derived on read — no background
   job. Endpoints: `POST /tickets/{id}/park` + `/unpark` + `/tickets/bulk/park` +
   `/bulk/unpark`. Parked is board-state on `TicketSchema`, NOT `HydratedTicket`
-  (extension `normalizeConversation` untouched); sticky across re-sync because
+  (the backend normalizer never carries the trio); sticky across re-sync because
   `_upsert_ticket` never writes the trio.
 - Webapp Layout B: parked tickets excluded from category columns; Topbar
   `parkedOnly` filter chip + `★ ready` badge; `ParkMenu.vue` (duration presets +

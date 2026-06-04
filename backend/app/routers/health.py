@@ -40,6 +40,7 @@ async def health(config: AppConfig = Depends(get_app_config)) -> HealthResponse:
         version=__version__,
         model=config.openrouter_model,
         openrouter_configured=config.openrouter_configured,
+        intercom_configured=config.intercom_configured,
         missing_secrets=missing,
         review_confidence_threshold=config.review_confidence_threshold,
         embeddings_available=embeddings_available,

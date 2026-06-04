@@ -5,16 +5,21 @@ security property that matters for this repo: **no secret ever reaches GitHub.**
 
 ## Secrets model
 
-- The only real secret is `OPENROUTER_API_KEY`, loaded from `backend/.env` at
-  runtime. `backend/.env` is gitignored and must never be committed.
+- Two secrets, both loaded from `backend/.env` at runtime (gitignored, never
+  committed):
+  - `OPENROUTER_API_KEY` — the AI categorization key.
+  - `INTERCOM_ACCESS_TOKEN` — the workspace Access Token the backend polls
+    `api.intercom.io` with (cross-package invariant #1). `INTERCOM_WORKSPACE_APP_ID`
+    sits alongside it but is **not** a secret (it's the public workspace slug used
+    only for deep-link URLs).
 - `backend/.env.example` is the tracked template (empty values only).
-- The extension uses **no Intercom token** — it reads Intercom through the
-  operator's logged-in browser session (cookie). See CLAUDE.md invariant #1.
-- No secret is logged, returned in errors, or baked into the webapp/extension
-  client bundle.
+- Both tokens live server-side only — neither is baked into the webapp/extension
+  bundle, logged, or returned in errors. The extension has no Intercom access at
+  all (it's a backend client).
 
-If a key is ever committed (even then removed), treat it as compromised and
-rotate it at <https://openrouter.ai/keys>.
+If either key is ever committed (even then removed), treat it as compromised and
+rotate it — OpenRouter at <https://openrouter.ai/keys>, the Intercom token in
+Intercom → Settings → Integrations → Developer Hub → your app.
 
 ## Pre-commit secret guard
 
@@ -34,7 +39,8 @@ Optional, strengthens scanning — install gitleaks:
 winget install gitleaks   # or: scoop install gitleaks / brew install gitleaks
 ```
 
-Tuning lives in `.gitleaks.toml` (OpenRouter key rule + allowlist for test
-fixtures, `.env.example`, and the public workspace id `j3dxf22l`).
+Tuning lives in `.gitleaks.toml` (OpenRouter key + Intercom Access Token rules +
+allowlist for test fixtures, `.env.example`, and the public workspace id
+`j3dxf22l`).
 
 Bypass for a verified false positive: `git commit --no-verify` (use sparingly).

@@ -68,6 +68,10 @@ def test_config(tmp_path_factory: pytest.TempPathFactory) -> AppConfig:
     attachments_root = tmp_path_factory.mktemp("attachments")
     return AppConfig(
         openrouter_api_key="test-openrouter-key",
+        # Dummy token so the broad suite boots non-degraded; tests that exercise
+        # the missing-token path construct their own AppConfig with it cleared.
+        intercom_access_token="test-intercom-token",
+        intercom_workspace_app_id="testworkspace",
         database_url="sqlite+aiosqlite:///:memory:",
         cache_ttl_seconds=300,
         ai_concurrency=4,

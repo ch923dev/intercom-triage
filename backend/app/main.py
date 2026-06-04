@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.clients.intercom import IntercomClient
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig, get_config
 from app.db import make_engine, make_session_factory
@@ -130,6 +131,47 @@ async def _clustering_loop(
         await asyncio.sleep(config.clustering_interval_seconds)
 
 
+async def _intercom_poll_loop(
+    session_factory: async_sessionmaker[AsyncSession],
+    config: AppConfig,
+    intercom: IntercomClient,
+    openrouter: OpenRouterClient | None,
+) -> None:
+    """Background loop: poll Intercom and ingest. Once at startup, then every
+    `config.intercom_poll_interval_seconds`.
+
+    Catches broad `Exception` on purpose — a transient Intercom/network failure
+    (including a bad-token `IntercomAuthError`) must never stop the loop ticking;
+    the operator fixes the token and the next tick recovers."""
+    from app.services.sync import run_sync_cycle
+
+    while True:
+        try:
+            async with session_factory() as session:
+                out = await run_sync_cycle(
+                    session=session,
+                    openrouter=openrouter,
+                    intercom=intercom,
+                    config=config,
+                )
+            log_event(
+                "intercom_poll",
+                op="background",
+                received=out.received,
+                categorized=out.categorized,
+                skipped_known=out.skipped_known,
+                closed_detected=out.closed_detected,
+            )
+        except Exception as exc:
+            log_event(
+                "intercom_poll_error",
+                level=logging.WARNING,
+                op="background",
+                error=str(exc),
+            )
+        await asyncio.sleep(config.intercom_poll_interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Boot: logging → DB (create_all + seed) → external clients. Reverse on shutdown."""
@@ -152,10 +194,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             title=config.openrouter_title,
         )
 
+    intercom: IntercomClient | None = None
+    if config.intercom_configured:
+        intercom = IntercomClient(
+            config.intercom_access_token,
+            base=config.intercom_api_base,
+            version=config.intercom_api_version,
+            contact_cache_ttl_seconds=config.intercom_contact_cache_ttl_seconds,
+        )
+
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.config = config
     app.state.openrouter = openrouter
+    app.state.intercom = intercom
 
     if config.missing_secrets:
         log_event(
@@ -182,6 +234,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         clustering_task = asyncio.create_task(_clustering_loop(session_factory, config))
     app.state.clustering_task = clustering_task
 
+    # Intercom poller — only when a token is set AND a positive interval is
+    # configured (interval 0 = manual `POST /tickets/sync` only). No autonomous
+    # Intercom traffic or token spend out of the box.
+    intercom_poll_task: asyncio.Task[None] | None = None
+    if intercom is not None and config.intercom_poll_interval_seconds > 0:
+        intercom_poll_task = asyncio.create_task(
+            _intercom_poll_loop(session_factory, config, intercom, openrouter),
+        )
+    app.state.intercom_poll_task = intercom_poll_task
+
     try:
         yield
     finally:
@@ -201,8 +263,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await clustering_task
             except asyncio.CancelledError:
                 pass
+        if intercom_poll_task is not None:
+            intercom_poll_task.cancel()
+            try:
+                await intercom_poll_task
+            except asyncio.CancelledError:
+                pass
         if openrouter is not None:
             await openrouter.aclose()
+        if intercom is not None:
+            await intercom.aclose()
         await engine.dispose()
 
 

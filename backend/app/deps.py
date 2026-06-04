@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from app.clients.intercom import IntercomClient
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig
 
@@ -19,4 +20,9 @@ def get_app_config(request: Request) -> AppConfig:
 
 def get_openrouter(request: Request) -> OpenRouterClient | None:
     client: OpenRouterClient | None = getattr(request.app.state, "openrouter", None)
+    return client
+
+
+def get_intercom(request: Request) -> IntercomClient | None:
+    client: IntercomClient | None = getattr(request.app.state, "intercom", None)
     return client

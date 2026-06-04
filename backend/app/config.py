@@ -47,6 +47,31 @@ class AppConfig(BaseSettings):
     openrouter_referer: str = "http://localhost:4000"
     openrouter_title: str = "Intercom Triage"
 
+    # ── Intercom (official REST API) ──────────────────────────────────────────
+    # The backend polls Intercom's documented API directly with a workspace
+    # Access Token (cross-package invariant #1). The token is a secret; an empty
+    # token boots the backend degraded (no poller, `/tickets/sync` → 503) exactly
+    # like a missing OpenRouter key. `intercom_workspace_app_id` is the workspace
+    # slug used only to build deep-link URLs (e.g. `j3dxf22l`) — NOT a secret.
+    intercom_access_token: str = ""
+    intercom_api_base: str = "https://api.intercom.io"
+    # Pinned API version — `part_type` enum + contact `location` shapes are
+    # version-stable only when pinned. Bump deliberately, re-verify a live
+    # payload (the normalizer mapping depends on it).
+    intercom_api_version: str = "2.13"
+    intercom_workspace_app_id: str = ""
+    # Background poller cadence. 0 = OFF (manual `POST /tickets/sync` only) so an
+    # out-of-the-box boot makes zero autonomous Intercom traffic / token spend.
+    intercom_poll_interval_seconds: int = Field(default=0, ge=0)
+    # Bounded fan-out for the per-conversation detail + contact fetches.
+    intercom_poll_concurrency: int = Field(default=4, ge=1, le=32)
+    # Closure pass: how far back to look for open→closed transitions among
+    # tracked-open tickets that fell off the open list. Default 7 days.
+    intercom_closure_lookback_seconds: int = Field(default=7 * 24 * 3600, ge=0)
+    # In-process TTL for the contact-enrichment cache (location/timezone/phone/
+    # company panel fields). Repeat customers across a batch reuse the fetch.
+    intercom_contact_cache_ttl_seconds: int = Field(default=300, ge=0)
+
     # ── Model cascade (roadmap 2.2) ───────────────────────────────────────────
     # Route easy tickets to a cheap model, escalate low-confidence ones to the
     # strong `openrouter_model`. The cheap model is a current OpenRouter id —
@@ -142,10 +167,16 @@ class AppConfig(BaseSettings):
         return bool(self.openrouter_api_key.strip())
 
     @property
+    def intercom_configured(self) -> bool:
+        return bool(self.intercom_access_token.strip())
+
+    @property
     def missing_secrets(self) -> list[str]:
         out: list[str] = []
         if not self.openrouter_configured:
             out.append("OPENROUTER_API_KEY")
+        if not self.intercom_configured:
+            out.append("INTERCOM_ACCESS_TOKEN")
         return out
 
 

@@ -36,16 +36,8 @@ export const fetchSettings = () => request('/settings');
 /** Active categories + pending proposals. */
 export const fetchCategories = () => request('/categories');
 
-/** The stored board — ingested + categorized by the extension. */
+/** The stored board — fetched from Intercom + categorized by the backend. */
 export const getStoredTickets = () => request('/tickets');
-
-/** `{ticket_id: updated_at}` for every stored ticket. The sync flow uses this
- *  to skip Intercom detail fetches for conversations already stored unchanged. */
-export const getSyncState = () => request('/tickets/sync-state');
-
-/** Push a batch of HydratedTicket records the extension fetched from Intercom. */
-export const ingestTickets = (hydrated) =>
-  request('/tickets/ingest', { method: 'POST', body: JSON.stringify(hydrated) });
 
 /** Override a ticket's category. The backend persists it as an Override row,
  *  so the change survives the popup closing and the next fetch. */

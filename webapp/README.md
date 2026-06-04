@@ -59,11 +59,10 @@ Backend must be running on `127.0.0.1:4000` (see `../scripts/dev.ps1` — single
 
 ## Data flow
 
-The board reads from `GET /tickets` — the **stored** board the Chrome extension
-ingests into via `POST /tickets/ingest`. There is no Intercom Access Token in
-this build, so the extension is the only path that fetches conversations.
-First run on a fresh DB shows an empty-state callout pointing at the extension;
-once the operator clicks Sync in the popup, the board fills.
+The board reads from `GET /tickets` — the **stored** board the backend fills by
+polling Intercom's official API with a workspace Access Token (`INTERCOM_ACCESS_TOKEN`
+in `backend/.env`). First run on a fresh DB shows an empty-state callout; once the
+backend has synced (background poller, or `POST /tickets/sync`), the board fills.
 
 ## Scripts
 
