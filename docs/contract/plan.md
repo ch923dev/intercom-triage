@@ -29,23 +29,20 @@ This document defines **how** the system is built. Each section maps back to one
 | Client state | Pinia | Standard Vue 3 |
 | Drag-and-drop | `vuedraggable@next` (multi-drag for bulk) | Vue 3 compatible |
 | Webapp tests | Vitest + Vue Test Utils + happy-dom | Lands with Phase 12 bulk-actions |
-| Extension | Manifest V3 + vanilla TypeScript | Keeps popup bundle small |
 | AI gateway | OpenRouter | Single contract for Anthropic models |
 | AI model (default) | `anthropic/claude-sonnet-4.5` | Quality default |
 | AI model (cost mode) | `anthropic/claude-haiku-4.5` | Configurable via `.env` |
-| Deploy | `uvicorn main:app` on localhost; webapp via `npm run dev` or static build; extension side-loaded | No cloud, no Docker required |
+| Deploy | `uvicorn main:app` on localhost; webapp via `npm run dev` or static build | No cloud, no Docker required |
 | Secrets | `.env` file (gitignored) | NFR-005 |
 | Bulk request cap | `MAX_BULK_IDS` (default 200) | Caps memory + transaction size per bulk call (FR-036) |
 
 ## 2. Architecture
 
-Three components. All run locally; backend listens on `localhost` only.
+Two components. All run locally; backend listens on `localhost` only.
 
-The **backend** is a FastAPI service. It owns the Intercom integration, the AI integration, the SQLite persistence layer, and the public API surface. Reads its OpenRouter key + Intercom Access Token from `.env`. It polls Intercom's official `api.intercom.io` REST API directly (`app/clients/intercom.py`) — there is no extension/browser involvement in ingestion.
+The **backend** is a FastAPI service. It owns the Intercom integration, the AI integration, the SQLite persistence layer, and the public API surface. Reads its OpenRouter key + Intercom Access Token from `.env`. It polls Intercom's official `api.intercom.io` REST API directly (`app/clients/intercom.py`) — there is no browser involvement in ingestion.
 
 The **webapp** is a Vue 3 SPA. It calls the backend at `http://localhost:<port>`. Owns the Kanban UI, drag-and-drop, settings UI, category admin pages, proposals review queue, and the not-connected callout.
-
-The **Chrome extension** is a Manifest V3 extension. It is a read-only mini-board over the backend (full taxonomy as column tabs, override-capable) + a toolbar badge + "Open full board" handoff. It has **no** Intercom access — ingestion is entirely backend-side.
 
 Ingest data flow: a background poller (or `POST /tickets/sync`) runs `run_sync_cycle` → reads stored `{id: updated_at}` (internal `get_sync_state`) → searches the operator's Intercom inbox via `POST /conversations/search` → fetches detail (+ contact for panel fields) only for changed/new conversations → normalizes to `HydratedTicket`, strips HTML (FR-003) → backend checks the AI cache (FR-008); on miss, calls OpenRouter with a prompt built from the current taxonomy → resolves AI output into an existing category id, an existing pending proposal id, or a newly-created proposal (FR-015) → stores. Reads: `GET /tickets` serves the stored board with overrides applied (FR-009) and sorted (FR-013).
 
@@ -321,8 +318,7 @@ ids absent from the search are re-fetched so `_upsert_ticket` stamps
 poller (`main._intercom_poll_loop`, gated on a token + `INTERCOM_POLL_INTERVAL_SECONDS
 > 0`, default off) and a manual `POST /tickets/sync` (503 without a token).
 Deep-link URLs use `INTERCOM_WORKSPACE_APP_ID` (the public workspace slug, not a
-secret). The extension has no Intercom access — ingestion is entirely
-backend-side.
+secret). Ingestion is entirely backend-side.
 
 ## 7. AI specification
 
@@ -363,9 +359,9 @@ The AI returns one of three assignment shapes (see prompt builder for the strict
 
 **Persistence.** Both `followups` and `ticket_notes` are upserts keyed by `ticket_id`. The `PUT /followups/{ticket_id}` endpoint accepts an absolute `due_at` — the client computes the timestamp from preset minutes (`+15m`, `+1h`, `+4h`, `+EOD`, `+24h`) so server clock and client clock stay in sync at the moment the operator sets it. Empty `body` on `PUT /notes/{ticket_id}` deletes the row (idempotent if already absent).
 
-**Server-side alarm role:** none. The backend is a passive store; alarm evaluation runs in each client surface. This keeps the backend stateless wrt timing and lets the popup raise alarms even when the webapp isn't open.
+**Server-side alarm role:** none. The backend is a passive store; alarm evaluation runs entirely client-side in the webapp. This keeps the backend stateless wrt timing.
 
-**Client alarm loop** (webapp + popup):
+**Client alarm loop** (webapp):
 1. On open, `GET /followups` to populate state; `GET /settings.mute_alarms` to read the mute flag.
 2. Tick once per second. For each follow-up not yet `fired` with `due_at ≤ now`:
    - Push a banner record into a local stack.
@@ -381,7 +377,7 @@ The AI returns one of three assignment shapes (see prompt builder for the strict
 
 ## 8b. Design system
 
-Lifted from the canonical design at `design_bundle/intercom-ticket-management-with-ai-categorization/project/`. Webapp + popup must match.
+Lifted from the canonical design at `design_bundle/intercom-ticket-management-with-ai-categorization/project/`. The webapp implements it.
 
 **Type:** Geist (400/500/600/700) for prose, JetBrains Mono (400/500/600) for labels, ids, counts, deltas. Loaded from Google Fonts in `index.html`.
 
@@ -474,7 +470,7 @@ design.
 ## 8d. Bulk actions
 
 Operator selects N tickets and applies one action. Cuts per-ticket click cost.
-Webapp-only in v1 — popup ergonomics too cramped for multi-select.
+Webapp multi-select; bulk endpoints are cap-200 with per-id results.
 
 **Selection store (client).** New Pinia `selectionStore` exposes
 `Set<string>` of selected ticket ids, plus `toggle(id)`, `addRange(columnId, fromId, toId)`,
@@ -543,7 +539,7 @@ opportunistic follow-up but are not in scope for the phase.
 
 ## 9. Settings
 
-Singleton row in the `settings` table. Both surfaces `GET /settings` on open and `PUT /settings` on change. No client-side persistence — the surface reads from the backend each session.
+Singleton row in the `settings` table. The webapp `GET /settings` on open and `PUT /settings` on change. No client-side persistence — the webapp reads from the backend each session.
 
 ## 10. Deployment
 
@@ -552,7 +548,6 @@ Local-only. To run:
 ```
 cd backend && uvicorn main:app --port 8000              # backend on localhost
 cd webapp && npm run dev                                  # webapp on localhost:5173
-# extension: chrome://extensions → load unpacked → ./extension
 ```
 
 SQLite file lives at `backend/data/triage.db` (configurable via `DATABASE_URL`). Backups are a single file copy.
@@ -582,7 +577,7 @@ Promote to OpenTelemetry / Logfire only if you start running this against a real
 | Reverted Identity Platform | Roll JWT verification | Auth dropped entirely. |
 | OpenRouter rather than direct Anthropic API | Direct Anthropic SDK | Already in use; single key, swappable models. |
 | Pending proposals appear as live columns | Hide proposals until approved | Surfaces the curation work; prevents stale pending state being invisible. |
-| Server-side settings (singleton row) | `.env` or per-surface local storage | One source of truth; both surfaces read the same shape; trivial to back up. |
+| Server-side settings (singleton row) | `.env` or per-surface local storage | One source of truth; the webapp reads from the backend each session; trivial to back up. |
 | Rejected-proposal signatures table kept | Drop with the multi-tenant scope | Still useful for one user — prevents the AI re-proposing the same category every fetch. |
 
 ## §13 — Playbooks
@@ -617,8 +612,7 @@ Plan: `docs/superpowers/plans/2026-05-27-parked-snoozed-state.md`. Roadmap 4.1 /
   `_upsert_ticket` never writes the trio.
 - Webapp Layout B: parked tickets excluded from category columns; Topbar
   `parkedOnly` filter chip + `★ ready` badge; `ParkMenu.vue` (duration presets +
-  reason) drives park; bulk park/unpark in `BulkActionBar`. Extension popup gains
-  a Parked tab + single-ticket park/unpark.
+  reason) drives park; bulk park/unpark in `BulkActionBar`.
 
 ## §15 — AI reliability (roadmap 2.1 / 2.2 / 2.3)
 
@@ -707,8 +701,7 @@ UX + visibility. Mostly pure-stack; the one cross-package change is 0.2.
   (`negative`\|`neutral`\|`positive`), and `labels: string[]`. Stored on `ai_cache`
   (`ai_priority` / `ai_sentiment` / `ai_labels`, null/empty on pre-0.2 rows),
   surfaced on `TicketSchema`, consumed by the webapp (priority badge) — **one PR
-  across backend + webapp** (the extension/`HydratedTicket` shape is untouched,
-  so invariant #2 doesn't apply here). Same single AI call; cache key unchanged.
+  across backend + webapp**. Same single AI call; cache key unchanged.
 - **Aging indicators (FR-045).** Pure webapp. Card stripe tiered by time since the
   last customer-visible part; thresholds in one constant. Timestamps already on
   the wire (#5).
