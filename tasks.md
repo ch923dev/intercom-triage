@@ -181,7 +181,7 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T150 ✓ — Bulk pre-flight diff preview (client-side, respects `MAX_BULK_IDS`). FR-052/US-030. Commit `58d70a6`.
 
 ### Phase 17 — AI reliability + embedding keystone (roadmap 2.1–2.6)
-- T151 ✓ — Strict structured (JSON-schema-enforced) categorization output. FR-053/US-031. Commit `d6a77cf`.
+- T151 ✓ — Structured (`json_object`) categorization output; `SYSTEM_PROMPT` + defensive `parse_response` carry the contract. FR-053/US-031. Commit `d6a77cf`. **Amended 2026-06-04:** the original JSON-schema-enforced form (`oneOf`) was reverted — the default Anthropic model rejects `oneOf` + numeric `min`/`max`, 400-ing every call into fallback.
 - T152 ✓ — Model cascade (cheap→strong on low confidence), opt-in, off by default. FR-054/US-032. Commit `6892a31`.
 - T153 ✓ — Needs-review lane over `ai_confidence` (view-layer, calibrated threshold). FR-055/US-033. Commit `4c354c3`.
 - T154 ✓ — Local offline embedding layer (sentence-transformers + `ticket_embeddings`, migration 0017-era). Keystone. FR-056/US-034. Commit `d917ebd`.

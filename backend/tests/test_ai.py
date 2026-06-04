@@ -234,20 +234,19 @@ def test_fallback_result_has_null_resolution_fields() -> None:
 # ── 2.1 — strict structured outputs ────────────────────────────────────────────
 
 
-def test_categorization_response_format_is_strict_json_schema() -> None:
-    """The shared schema constant follows OpenRouter's strict json_schema convention."""
-    assert CATEGORIZATION_RESPONSE_FORMAT["type"] == "json_schema"
-    js = CATEGORIZATION_RESPONSE_FORMAT["json_schema"]
-    assert js["strict"] is True
-    assert js["name"] == "ticket_categorization"
-    branches = js["schema"]["oneOf"]
-    assert len(branches) == 3
-    for branch in branches:
-        # strict mode: every object closed + every property required.
-        assert branch["additionalProperties"] is False
-        assert set(branch["required"]) == set(branch["properties"].keys())
-    assignments = {b["properties"]["assignment"]["const"] for b in branches}
-    assert assignments == {"existing", "pending_proposal", "new_proposal"}
+def test_categorization_response_format_is_json_object() -> None:
+    """The categorization call uses plain json_object mode.
+
+    A strict ``json_schema`` form was tried (roadmap 2.1) but the default
+    Anthropic model rejects it outright via OpenRouter — first ``oneOf`` is
+    unsupported, then ``minimum``/``maximum`` on numbers — 400-ing EVERY
+    categorization call into per-ticket fallback (no cache row is ever written).
+    The SYSTEM_PROMPT fully specifies the output shape and ``parse_response``
+    validates it defensively, so json_object is sufficient and portable across
+    every OpenRouter provider. Guard against re-introducing an unsupported
+    schema here.
+    """
+    assert CATEGORIZATION_RESPONSE_FORMAT == {"type": "json_object"}
 
 
 def test_parse_schema_conforming_response() -> None:
@@ -270,8 +269,8 @@ def test_parse_schema_conforming_response() -> None:
 
 
 @pytest.mark.asyncio
-async def test_categorize_sends_strict_schema(session: AsyncSession) -> None:
-    """The categorization call injects the strict json_schema response_format."""
+async def test_categorize_sends_response_format(session: AsyncSession) -> None:
+    """The categorization call injects CATEGORIZATION_RESPONSE_FORMAT verbatim."""
     fb = await _fallback_id(session)
     fake = FakeOpenRouter({"X1": existing_assignment(1)})
     await categorize_many(
@@ -352,18 +351,6 @@ def test_fallback_result_has_neutral_triage_facets() -> None:
     assert result.ai_priority == "normal"
     assert result.ai_sentiment == "neutral"
     assert result.ai_labels == []
-
-
-def test_categorization_schema_includes_triage_fields() -> None:
-    """The strict json_schema requires priority/sentiment/labels on every branch."""
-    js = CATEGORIZATION_RESPONSE_FORMAT["json_schema"]
-    for branch in js["schema"]["oneOf"]:
-        props = branch["properties"]
-        assert props["priority"]["enum"] == ["low", "normal", "high", "urgent"]
-        assert props["sentiment"]["enum"] == ["negative", "neutral", "positive"]
-        assert props["labels"]["type"] == "array"
-        for facet in ("priority", "sentiment", "labels"):
-            assert facet in branch["required"]
 
 
 @pytest.mark.asyncio
@@ -676,17 +663,3 @@ async def test_cascade_escalation_rate_accounting(session: AsyncSession) -> None
         assert out[tid].category_id == 1
     for tid in weak:
         assert out[tid].category_id == 2
-
-
-def test_strict_schema_includes_non_actionable_kind() -> None:
-    """non_actionable_kind must appear in every oneOf branch's properties and
-    required list so strict mode does not forbid the model from returning it."""
-    from app.ai.prompt import CATEGORIZATION_JSON_SCHEMA
-
-    branches = CATEGORIZATION_JSON_SCHEMA["schema"]["oneOf"]
-    assert branches, "expected oneOf branches"
-    for branch in branches:
-        assert "non_actionable_kind" in branch["properties"], branch["properties"].keys()
-        assert "non_actionable_kind" in branch["required"]
-        enum = branch["properties"]["non_actionable_kind"]["enum"]
-        assert set(enum) == {"auto_reply", "thanks", "spam", "out_of_office", "other", None}

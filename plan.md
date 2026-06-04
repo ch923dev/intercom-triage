@@ -617,11 +617,17 @@ Three independent reliability layers over the single categorization call. All
 preserve FR-007 (any failure → fallback for that ticket; batch never aborts) and
 the content-signature cache key (#6).
 
-- **Strict structured outputs (FR-053).** The categorization request uses
-  OpenRouter's JSON-schema-enforced `response_format` instead of relying on
-  `{...}` extraction from free text. A response that fails the schema is treated
-  as a parse failure → fallback for that one ticket. The fragile fence-stripping
-  path remains as a defensive fallback but is no longer the primary contract.
+- **Structured outputs (FR-053).** The categorization request uses
+  `response_format={type:"json_object"}`. `SYSTEM_PROMPT` specifies the full
+  output shape and `parse_response` extracts + validates it (fence-stripping +
+  outermost-`{...}` + per-field validation); any shape that fails validation →
+  fallback for that one ticket. **Note (2026-06-04):** a strict
+  JSON-schema-enforced `response_format` (root `oneOf` discriminator) was shipped
+  first but the default Anthropic model on OpenRouter rejects it — `oneOf` is
+  unsupported, and so are numeric `minimum`/`maximum` — which 400'd *every*
+  categorization call into fallback (no `ai_cache` row ever written). Reverted to
+  `json_object`; the prompt + defensive parser are the contract. Re-enabling
+  strict mode requires gating it on a supporting (e.g. OpenAI-family) model.
 - **Model cascade (FR-054), opt-in.** `cascade_enabled` (default off). When on,
   the cheap model (`openrouter_cheap_model`, default `anthropic/claude-3.5-haiku`)
   categorizes first; if its self-reported confidence `< cascade_escalate_below`

@@ -215,7 +215,7 @@ Full per-feature catalog (every capability, by area, with code anchors):
 **Shipped to `main`:** Phases 0–3 + 4.1 (parked, T106) + 4.2 (`non_actionable_kind`,
 T107) + robustness R.1–R.5. That covers: priority/sentiment/multi-label, aging
 indicators, keyboard triage, saved views, priority-sorted queue, stats
-dashboard, cost meter, snippets, bulk pre-flight diff, strict structured
+dashboard, cost meter, snippets, bulk pre-flight diff, structured JSON
 outputs, model cascade, needs-review lane, the local embedding layer, few-shot
 categorization, RAG draft replies, recurring-issue clustering, playbook-gap
 detection, playbook auto-match.

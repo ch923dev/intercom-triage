@@ -7,7 +7,7 @@ inputs are the real SQLAlchemy rows + the hydrated-ticket schema.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from app.models import Category, CategoryProposal
 from app.schemas import HydratedTicket
@@ -142,100 +142,18 @@ Rules:
 """
 
 
-# ── Strict structured-output schema (roadmap 2.1) ─────────────────────────────
+# ── Categorization response format ───────────────────────────────────────────
 #
-# Mirrors the three-option union documented in SYSTEM_PROMPT. Passed to
-# OpenRouter as `response_format={"type":"json_schema",...}` for the
-# categorization call only, so the happy path never produces malformed JSON.
-# OpenAI-compatible `strict` mode requires: every property listed in `required`
-# and `additionalProperties: false` on every object. The three assignment
-# variants therefore become a closed `oneOf` — each branch repeats the shared
-# fields (subject/summary/confidence/resolution_*) plus its own discriminator and
-# assignment-specific keys. `parse_response` remains the defensive fallback for
-# refusals / non-supporting endpoints (see pipeline.py).
-
-_RESOLUTION_VERDICT_VALUES = ["resolved", "non_actionable", "not_resolved"]
-# Roadmap 0.2 — triage enums on the SAME categorization call (no extra AI call).
-_PRIORITY_VALUES = ["low", "normal", "high", "urgent"]
-_SENTIMENT_VALUES = ["negative", "neutral", "positive"]
-
-_SHARED_PROPERTIES: dict[str, Any] = {
-    "subject": {"type": "string", "description": "<=80 char scannable headline."},
-    "summary": {"type": "string", "description": "2-3 sentences, <=600 chars."},
-    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-    "priority": {"type": "string", "enum": _PRIORITY_VALUES},
-    "sentiment": {"type": "string", "enum": _SENTIMENT_VALUES},
-    "labels": {
-        "type": "array",
-        "items": {"type": "string", "maxLength": 24},
-        "description": "0-3 secondary tags beyond the single category.",
-    },
-    "resolution_verdict": {"type": "string", "enum": _RESOLUTION_VERDICT_VALUES},
-    "resolution_confidence": {"type": "number", "minimum": 0, "maximum": 1},
-    "resolution_reason": {"type": "string", "description": "One clause, <=120 chars."},
-    "non_actionable_kind": {
-        "type": ["string", "null"],
-        "enum": ["auto_reply", "thanks", "spam", "out_of_office", "other", None],
-        "description": "Set only when resolution_verdict is non_actionable; else null.",
-    },
-}
-_SHARED_REQUIRED = [
-    "subject",
-    "summary",
-    "confidence",
-    "priority",
-    "sentiment",
-    "labels",
-    "resolution_verdict",
-    "resolution_confidence",
-    "resolution_reason",
-    "non_actionable_kind",
-]
-
-
-def _branch(assignment: str, extra: dict[str, Any]) -> dict[str, Any]:
-    """One closed `oneOf` branch: shared fields + discriminator + branch keys."""
-    properties: dict[str, Any] = {
-        "assignment": {"type": "string", "const": assignment},
-        **_SHARED_PROPERTIES,
-        **extra,
-    }
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": ["assignment", *_SHARED_REQUIRED, *extra.keys()],
-        "additionalProperties": False,
-    }
-
-
-CATEGORIZATION_JSON_SCHEMA: dict[str, Any] = {
-    "name": "ticket_categorization",
-    "strict": True,
-    "schema": {
-        "oneOf": [
-            _branch(
-                "existing",
-                {"category_id": {"type": "integer"}},
-            ),
-            _branch(
-                "pending_proposal",
-                {"proposal_id": {"type": "integer"}},
-            ),
-            _branch(
-                "new_proposal",
-                {
-                    "proposed_name": {"type": "string", "maxLength": 32},
-                    "proposed_description": {"type": "string"},
-                },
-            ),
-        ],
-    },
-}
-
-CATEGORIZATION_RESPONSE_FORMAT: dict[str, Any] = {
-    "type": "json_schema",
-    "json_schema": CATEGORIZATION_JSON_SCHEMA,
-}
+# Plain json_object mode. The SYSTEM_PROMPT above fully specifies the output
+# shape and `pipeline.parse_response` extracts + validates it defensively, so
+# server-side schema enforcement is redundant. A strict `json_schema` form was
+# tried (roadmap 2.1) but the default Anthropic model rejects it via OpenRouter
+# — `oneOf` is unsupported, and so are `minimum`/`maximum` on numbers — which
+# 400s EVERY categorization call into per-ticket fallback (no cache row is ever
+# written; every ticket lands in the fallback category with no subject/summary).
+# json_object is accepted by every OpenRouter provider we target; SYSTEM_PROMPT
+# is now the single source of the response contract.
+CATEGORIZATION_RESPONSE_FORMAT: dict[str, str] = {"type": "json_object"}
 
 
 def _format_categories(categories: Iterable[Category]) -> str:
