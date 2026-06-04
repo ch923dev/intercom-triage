@@ -1,4 +1,4 @@
-﻿// Tweaks (display preferences) store. Per plan §8b — dark mode, accent,
+// Tweaks (display preferences) store. Per plan §8b — dark mode, accent,
 // density, show summary, show confidence. These are per-device display
 // choices and stay in localStorage. The sixth tweak — mute alarms — lives in
 // the server settings row instead (FR-024) so it persists server-side; see the

@@ -1,4 +1,4 @@
-﻿# Webapp — Intercom Triage
+# Webapp — Intercom Triage
 
 Vue 3 + Vite + TypeScript SPA. Calls the backend at `http://127.0.0.1:4000`
 via Vite's dev proxy on `/api/*`.
