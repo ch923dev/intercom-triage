@@ -2,7 +2,7 @@
 
 Local single-operator tool that pre-categorizes and summarizes recent Intercom
 conversations so you can scan and route in one Kanban view instead of opening
-each ticket. Backend + webapp + Chrome extension, all on `localhost`.
+each ticket. Backend + webapp, all on `localhost`.
 
 Start at the **[docs hub](./docs/)**. The contract:
 [`spec.md`](./docs/contract/spec.md) for what it does,
@@ -15,7 +15,6 @@ Start at the **[docs hub](./docs/)**. The contract:
 .
 ├── backend/        FastAPI service + SQLite store + Intercom/AI integration
 ├── webapp/         Vue 3 + Vite SPA — the Kanban board, admin pages, settings
-├── extension/      Chrome MV3 popup mini-board + background badge
 ├── snippets/       Reference implementations referenced by task docs
 └── docs/           📚 Docs hub (README.md) — handbook, features, contract/{spec,plan,tasks}.md
 ```
@@ -24,8 +23,6 @@ Start at the **[docs hub](./docs/)**. The contract:
 
 - Python 3.11+ (3.12 tested)
 - Node 18+
-- Chrome — optional: the extension is a read-only toolbar mini-board over the
-  backend (it no longer touches Intercom)
 - OpenRouter API key
 - Intercom workspace **Access Token** — the backend polls `api.intercom.io` with
   it (Intercom → Settings → Integrations → Developer Hub → your app)
@@ -69,20 +66,6 @@ npm run dev                           # serves http://localhost:5173
 The dev server proxies `/api/*` to the backend on `:4000`. Open
 <http://localhost:5173> — the board fetches tickets, and the top bar gives you
 the category-management and proposal-review pages plus the filter drawer.
-
-### 3. Chrome extension
-
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. **Load unpacked** → select the `extension/` folder.
-
-The extension is a **read-only toolbar mini-board** — it shows the same taxonomy
-and lets you resolve / move / park tickets, but ingestion is the backend's job
-(no Intercom access here). It talks only to the backend on `:4000`. Background
-polling is **off by default** — pick an interval in the popup footer to badge the
-Urgent count (this refreshes the badge from the backend board; it does not fetch
-from Intercom). The popup also mirrors the webapp's follow-up alarms: a due
-banner, per-row countdown chips, and an audio cue (shared mute via `GET /settings`).
 
 ## API surface
 
@@ -161,8 +144,7 @@ npm run build
 
 Installs pip + npm deps (idempotent if cached), then opens a Windows Terminal
 window with backend (`:4000`) and webapp (`:5173`) in a split-pane. Requires
-`wt.exe` (Windows Terminal — default on Win 11). Extension is loaded
-manually once via `chrome://extensions`.
+`wt.exe` (Windows Terminal — default on Win 11).
 
 ## Configuration
 
