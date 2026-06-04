@@ -96,7 +96,7 @@ Shutdown reverses: cancel loops → close OpenRouter + Intercom → dispose engi
 
 ```
 app/
-├── main.py              lifespan + create_app + CORS (localhost:5173 + chrome-extension://)
+├── main.py              lifespan + create_app + CORS (localhost:5173)
 ├── config.py            pydantic-settings AppConfig (reads .env). MAX_BULK_IDS constant.
 ├── db.py                async engine + session factory + get_session dependency
 ├── deps.py              get_app_config + get_openrouter + get_intercom (read app.state)
