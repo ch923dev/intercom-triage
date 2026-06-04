@@ -72,6 +72,37 @@ def new_proposal_assignment(name: str) -> str:
     )
 
 
+class FakeIntercom:
+    """Stand-in for IntercomClient — serves canned search summaries + details +
+    contacts and records which conversations were detail-fetched (so a test can
+    assert skip-known avoided a fetch)."""
+
+    def __init__(
+        self,
+        *,
+        summaries: list[dict[str, Any]] | None = None,
+        details: dict[str, dict[str, Any]] | None = None,
+        contacts: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        self._summaries = summaries or []
+        self._details = details or {}
+        self._contacts = contacts or {}
+        self.detail_calls: list[str] = []
+
+    async def search_conversations(
+        self, *, states: Any, updated_after: int | None = None, per_page: int = 150
+    ) -> Any:
+        for summary in self._summaries:
+            yield summary
+
+    async def get_conversation(self, conversation_id: str) -> dict[str, Any]:
+        self.detail_calls.append(conversation_id)
+        return self._details[conversation_id]
+
+    async def get_contact(self, contact_id: str) -> dict[str, Any] | None:
+        return self._contacts.get(contact_id)
+
+
 class FakeOpenRouter:
     """Stand-in for OpenRouterClient — returns canned per-ticket responses."""
 

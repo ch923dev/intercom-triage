@@ -44,14 +44,14 @@ intercom-ticket-management/
 
 The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 
-1. **No Intercom Access Token anywhere.** Extension is the only ingestion path.
-2. **`HydratedTicket` shape spans three packages** (`extension/intercom.js:normalizeConversation` → `backend/app/schemas.py:HydratedTicket` → `webapp/src/types/api.ts`). Edit all three together or break ingest.
-3. **`renderable_type` mapping is reverse-engineered.** 1/12 customer, 2/24 admin, 3 internal-note, anything else skipped.
-4. **`parts[]` is customer-visible (fed to AI); `internal_notes[]` is team-only (never fed to AI).** Keep them separated end-to-end.
+1. **Backend owns Intercom ingestion via an Access Token.** The backend polls the official `api.intercom.io` REST API with a workspace Bearer token from `backend/.env` (`INTERCOM_ACCESS_TOKEN`), normalizes payloads in `backend/app/services/intercom_normalizer.py`, and ingests them through `run_sync_cycle` (`backend/app/services/sync.py`). A background poller (interval-gated, default off) + `POST /tickets/sync` drive it. **The extension no longer touches Intercom** — it is a read-only mini-board + badge over the backend. (This reverses the former session-scrape model; the extension `ember/` path is gone.)
+2. **`HydratedTicket` shape spans two packages** (`backend/app/schemas.py:HydratedTicket` → `webapp/src/types/api.ts`). The producer is the backend normalizer (`backend/app/services/intercom_normalizer.py:normalize_conversation`), not the extension. Edit the backend schema + webapp type together or break the board.
+3. **`part_type` mapping (official API).** Intercom conversation parts carry a `part_type` string: `comment` (+ customer author → `parts[]`, admin/bot author → `parts[]` with `is_admin`), `note` → `internal_notes[]`, `assignment`/`open`/`close`/`snoozed`/… → skipped. The opening message lives on `source` and is emitted as the first part. Unknown `part_type` → skipped + logged (`intercom.unknown_part_type`). Stable + documented (replaces the old reverse-engineered numeric `renderable_type` codes).
+4. **`parts[]` is customer-visible (fed to AI); `internal_notes[]` is team-only (never fed to AI).** Keep them separated end-to-end. The normalizer enforces this via `part_type='note'` → `internal_notes[]`.
 5. **Naive UTC in DB; `Z`-suffixed ISO on the wire.** Pydantic `UTCDatetime` / `NaiveUTCDatetime` enforce this; JS clients depend on it.
 6. **AI cache key = content signature (last customer-visible part timestamp), not Intercom `updated_at`.** Internal teammate notes must not bust cache.
 7. **Fallback `CategorizationResult` rows are never cached.** Caching a fallback poisons the ticket until a new customer message arrives.
-8. **`title_user_edited` / `summary_user_edited` are sticky across re-syncs.** Extension ingest + backend `_upsert_ticket` must preserve operator edits.
+8. **`title_user_edited` / `summary_user_edited` are sticky across re-syncs.** Backend ingest (`_upsert_ticket`) must preserve operator edits when the poller re-fetches a conversation.
 9. **`MAX_BULK_IDS = 200`.** Backend constant (`backend/app/config.py`), webapp pre-flight warning. Bump together.
 10. **`tickets.resolved_at` ⇔ `resolved_source`** (XOR CheckConstraint). `resolved_source ∈ {'manual', 'intercom_closed', 'non_actionable', 'ai_resolved'}` (`ai_resolved` = AI auto-close under the operator's auto-resolve toggle, migration 0012). Non-actionable renders as its own Kanban column (webapp) / its own popup tab (extension) — split from Resolved at the view layer (`tickets.nonActionableTickets` / `pureResolvedTickets` getters); storage stays unified. Reopen path clears both. A non-actionable ticket may carry a structured `non_actionable_kind` (`auto_reply`/`thanks`/`spam`/`out_of_office`/`other`) on `tickets` + `ai_cache` (AI-derived, board-state only — not on `HydratedTicket`; invariant #2 untouched); it is CHECK-coupled to `resolved_source='non_actionable'` and cleared on every reopen path with the resolution pair (migration 0020 / T107).
 11. **Drag-out reopen is atomic.** Setting an override on a resolved ticket clears `resolved_at` + `resolved_source` in the same transaction.
@@ -77,8 +77,8 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 ## Subagent doctrine
 
 - Delegate broad codebase searches (>3 grep/glob rounds, "find every place that does X") to `Agent(subagent_type=Explore)` so the main context stays focused on the task. Direct `Grep` / `Glob` for targeted, single-file lookups.
-- Delegate independent parallel research (e.g. "summarise backend/app/services/ + extension/intercom.js side-by-side") to two `Agent` calls in one message. Don't run them sequentially in the main thread.
-- Do **not** delegate the actual edit. Cross-package edits (HydratedTicket, renderable_type, MAX_BULK_IDS) must run in the main thread with the corresponding skill loaded so the invariant guardrails apply.
+- Delegate independent parallel research (e.g. "summarise backend/app/services/sync.py + backend/app/clients/intercom.py side-by-side") to two `Agent` calls in one message. Don't run them sequentially in the main thread.
+- Do **not** delegate the actual edit. Cross-package edits (HydratedTicket, the `part_type` mapping, MAX_BULK_IDS) must run in the main thread with the corresponding skill loaded so the invariant guardrails apply.
 - Do **not** delegate when the answer is already in `docs/PROJECT.md`, `spec.md`, `plan.md`, or `tasks.md`. Read those directly — they exist precisely to short-circuit exploration.
 
 ## Scope guardrails
@@ -98,7 +98,7 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 
 ## Don't
 
-- Don't add a backend-side Intercom HTTP client.
+- Don't add a SECOND Intercom integration. The backend `IntercomClient` (`backend/app/clients/intercom.py`) is the only ingestion path; don't give the extension or webapp Intercom access again.
 - Don't introduce a monorepo tool / shared package / codegen step.
 - Don't deploy this anywhere (no Dockerfile, no CI/CD, no production config).
 - Don't add user auth / RBAC / tenants.
@@ -128,9 +128,11 @@ conflict at MERGE time — serialize or pre-assign them across sessions:
   migration at a time, or pre-assign the next number + `down_revision`.
 - `backend/app/main.py` (`include_router(...)` block) + `backend/app/routers/__init__.py`
   — the router registry. Every new endpoint appends here; coordinate the inserts.
-- The 3-package `HydratedTicket` contract — `backend/app/schemas.py` ↔
-  `webapp/src/types/api.ts` ↔ `extension/intercom.js` (invariant #2). A shape
-  change touches all three; don't split it across parallel sessions.
+- The `HydratedTicket` contract — `backend/app/schemas.py` ↔
+  `webapp/src/types/api.ts` (invariant #2), produced by
+  `backend/app/services/intercom_normalizer.py`. A shape change touches the
+  schema, the normalizer, and the webapp type; don't split it across parallel
+  sessions.
 - `webapp/package-lock.json` — never hand-merge; re-run `npm install` (in
   `webapp/`) after merge. Backend has no lockfile (pip `requirements.txt`).
 - Single-source docs — `spec.md`, `plan.md`, `tasks.md`, `docs/PROJECT.md`,

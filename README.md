@@ -24,9 +24,11 @@ built, and [`tasks.md`](./tasks.md) for the task breakdown.
 
 - Python 3.11+ (3.12 tested)
 - Node 18+
-- Chrome — required: the extension scrapes conversations from your logged-in
-  Intercom session (no API token)
+- Chrome — optional: the extension is a read-only toolbar mini-board over the
+  backend (it no longer touches Intercom)
 - OpenRouter API key
+- Intercom workspace **Access Token** — the backend polls `api.intercom.io` with
+  it (Intercom → Settings → Integrations → Developer Hub → your app)
 
 ## Quickstart
 
@@ -37,7 +39,8 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1          # PowerShell  (bash: source .venv/bin/activate)
 pip install -r requirements.txt
-copy .env.example .env                # then fill in OPENROUTER_API_KEY
+copy .env.example .env                # then fill in OPENROUTER_API_KEY,
+                                      # INTERCOM_ACCESS_TOKEN + INTERCOM_WORKSPACE_APP_ID
 uvicorn app.main:app --reload --host 127.0.0.1 --port 4000
 ```
 
@@ -45,6 +48,11 @@ First boot creates `backend/data/triage.db` and seeds seven categories
 (Urgent, Bug, Feature Request, Question, Billing, Complaint, Other) plus the
 default filter settings. Missing secrets do **not** block startup — the backend
 runs in a degraded mode and `/health` reports what is missing.
+
+To ingest, the backend polls Intercom directly. Trigger one cycle manually with
+`curl -X POST http://localhost:4000/tickets/sync`, or set
+`INTERCOM_POLL_INTERVAL_SECONDS` (e.g. `120`) in `.env` to run a background
+poller (off by default — `0`).
 
 ```powershell
 curl http://localhost:4000/health
@@ -68,13 +76,13 @@ the category-management and proposal-review pages plus the filter drawer.
 2. Enable **Developer mode**.
 3. **Load unpacked** → select the `extension/` folder.
 
-The extension is the only Intercom integration — it scrapes conversations from
-your logged-in `app.intercom.com` session and pushes them to the backend via
-`POST /tickets/ingest`. The toolbar popup is a mini-board with the same taxonomy;
-it talks directly to the backend on `:4000`. Background polling is **off by
-default** — pick an interval in the popup footer to have it badge the Urgent
-count. The popup also mirrors the webapp's follow-up alarms: a due banner,
-per-row countdown chips, and an audio cue (shared mute via `GET /settings`).
+The extension is a **read-only toolbar mini-board** — it shows the same taxonomy
+and lets you resolve / move / park tickets, but ingestion is the backend's job
+(no Intercom access here). It talks only to the backend on `:4000`. Background
+polling is **off by default** — pick an interval in the popup footer to badge the
+Urgent count (this refreshes the badge from the backend board; it does not fetch
+from Intercom). The popup also mirrors the webapp's follow-up alarms: a due
+banner, per-row countdown chips, and an audio cue (shared mute via `GET /settings`).
 
 ## API surface
 
@@ -88,9 +96,9 @@ per-row countdown chips, and an audio cue (shared mute via `GET /settings`).
 | `POST /categories/{src}/merge-into/{dst}` | Merge categories |
 | `GET /proposals` | Pending AI category proposals + example tickets |
 | `POST /proposals/{id}/approve` · `/merge-into/{cat}` · `/reject` | Resolve a proposal |
-| `GET /tickets` | The stored board — extension-ingested + categorized tickets |
-| `POST /tickets/ingest` | Receive conversations from the extension; categorize + store |
-| `GET /tickets/sync-state` | `{id: updated_at}` map the extension uses to skip unchanged conversations |
+| `GET /tickets` | The stored board — backend-polled + categorized tickets |
+| `POST /tickets/sync` | Run one Intercom fetch+ingest cycle now (503 if no token); the background poller runs the same cycle |
+| `POST /tickets/ingest` | Direct ingest of `HydratedTicket[]` (categorize + store) — used internally by the sync cycle |
 | `POST /tickets/{id}/resolve` · `/reopen` · `/dismiss-chip` · `PATCH /ai-resolve` | Manual + AI resolution |
 | `PATCH /tickets/{id}/category` | Manually override a ticket's category |
 | `PATCH /tickets/{id}` | Edit AI-supplied title + summary (sticky across re-syncs) |

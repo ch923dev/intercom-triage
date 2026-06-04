@@ -1,6 +1,6 @@
 # Intercom Triage — Tasks
 
-**Status:** ready · **Version:** 1.6 · **Implements:** `spec.md` v1.7, `plan.md` v1.7
+**Status:** ready · **Version:** 1.7 · **Implements:** `spec.md` v1.8, `plan.md` v1.8
 
 Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](docs/_archive/tasks/).
 
@@ -14,6 +14,8 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - `✓` = shipped and live in `main`.
 - `⊘` = superseded. Detail file retains the original body and names the replacement.
 - No marker = still open / backlog.
+
+**Changes from v1.7 (Intercom ingestion pivot):** the backend now fetches Intercom directly from the official `api.intercom.io` REST API with a workspace Access Token, replacing the extension session scrape. New Phase 19 (T161–T166): Intercom client, normalizer, sync orchestration + `POST /tickets/sync`, background poller + config/health, extension reduction, docs/charter. Rewrote FR-001 + FR-031, added NFR-010. `GET /tickets/sync-state` route retired (the service stays, internal).
 
 **Changes from v1.6 (reconciliation):** the forward roadmap (`docs/ROADMAP.md`) was executed in full through Phase 3 + 4.1, but the work shipped to `main` ahead of these docs. This revision backfills the source-of-truth tasks for it: new Phases 15–18 (T142–T160) cover roadmap 0.2–3.3 and R.4; T106 (parked, roadmap 4.1) and T102 (cost meter, realized by roadmap 1.4) are marked `✓`. Traceability matrix gains FR-043..FR-061, NFR-009, and US-022..US-039. Total task count ~160. Detail bodies are inline below + the acceptance criteria in `spec.md`; per-feature commit SHAs are cited for traceability.
 
@@ -194,6 +196,14 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T159 ✓ — Semantic playbook auto-match on ticket open (`GET /playbooks/suggested`). FR-061/US-039. Commit `a2de64f`.
 - T160 ✓ — Latency p50/p95/max histograms in `metrics.py` (robustness R.4). NFR-009. Commit `ffb28c5`.
 
+### Phase 19 — Backend-direct Intercom ingestion (Access Token pivot)
+- T161 ✓ — Intercom REST client (`clients/intercom.py`): `POST /conversations/search` (cursor), `GET /conversations/{id}`, TTL-cached `GET /contacts/{id}`; retry + 429/`X-RateLimit-Reset` aware; `IntercomError`/`IntercomAuthError`. FR-001, inv #1.
+- T162 ✓ — Official-API → `HydratedTicket` normalizer (`services/intercom_normalizer.py`): `part_type` routing, `source`-first, priority/state coercion, HTML strip + attachment fallback, contact panel-field merge. FR-003, inv #2/#3/#4, R.1/R.5.
+- T163 ✓ — Sync orchestration (`services/sync.py:run_sync_cycle`): server-side skip-known + closure pass; `POST /tickets/sync` + `SyncResponse`; `GET /tickets/sync-state` route retired (service kept internal). FR-001, FR-031.
+- T164 ✓ — Background poller + lifespan wiring (`main:_intercom_poll_loop`, `get_intercom` dep); `intercom_*` config + `intercom_configured`/`missing_secrets` + `/health.intercom_configured`. FR-001, NFR-010.
+- T165 ✓ — Extension reduction: delete `intercom.js` + ember scraping/closure/sync; drop `app.intercom.com` host perm, app_id setup, Sync button; popup = read-only board + badge-only poller. inv #1.
+- T166 ✓ — Docs/charter: invariants #1/#2/#3 rewrite, spec FR-001/FR-031 + NFR-010, plan §2/§4/§6, PROJECT/FEATURES, SECURITY (two secrets) + gitleaks Intercom-token rule, README, sub-package CLAUDE.md.
+
 ### [Phase 9 — Backlog](docs/_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to webapp and extension. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
@@ -210,7 +220,7 @@ Every requirement maps to at least one task.
 
 | Requirement | Implementing tasks |
 |---|---|
-| FR-001 | T009, T025 |
+| FR-001 | T009, T025, T161, T162, T163, T164 |
 | FR-002 | T009 |
 | FR-003 | T010 |
 | FR-004 | T014, T007, T025 |
@@ -252,7 +262,7 @@ Every requirement maps to at least one task.
 | FR-028 | T055, T061, T062, T064 |
 | FR-029 | T054, T055, T060, T064, T065, T068 |
 | FR-030 | T054, T055, T063, T064, T069 |
-| FR-031 | T070 |
+| FR-031 | T070, T163 |
 | FR-032 | T080, T081 |
 | FR-033 | T074, T075, T076, T077, T078, T082 |
 | FR-034 | T080, T081 |
@@ -307,3 +317,4 @@ Every requirement maps to at least one task.
 | FR-061 | T159 |
 | FR-062 | T107 |
 | NFR-009 | T160 |
+| NFR-010 | T164 |

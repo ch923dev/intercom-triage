@@ -69,29 +69,21 @@ async def test_edit_title_truncated_to_schema_cap(session: AsyncSession) -> None
 
 
 @pytest.mark.asyncio
-async def test_sync_state_values_are_z_suffixed_utc(
-    client: AsyncClient, session: AsyncSession
-) -> None:
-    """GET /tickets/sync-state must emit Z-suffixed UTC ISO strings (invariant #5).
-
-    The endpoint returns {ticket_id: updated_at}. Every value must end with 'Z'
-    and must not contain '+00:00' (which JS Date.parse interprets differently
-    than 'Z' on some engines).
+async def test_sync_state_returns_aware_utc(session: AsyncSession) -> None:
+    """`get_sync_state` tags every timestamp as UTC so serialization carries the
+    offset (invariant #5). It is now an INTERNAL call feeding the backend sync
+    cycle — the former `GET /tickets/sync-state` route was removed when the
+    backend took over Intercom ingestion (the extension was its only caller).
     """
+    from datetime import UTC
+
+    from app.services.tickets import get_sync_state
+
     _seed_open(session, "sync-1")
     _seed_open(session, "sync-2", category_id=2)
     await session.commit()
 
-    r = await client.get("/tickets/sync-state")
-    assert r.status_code == 200
-    data = r.json()
-    assert "sync-1" in data
-    assert "sync-2" in data
-    for ticket_id, ts_value in data.items():
-        assert isinstance(ts_value, str), f"ticket {ticket_id}: expected str, got {type(ts_value)}"
-        assert ts_value.endswith(
-            "Z"
-        ), f"ticket {ticket_id}: timestamp {ts_value!r} does not end with 'Z'"
-        assert (
-            "+00:00" not in ts_value
-        ), f"ticket {ticket_id}: timestamp {ts_value!r} contains '+00:00' instead of 'Z'"
+    state = await get_sync_state(session)
+    assert {"sync-1", "sync-2"} <= set(state)
+    for ticket_id, value in state.items():
+        assert value.tzinfo is UTC, f"ticket {ticket_id}: {value!r} is not UTC-aware"

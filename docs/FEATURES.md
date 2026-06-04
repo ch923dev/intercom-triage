@@ -40,7 +40,7 @@ The core loop: ingest → AI categorize against the operator's taxonomy → boar
 - **Manual resolve** — mark a ticket resolved (`resolved_source='manual'`); clears any parked state. (both · `POST /tickets/{id}/resolve` → `services/resolution.py:resolve`)
 - **Reopen (atomic)** — clears `resolved_at` + `resolved_source` + `non_actionable_kind` + stamps `resolution_cleared_at` in one transaction. (both · `POST /tickets/{id}/reopen` · inv #11)
 - **Mark non-actionable** — resolve as a non-actionable sub-state (spam/thanks/auto-reply/out-of-office/other); its own board column / popup tab. (both · `POST /tickets/{id}/non-actionable` · US-019/FR-037, inv #10)
-- **Intercom-closed auto-resolve** — the extension's closure pass detects open→closed in Intercom; ingest stamps `resolved_source='intercom_closed'`. (extension/backend · `extension/background.js:54`, `services/tickets.py`)
+- **Intercom-closed auto-resolve** — the backend closure pass (in `run_sync_cycle`) detects open→closed in Intercom; ingest stamps `resolved_source='intercom_closed'`. (backend · `services/sync.py`, `services/tickets.py:_upsert_ticket`)
 - **AI auto-resolve** — under the operator's toggle + confidence threshold, a high-confidence `resolved`/`non_actionable` verdict auto-resolves (`resolved_source='ai_resolved'`); never overrides an existing resolution. (ai/backend · `services/tickets.py:_maybe_auto_resolve_from_ai` · US-016, FR-026/FR-029/FR-030, inv #10)
 - **Per-ticket AI-resolve toggle (tri-state)** — `null` inherits the global default; `true`/`false` override per ticket. (both · `PATCH /tickets/{id}/ai-resolve` → `services/resolution.py:set_ai_resolve`)
 - **Resolution chip + dismiss** — server-computed advisory chip (`ai_resolved`/`ai_reopened`/`new_reply`); dismissible until the customer-visible thread advances. (backend/webapp · `services/tickets.py:_chip_state`, `POST /tickets/{id}/dismiss-chip`, `ResolutionChip.vue` · US-016/FR-027)
@@ -125,17 +125,21 @@ All enforce inv #4 (never feed/embed `internal_notes`) and inv #6 (embeddings li
 - **Admin pages** — Categories (CRUD/recolor/reorder/archive/merge), Proposals (approve/merge/reject), Playbooks, Snippets, Stats. (webapp · `CategoriesPage.vue` etc.)
 - **Settings drawer (7 sections)** — Display, Filters (lookback/states/keywords/hide-empty), AI (categorize toggle, auto-resolve, confidence threshold), Notifications (mute alarms, desktop notifs), Cost meter, Sync interval, Saved views. (webapp · `SettingsDrawer.vue` + `settings/*` · T027)
 
-## J. Extension (Chrome MV3 popup)
+## J. Intercom ingestion (backend)
 
-- **Session scraper + normalizer** — pulls conversations from Intercom's `ember/` API using the logged-in session (no API token), maps `renderable_type` (1/12 customer, 2/24 admin, 3 internal note), coerces two-clock timestamps, synthesizes `[attachment: …]` for image-only parts (R.5). (extension · `intercom.js:normalizeConversation` · inv #1/#2/#3, R.1/R.5)
-- **Sync-state skip optimization** — `GET /tickets/sync-state` lets the extension skip detail-fetch + re-categorization for unchanged conversations. (extension/backend · `GET /tickets/sync-state`, `intercom.js:fetchHydratedBatch`)
-- **Popup mini-board** — category/proposal/resolved/non-actionable/parked tabs with counts; same taxonomy as the webapp. (extension · `popup.js`)
+- **Official API client** — async client over `api.intercom.io` with a workspace Access Token: conversation search (cursor-paginated), detail fetch, TTL-cached contact fetch; retry + rate-limit (`X-RateLimit-Reset`) aware. (backend · `clients/intercom.py` · inv #1)
+- **Normalizer** — maps the official payload to `HydratedTicket`: `part_type` (`comment`→`parts[]`, `note`→`internal_notes[]`, events skipped), `source` as the first part, priority coercion, HTML strip, `[attachment: …]` fallback (R.5), customer panel fields from the contact. (backend · `services/intercom_normalizer.py` · inv #2/#3/#4, R.1/R.5)
+- **Sync cycle** — `run_sync_cycle`: server-side skip-known (internal `get_sync_state`), search → detail/contact fetch for changed/new, closure pass for open→closed, then the existing cache-aware ingest. (backend · `services/sync.py`)
+- **Poller + manual sync** — background poller (interval-gated, default off) + `POST /tickets/sync` (503 without a token); returns `{received, categorized, skipped_known, closed_detected}`. (backend · `main:_intercom_poll_loop`, `routers/tickets.py`)
+
+## K. Extension (Chrome MV3 popup)
+
+- **Popup mini-board** — category/proposal/resolved/non-actionable/parked tabs with counts; same taxonomy as the webapp. Read-only over the backend (no Intercom access). (extension · `popup.js`)
 - **Popup per-ticket actions** — move category, resolve, reopen, non-actionable, park, unpark; follow-up countdown chip + due banner with snooze. (extension · `popup.js`)
-- **Sync now / refresh** — pull+ingest from Intercom, or reload the stored board without re-ingesting. (extension · `popup.js`)
-- **Background poll + Urgent badge** — optional interval poll (off by default) that ingests + badges the toolbar with the Urgent count; runs the closure pass. (extension · `background.js`)
-- **Setup + login hint** — one-time workspace `app_id` entry; surfaces a "log in to Intercom" hint on 401/403. (extension · `popup.html`/`popup.js`)
+- **Refresh** — reload the stored board from the backend. (extension · `popup.js`)
+- **Background badge poll** — optional interval poll (off by default) that badges the toolbar with the Urgent count from the backend board (no Intercom fetch). (extension · `background.js`)
 
-## K. Platform & ops
+## L. Platform & ops
 
 - **Naive-UTC-in-DB / Z-on-wire** — Pydantic `UTCDatetime`/`NaiveUTCDatetime` enforce the timestamp contract JS clients depend on. (backend · `schemas.py` · inv #5)
 - **Singleton settings** — one `Settings` row, `CHECK (id = 1)`, inserted on first boot. (backend · `models.py` · inv #12)

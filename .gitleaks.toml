@@ -9,13 +9,21 @@
 [extend]
 useDefault = true
 
-# Project-specific extra rule: OpenRouter keys (sk-or-v1-...), the one live
-# secret format this repo uses.
+# Project-specific extra rule: OpenRouter keys (sk-or-v1-...).
 [[rules]]
 id = "openrouter-api-key"
 description = "OpenRouter API key"
 regex = '''sk-or-v1-[0-9a-f]{32,}'''
 keywords = ["sk-or-v1-"]
+
+# Intercom workspace Access Token committed into a config/env assignment. The
+# token itself has no fixed prefix, so key off the variable name with a
+# real-looking value (dummies are allowlisted below).
+[[rules]]
+id = "intercom-access-token"
+description = "Intercom Access Token"
+regex = '''(?i)intercom_access_token\s*[:=]\s*['"]?[A-Za-z0-9+/=_-]{20,}'''
+keywords = ["intercom_access_token"]
 
 [allowlist]
 description = "Known-safe matches — placeholders, examples, test fixtures, audit notes"
@@ -27,9 +35,11 @@ paths = [
   '''(^|/)extension/fixtures/''',
   '''(^|/)docs/_archive/''',
 ]
-# j3dxf22l = public Intercom workspace app_id (visible in any Intercom URL), not a secret.
-# "test-openrouter-key" / "test" = dummy values in test config.
+# j3dxf22l / testworkspace = public Intercom workspace app_id (not a secret).
+# "test-openrouter-key" / "test-intercom-token" = dummy values in test config.
 regexes = [
   '''j3dxf22l''',
+  '''testworkspace''',
   '''test-openrouter-key''',
+  '''test-intercom-token''',
 ]

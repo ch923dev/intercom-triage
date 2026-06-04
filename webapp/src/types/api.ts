@@ -73,9 +73,9 @@ export interface ConversationPart {
   author: TicketAuthor;
   body: string;
   created_at: string;
-  /** True for an admin reply visible to the customer (Intercom renderable_type
-   *  24). Inbound customer messages → false. Internal team notes live in
-   *  `Ticket.internal_notes`, not here. */
+  /** True for an admin/bot reply visible to the customer (Intercom part_type
+   *  `comment` with an admin author). Inbound customer messages → false.
+   *  Internal team notes (part_type `note`) live in `Ticket.internal_notes`. */
   is_admin: boolean;
 }
 

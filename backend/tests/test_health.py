@@ -12,6 +12,7 @@ async def test_health_ok_when_creds_present(client: AsyncClient) -> None:
     data = resp.json()
     assert data["status"] == "ok"
     assert data["openrouter_configured"] is True
+    assert data["intercom_configured"] is True
     assert data["missing_secrets"] == []
     assert data["model"] == "anthropic/claude-sonnet-4.5"
     assert "version" in data
@@ -43,3 +44,25 @@ async def test_health_degraded_when_embeddings_enabled_but_unavailable(
     assert data["embeddings_available"] is False
     assert data["clustering_available"] is False
     assert data["status"] == "degraded"
+
+
+def test_intercom_token_reported_in_missing_secrets() -> None:
+    """A missing Access Token is surfaced like a missing OpenRouter key — the
+    backend boots degraded, not blind (FR-014)."""
+    from app.config import AppConfig
+
+    without = AppConfig(
+        openrouter_api_key="x",
+        intercom_access_token="",
+        database_url="sqlite+aiosqlite:///:memory:",
+    )
+    assert without.intercom_configured is False
+    assert "INTERCOM_ACCESS_TOKEN" in without.missing_secrets
+
+    with_token = AppConfig(
+        openrouter_api_key="x",
+        intercom_access_token="tok",
+        database_url="sqlite+aiosqlite:///:memory:",
+    )
+    assert with_token.intercom_configured is True
+    assert "INTERCOM_ACCESS_TOKEN" not in with_token.missing_secrets

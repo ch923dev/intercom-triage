@@ -4,11 +4,7 @@
   "version": "0.1.0",
   "description": "Pre-categorized Intercom triage board in your Chrome toolbar.",
   "permissions": ["storage", "alarms"],
-  "host_permissions": [
-    "http://127.0.0.1:4000/*",
-    "http://localhost:4000/*",
-    "https://app.intercom.com/*"
-  ],
+  "host_permissions": ["http://127.0.0.1:4000/*", "http://localhost:4000/*"],
   "action": {
     "default_popup": "popup.html",
     "default_title": "Intercom Triage",

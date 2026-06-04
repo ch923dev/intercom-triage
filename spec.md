@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 1.7 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 1.8 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v1.7:** ingestion pivot — the backend now fetches Intercom conversations directly from the official `api.intercom.io` REST API using a workspace Access Token, replacing the former Chrome-extension session scrape. A background poller + `POST /tickets/sync` drive ingestion; the extension becomes a read-only mini-board. Rewrote FR-001 + FR-031 and added NFR-010 (Intercom token is a server-side secret). No board behavior removed.
 
 **Changes from v1.6:** reconciliation backfill — the forward roadmap (`docs/ROADMAP.md`) was executed in full through Phase 3 + 4.1, but the shipped capability landed in code ahead of this spec. This version writes the source-of-truth requirements for the 19 shipped-but-undocumented features: triage facets (US-022), aging indicators (US-023), keyboard triage (US-024), saved views (US-025), priority-sorted queue (US-026), stats dashboard (US-027), cost meter (US-028), snippets (US-029), bulk pre-flight diff (US-030), reliable structured AI output (US-031), model cascade (US-032), needs-review lane (US-033), local embedding layer (US-034), few-shot categorization (US-035), RAG draft replies (US-036), recurring-issue clustering (US-037), playbook-gap detection (US-038), playbook auto-match (US-039). Adds FR-043..FR-061 and NFR-009. No capability removed; no behavior changed — code and spec are now in sync.
 
@@ -469,7 +471,7 @@ Acceptance:
 
 | ID | Requirement | Stories |
 |---|---|---|
-| FR-001 | The system fetches Intercom conversations filtered by `updated_at > now − threshold`. | US-001 |
+| FR-001 | The backend fetches Intercom conversations directly from the official `api.intercom.io` REST API using a workspace Access Token, driven by a background poller and a manual `POST /tickets/sync`. Conversations already stored unchanged are skipped without a detail fetch (server-side skip-known). | US-001 |
 | FR-002 | The fetch result is bounded by a configurable maximum count per request. | US-001 |
 | FR-003 | Each fetched conversation has its full message thread hydrated and converted to plain text before AI input. | US-002, US-003 |
 | FR-004 | Every ticket returned to a client carries either an active category id or a pending proposal id. | US-002, US-009 |
@@ -499,7 +501,7 @@ Acceptance:
 | FR-028 | The system exposes `POST /tickets/{id}/resolve`, `POST /tickets/{id}/reopen`, `PATCH /tickets/{id}/ai-resolve`, and `POST /tickets/{id}/dismiss-chip`. `GET /tickets` accepts `?resolved=true\|false`; default excludes resolved tickets. | US-015, US-016 |
 | FR-029 | Each ticket carries a per-ticket AI-resolve tri-state override (`true` / `false` / `null`); `null` means inherit `settings.ai_resolve_default`. | US-016 |
 | FR-030 | Settings persist `ai_resolve_default` (bool) and `ai_resolve_confidence_threshold` (float 0..1); both are read and written through the existing settings endpoint. | US-016 |
-| FR-031 | On each sync the extension performs a closure pass: it compares tracked ticket ids against the open list returned by Intercom and fetches the closed-conversation list for any ids that have gone missing, then ingests them so the backend auto-resolves via the open→closed transition. | US-017 |
+| FR-031 | On each sync the backend performs a closure pass: it compares tracked-open ticket ids against the active conversation search and re-fetches any that have gone missing, then ingests them so `_upsert_ticket` auto-resolves via the open→closed transition (`resolved_source='intercom_closed'`). | US-017 |
 | FR-032 | The webapp maintains a transient client-side selection set of ticket ids. The set is cleared on view change, on Escape, on an empty-background click, and after every successful bulk action. | US-018 |
 | FR-033 | The backend exposes bulk endpoints that accept `{ticket_ids: string[]}` arrays and return `{ok_ids: string[], failed: [{id, reason}]}`. A per-id failure does not abort the rest of the batch. | US-018 |
 | FR-034 | Shift+click extends the selection across the contiguous range of cards in the same column (in displayed sort order). Shift+click in a different column toggles only the clicked card. | US-018 |
@@ -545,6 +547,7 @@ Acceptance:
 | NFR-007 | The webapp surface is keyboard-navigable for column scrolling, refresh, and override. |
 | NFR-008 | The backend runs from a single command (`uvicorn` or equivalent) with no external services required beyond the local database file. |
 | NFR-009 | External-call latency is sampled into in-process histograms; `GET /metrics` exposes per-key p50 / p95 / max over a bounded sample window. Single-operator scope — not a metrics exporter. |
+| NFR-010 | The Intercom Access Token is a server-side secret loaded from the local config file (alongside the AI key); it never reaches the webapp/extension bundle, logs, or error responses. A missing token is reported by `/health`, not fatal at startup. |
 
 ## 7. Decisions
 

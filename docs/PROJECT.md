@@ -32,8 +32,8 @@ team leaderboards, CSAT, autonomous action agents, multi-channel. See the root
 
 | Package | Stack | Role | Guide |
 |---|---|---|---|
-| `extension/` | Plain ES modules, Chrome MV3, no build | **The only ingestion path.** Scrapes Intercom's undocumented `ember/` API from the operator's logged-in session, normalizes to `HydratedTicket[]`, POSTs to the backend. | [`extension/CLAUDE.md`](../extension/CLAUDE.md) |
-| `backend/` | FastAPI + async SQLAlchemy 2.0 + SQLite + OpenRouter | Categorize (cache-aware) against the operator's taxonomy, store, and serve the board. Embeddings, clustering, playbooks, stats. | [`backend/CLAUDE.md`](../backend/CLAUDE.md) |
+| `extension/` | Plain ES modules, Chrome MV3, no build | Read-only toolbar mini-board + Urgent badge over the backend. **No Intercom access.** | [`extension/CLAUDE.md`](../extension/CLAUDE.md) |
+| `backend/` | FastAPI + async SQLAlchemy 2.0 + SQLite + OpenRouter + Intercom REST | **The ingestion path.** Polls `api.intercom.io` with an Access Token, normalizes, categorizes (cache-aware) against the operator's taxonomy, stores, and serves the board. Embeddings, clustering, playbooks, stats. | [`backend/CLAUDE.md`](../backend/CLAUDE.md) |
 | `webapp/` | Vue 3 + Pinia + Vite + TS (no router) | The Kanban board + admin/settings pages. Optimistic-update Pinia store is the heart. | [`webapp/CLAUDE.md`](../webapp/CLAUDE.md), [`webapp/DESIGN.md`](../webapp/DESIGN.md) |
 
 Three stacks intentionally — **do not merge them.** No monorepo tool, shared
@@ -43,27 +43,27 @@ package, or codegen step.
 
 ## 3. Architecture & data flow
 
-The operator signs into Intercom in Chrome. The extension scrapes conversations
-from the logged-in session via Intercom's `ember/` API and POSTs
-`HydratedTicket[]` to `POST /tickets/ingest`. The backend categorizes via
-OpenRouter (semaphore-bounded, cache-aware on the customer-visible content
-signature) against the curated taxonomy, stores rows in SQLite, and serves the
-board via `GET /tickets`. The webapp and the extension popup mini-board both
-read from the backend; mutations (override, resolve, follow-up, bulk, park…) go
-back through the same HTTP API.
+The backend polls Intercom's official `api.intercom.io` REST API with a
+workspace Access Token (`app/clients/intercom.py`), normalizes payloads to
+`HydratedTicket` (`app/services/intercom_normalizer.py`), and ingests via
+`app/services/sync.py:run_sync_cycle` — driven by a background poller and a
+manual `POST /tickets/sync`. It categorizes via OpenRouter (semaphore-bounded,
+cache-aware on the customer-visible content signature) against the curated
+taxonomy, stores rows in SQLite, and serves the board via `GET /tickets`. The
+webapp and the extension popup mini-board both read from the backend; mutations
+(override, resolve, follow-up, bulk, park…) go back through the same HTTP API.
 
 ```
-                    Intercom (browser session, ember/ API)
+        Intercom official REST API (api.intercom.io, Access Token)
                                   │
                                   ▼
                   ┌──────────────────────────────────┐
-                  │ extension/intercom.js            │
-                  │   normalizeConversation()        │
+                  │ backend: clients/intercom.py +    │
+                  │ services/intercom_normalizer.py + │
+                  │ services/sync.py (poll / sync)    │
                   └──────────────┬───────────────────┘
-                                 │ HydratedTicket[]
+                                 │ categorize + cache + store
                                  ▼
-              POST /tickets/ingest   (backend categorizes + caches + stores)
-                                 │
                           ┌──────┴──────┐
                           ▼             ▼
                   GET /tickets     GET /tickets
@@ -72,8 +72,8 @@ back through the same HTTP API.
                                  note · bulk · ai-resolve · park · dismiss-chip
 ```
 
-`GET /tickets/sync-state` returns `{id: updated_at}` so the extension skips the
-per-conversation detail fetch for unchanged conversations.
+Server-side skip-known (an internal `get_sync_state`) skips the per-conversation
+detail fetch for conversations already stored unchanged.
 
 ---
 
@@ -143,9 +143,9 @@ the wire (invariant #5). Migrations are forward-only Alembic revisions
 invariants."** Enforced by `scripts/check-invariants.ps1` (PreToolUse hook).
 One-line index only:
 
-1. No Intercom Access Token anywhere — the extension is the only ingestion path.
-2. `HydratedTicket` spans three packages — edit all three together or break ingest.
-3. `renderable_type` mapping is reverse-engineered (1/12 customer, 2/24 admin, 3 internal note).
+1. Backend owns Intercom ingestion via an Access Token (`api.intercom.io`); the extension has no Intercom access.
+2. `HydratedTicket` spans two packages (backend schema ↔ webapp type), produced by the backend normalizer — edit together or break the board.
+3. `part_type` mapping (official API): `comment`→`parts[]`, `note`→`internal_notes[]`, events skipped, `source` first.
 4. `parts[]` is customer-visible (fed to AI); `internal_notes[]` is team-only (never fed to AI).
 5. Naive UTC in DB; `Z`-suffixed ISO on the wire.
 6. AI cache key = content signature (last customer-visible part timestamp), not Intercom `updated_at`.
@@ -170,7 +170,7 @@ Router footprint: `backend/app/routers/`.
 | health / metrics | `GET /health` · `GET /metrics` |
 | categories | `GET /categories` · `POST /categories` · `PATCH /{id}` · `POST /{id}/archive` · `POST /{src}/merge-into/{dst}` |
 | proposals | `GET /proposals` · `POST /{id}/approve` · `/merge-into/{cat}` · `/reject` |
-| tickets (read/ingest) | `GET /tickets` · `GET /tickets/sync-state` · `POST /tickets/ingest` |
+| tickets (read/ingest) | `GET /tickets` · `POST /tickets/sync` (run a poll cycle) · `POST /tickets/ingest` (internal) |
 | tickets (single) | `PATCH /{id}/category` · `PATCH /{id}` · `POST /{id}/resolve` · `/non-actionable` · `/reopen` · `/park` · `/unpark` · `/dismiss-chip` · `PATCH /{id}/ai-resolve` |
 | tickets (bulk, capped 200) | `POST /tickets/bulk/resolve` · `/reopen` · `/dismiss-chip` · `/non-actionable` · `/park` · `/unpark` · `PATCH /tickets/bulk/category` — each returns `{ok_ids, failed[]}` |
 | followups | `GET /followups` · `PUT /followups/bulk` · `DELETE /followups/bulk` · `PUT /{id}` · `POST /{id}/snooze` · `/mark-fired` · `DELETE /{id}` |
@@ -244,8 +244,8 @@ backend 409 tests, webapp 215 tests, extension 20 tests — all green.
 
 ## 12. Glossary
 
-- **HydratedTicket** — the normalized conversation shape the extension produces and the backend stores; spans three packages (invariant #2).
-- **renderable_type** — Intercom's numeric message-type code, reverse-engineered: 1/12 customer, 2/24 admin, 3 internal note, others skipped (invariant #3).
+- **HydratedTicket** — the normalized conversation shape the backend normalizer produces and stores; spans backend schema ↔ webapp type (invariant #2).
+- **part_type** — Intercom's official conversation-part type: `comment`→`parts[]` (customer or admin), `note`→`internal_notes[]`, events skipped; the opening `source` message is the first part (invariant #3). Replaced the old reverse-engineered numeric `renderable_type` codes.
 - **content signature** — the last customer-visible part timestamp; the AI cache key (invariant #6). Teammate notes/assignments advance Intercom `updated_at` but must not bust cache.
 - **override beats AI** — a manual category override wins while `tickets.updated_at ≤ override.set_at`.
 - **proposal** — an AI-suggested new category, pending operator approve/merge/reject.
