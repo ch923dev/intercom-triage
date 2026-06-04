@@ -4,8 +4,10 @@ Local single-operator tool that pre-categorizes and summarizes recent Intercom
 conversations so you can scan and route in one Kanban view instead of opening
 each ticket. Backend + webapp + Chrome extension, all on `localhost`.
 
-See [`spec.md`](./spec.md) for what it does, [`plan.md`](./plan.md) for how it's
-built, and [`tasks.md`](./tasks.md) for the task breakdown.
+Start at the **[docs hub](./docs/)**. The contract:
+[`spec.md`](./docs/contract/spec.md) for what it does,
+[`plan.md`](./docs/contract/plan.md) for how it's built, and
+[`tasks.md`](./docs/contract/tasks.md) for the task breakdown.
 
 ## Layout
 
@@ -15,9 +17,7 @@ built, and [`tasks.md`](./tasks.md) for the task breakdown.
 ├── webapp/         Vue 3 + Vite SPA — the Kanban board, admin pages, settings
 ├── extension/      Chrome MV3 popup mini-board + background badge
 ├── snippets/       Reference implementations referenced by task docs
-├── spec.md         Requirements (what)
-├── plan.md         Architecture + decisions (how)
-└── tasks.md        Task breakdown w/ traceability matrix
+└── docs/           📚 Docs hub (README.md) — handbook, features, contract/{spec,plan,tasks}.md
 ```
 
 ## Prerequisites
@@ -173,7 +173,7 @@ concurrency, cache TTL, and the SQLite → Postgres swap.
 ## Backup
 
 Copy `backend/data/triage.db` somewhere — single file. The Postgres swap is
-documented in [`plan.md`](./plan.md#10-deployment).
+documented in [`plan.md`](./docs/contract/plan.md#10-deployment).
 
 Attachment files live under `backend/data/attachments/` (content-addressed
 by sha256). To back up notes + their files, copy `backend/data/` as a whole.

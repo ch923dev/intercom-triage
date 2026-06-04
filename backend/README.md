@@ -3,8 +3,8 @@
 FastAPI service on `localhost:4000`. Owns Intercom integration, AI categorization,
 SQLite store, and the public API surface.
 
-See [`../spec.md`](../spec.md), [`../plan.md`](../plan.md), and
-[`../tasks.md`](../tasks.md).
+See [`../docs/contract/spec.md`](../docs/contract/spec.md), [`../docs/contract/plan.md`](../docs/contract/plan.md), and
+[`../docs/contract/tasks.md`](../docs/contract/tasks.md).
 
 ## Layout
 
@@ -47,7 +47,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 4000
 
 ## API
 
-Full API contract in [`../plan.md`](../plan.md#4-api-contract); table summary in
+Full API contract in [`../docs/contract/plan.md`](../docs/contract/plan.md#4-api-contract); table summary in
 [`../README.md`](../README.md#api-surface). Interactive docs at
 <http://localhost:4000/docs> while the server is running.
 

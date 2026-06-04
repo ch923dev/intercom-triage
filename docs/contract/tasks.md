@@ -2,7 +2,7 @@
 
 **Status:** ready · **Version:** 1.7 · **Implements:** `spec.md` v1.8, `plan.md` v1.8
 
-Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](docs/_archive/tasks/).
+Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](../_archive/tasks/).
 
 **Conventions.**
 - `[P]` next to a task ID means it may run in parallel with siblings at the same dependency depth.
@@ -17,7 +17,7 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 
 **Changes from v1.7 (Intercom ingestion pivot):** the backend now fetches Intercom directly from the official `api.intercom.io` REST API with a workspace Access Token, replacing the extension session scrape. New Phase 19 (T161–T166): Intercom client, normalizer, sync orchestration + `POST /tickets/sync`, background poller + config/health, extension reduction, docs/charter. Rewrote FR-001 + FR-031, added NFR-010. `GET /tickets/sync-state` route retired (the service stays, internal).
 
-**Changes from v1.6 (reconciliation):** the forward roadmap (`docs/ROADMAP.md`) was executed in full through Phase 3 + 4.1, but the work shipped to `main` ahead of these docs. This revision backfills the source-of-truth tasks for it: new Phases 15–18 (T142–T160) cover roadmap 0.2–3.3 and R.4; T106 (parked, roadmap 4.1) and T102 (cost meter, realized by roadmap 1.4) are marked `✓`. Traceability matrix gains FR-043..FR-061, NFR-009, and US-022..US-039. Total task count ~160. Detail bodies are inline below + the acceptance criteria in `spec.md`; per-feature commit SHAs are cited for traceability.
+**Changes from v1.6 (reconciliation):** the forward roadmap (`docs/_archive/ROADMAP.md`) was executed in full through Phase 3 + 4.1, but the work shipped to `main` ahead of these docs. This revision backfills the source-of-truth tasks for it: new Phases 15–18 (T142–T160) cover roadmap 0.2–3.3 and R.4; T106 (parked, roadmap 4.1) and T102 (cost meter, realized by roadmap 1.4) are marked `✓`. Traceability matrix gains FR-043..FR-061, NFR-009, and US-022..US-039. Total task count ~160. Detail bodies are inline below + the acceptance criteria in `spec.md`; per-feature commit SHAs are cited for traceability.
 
 **Changes from v1.4:** added Phase 12 (bulk actions) — T074–T083. Covers Pydantic bulk schemas, six bulk endpoints (resolve / reopen / recategorize / dismiss-chip / followup set / followup clear), backend tests, Vitest harness, `selectionStore` + card/column wiring, `BulkActionBar` + category picker reuse, tickets-store bulk actions with per-id rollback, multi-drag wiring through Board + ResolvedColumn, and `/metrics` counters. Total task count ~83.
 
@@ -31,24 +31,24 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 
 ## Index
 
-### [Phase 0 — Scaffolding](docs/_archive/tasks/phase-00-scaffolding.md)
+### [Phase 0 — Scaffolding](../_archive/tasks/phase-00-scaffolding.md)
 - T001 ✓ — Repo scaffold
 - T002 [P] ✓ — Dev tooling
 
-### [Phase 1 — Backend foundation](docs/_archive/tasks/phase-01-backend-foundation.md)
+### [Phase 1 — Backend foundation](../_archive/tasks/phase-01-backend-foundation.md)
 - T003 ✓ — Backend project init
 - T004 ✓ — Settings + .env.example
 - T005 ✓ — FastAPI skeleton + `/health`
 - T006 ✓ — SQLAlchemy models + init_db
 - T007 [P] ✓ — `GET /categories`
 
-### [Phase 2 — Intercom integration (superseded)](docs/_archive/tasks/phase-02-intercom-superseded.md)
+### [Phase 2 — Intercom integration (superseded)](../_archive/tasks/phase-02-intercom-superseded.md)
 - T008 ⊘ — Intercom HTTP client
 - T009 ⊘ — Search with threshold + state filter
 - T010 ⊘ — Hydration + HTML stripping
 - T011 ⊘ — Deep-link builder
 
-### [Phase 3 — AI pipeline](docs/_archive/tasks/phase-03-ai-pipeline.md)
+### [Phase 3 — AI pipeline](../_archive/tasks/phase-03-ai-pipeline.md)
 - T012 ✓ — OpenRouter client
 - T013 ✓ — Dynamic prompt builder
 - T014 ✓ — AI response parser
@@ -56,7 +56,7 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T016 ✓ — Parallel categorization with fallback
 - T017 ✓ — AI cache read/write
 
-### [Phase 4 — Category management API](docs/_archive/tasks/phase-04-category-api.md)
+### [Phase 4 — Category management API](../_archive/tasks/phase-04-category-api.md)
 - T018 ✓ — `POST /categories`, `PATCH /categories/{id}`, `POST /categories/{id}/archive`
 - T019 ✓ — Archive sweeper
 - T020 ✓ — `POST /categories/{src}/merge-into/{dst}`
@@ -65,13 +65,13 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T023 ✓ — `POST /proposals/{id}/merge-into/{category_id}`
 - T024 ✓ — `POST /proposals/{id}/reject`
 
-### [Phase 5 — Tickets API + overrides + settings](docs/_archive/tasks/phase-05-tickets-overrides-settings.md)
+### [Phase 5 — Tickets API + overrides + settings](../_archive/tasks/phase-05-tickets-overrides-settings.md)
 - T025 ✓ — `POST /tickets/ingest` + `GET /tickets`
 - T026 ✓ — Override endpoint + cache integration
 - T027 ✓ — `GET /settings` and `PUT /settings`
 - T028 ✓ — Structured logging on external calls
 
-### [Phase 6 — Webapp](docs/_archive/tasks/phase-06-webapp.md)
+### [Phase 6 — Webapp](../_archive/tasks/phase-06-webapp.md)
 - T029 ✓ — Vite + Vue 3 + TS scaffold
 - T030 ✓ — Typed API client
 - T031 ✓ — Tickets + categories stores (Pinia)
@@ -84,16 +84,16 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T038 ✓ — Proposals review page
 - T039 ✓ — Extension discovery callout
 
-### [Phase 7 — Chrome extension](docs/_archive/tasks/phase-07-extension.md)
+### [Phase 7 — Chrome extension](../_archive/tasks/phase-07-extension.md)
 - T040 ✓ — MV3 manifest + popup shell
 - T041 ✓ — Popup mini-board
 - T042 ✓ — Background poll + badge
 
-### [Phase 8 — Polish](docs/_archive/tasks/phase-08-polish.md)
+### [Phase 8 — Polish](../_archive/tasks/phase-08-polish.md)
 - T043 ✓ — `GET /metrics` lightweight counters
 - T044 ✓ — README + quickstart
 
-### [Phase 10 — Follow-ups, alarms, notes](docs/_archive/tasks/phase-10-followups.md)
+### [Phase 10 — Follow-ups, alarms, notes](../_archive/tasks/phase-10-followups.md)
 - T045 ✓ — `followups` + `ticket_notes` tables + `settings.mute_alarms`
 - T046 ✓ — Follow-up endpoints
 - T047 ✓ — Notes endpoints
@@ -104,7 +104,7 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T052 ✓ — Notes section in flyout
 - T053 ✓ — Popup mirror — due banner + chip
 
-### [Phase 11 — Ticket resolution](docs/_archive/tasks/phase-11-resolution.md)
+### [Phase 11 — Ticket resolution](../_archive/tasks/phase-11-resolution.md)
 - T054 ✓ — Alembic migration + SQLAlchemy model additions
 - T055 ✓ — Pydantic schemas: resolution fields + new request bodies
 - T056 ✓ — AI prompt + parser carry resolution verdict
@@ -126,7 +126,7 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T072 ✓ — Docs — `spec.md`, `plan.md`, `tasks.md`
 - T073 ✓ — Quality gates pass on main
 
-### [Phase 12 — Bulk actions](docs/_archive/tasks/phase-12-bulk.md)
+### [Phase 12 — Bulk actions](../_archive/tasks/phase-12-bulk.md)
 - T074 ✓ — Pydantic bulk schemas
 - T075 ✓ — Bulk resolve + reopen endpoints
 - T076 ✓ — Bulk recategorize endpoint
@@ -139,7 +139,7 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T083 ✓ — Bulk drag through Board + ResolvedColumn
 - T084 ✓ — `/metrics` bulk counters + docs refresh
 
-### [Phase 13 — Non-actionable tickets](docs/_archive/tasks/phase-13-non-actionable.md)
+### [Phase 13 — Non-actionable tickets](../_archive/tasks/phase-13-non-actionable.md)
 - T085 ✓ — Migration 0010 widens resolved_source + ai_resolution_verdict CHECK
 - T086 ✓ — AI prompt + parser carry non_actionable verdict
 - T087 ✓ — Ingest auto-applies non_actionable under shared threshold
@@ -152,7 +152,7 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T094 ✓ — Extension popup: non-actionable button + badge
 - T095 ✓ — Docs (CLAUDE.md invariant, spec/plan/tasks index)
 
-### [Phase 14 — Playbooks](docs/superpowers/specs/2026-05-26-playbooks-design.md)
+### [Phase 14 — Playbooks](../superpowers/specs/2026-05-26-playbooks-design.md)
 - T130 ✓ — `Playbook` model + Alembic migration.
 - T131 ✓ — Schemas + create/list/archive service.
 - T132 ✓ — `list_for_ticket` effective-category resolution.
@@ -204,7 +204,7 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T165 ✓ — Extension reduction: delete `intercom.js` + ember scraping/closure/sync; drop `app.intercom.com` host perm, app_id setup, Sync button; popup = read-only board + badge-only poller. inv #1.
 - T166 ✓ — Docs/charter: invariants #1/#2/#3 rewrite, spec FR-001/FR-031 + NFR-010, plan §2/§4/§6, PROJECT/FEATURES, SECURITY (two secrets) + gitleaks Intercom-token rule, README, sub-package CLAUDE.md.
 
-### [Phase 9 — Backlog](docs/_archive/tasks/backlog.md)
+### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to webapp and extension. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
 - T103 — Multi-user expansion: add a `users` table + simple session cookie auth + per-user overrides and settings. *(out of scope — `CLAUDE.md`)*

@@ -6,7 +6,7 @@
 > without re-deriving it from code.
 >
 > Orientation + architecture: [`PROJECT.md`](./PROJECT.md). Requirements/IDs:
-> `spec.md` (US-*/FR-*/NFR-*). Per-change rules + the 14 invariants: root
+> `contract/spec.md` (US-*/FR-*/NFR-*). Per-change rules + the 14 invariants: root
 > [`CLAUDE.md`](../CLAUDE.md). When this catalog and code disagree, code wins —
 > fix this file.
 
@@ -159,4 +159,4 @@ All enforce inv #4 (never feed/embed `internal_notes`) and inv #6 (embeddings li
 
 *Maintenance: when you ship a feature, add a one-line entry here in the right
 area and flip any `[OPEN]` tag. Keep entries one line; deep design rationale
-belongs in `docs/superpowers/specs/`, requirements in `spec.md`.*
+belongs in `docs/superpowers/specs/`, requirements in `contract/spec.md`.*

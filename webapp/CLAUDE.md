@@ -6,7 +6,7 @@ Guidance for Claude Code when working in `webapp/`.
 
 ## 1. Think Before Coding (in this repo)
 
-- Backend contracts live in `src/types/api.ts` + `src/api/client.ts`. If a field's nullability or PATCH/PUT shape is unclear, check `../plan.md` / `../spec.md` or ask — never guess a wire format.
+- Backend contracts live in `src/types/api.ts` + `src/api/client.ts`. If a field's nullability or PATCH/PUT shape is unclear, check `../docs/contract/plan.md` / `../docs/contract/spec.md` or ask — never guess a wire format.
 - `ConversationPart.is_admin` comes from the official Intercom `part_type` + author type (mapped backend-side in `intercom_normalizer.py`); `note` parts live in `Ticket.internal_notes`, never `parts`. Flag any contract change.
 - The **backend** polls Intercom directly (Access Token in `backend/.env`); the webapp never touches Intercom. An empty board means "no token / nothing synced yet" (check `/health.intercom_configured`), not "fetch failed." Don't add fallbacks or mock data.
 

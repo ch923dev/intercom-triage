@@ -12,9 +12,10 @@ Repo-wide guidance for Claude Code. Top-level entry point — read first, then d
 - [`docs/principles.md`](./docs/principles.md) — the four engineering principles (Think / Simplicity / Surgical / Goal-Driven). Override defaults; apply on every change.
 - [`docs/PROJECT.md`](./docs/PROJECT.md) — canonical project handbook: architecture, data-flow, stack, data model, full API surface, feature/roadmap status, glossary.
 - [`docs/FEATURES.md`](./docs/FEATURES.md) — exhaustive feature catalog by capability area (what the product does, with code anchors + surfaces).
-- `spec.md` — requirements (`US-*`, `FR-*`, `NFR-*`).
-- `plan.md` — architecture decisions (§1..§12).
-- `tasks.md` — task breakdown + traceability matrix (`T001..`).
+- [`docs/README.md`](./docs/README.md) — the docs hub (navigable index of everything below).
+- [`docs/contract/spec.md`](./docs/contract/spec.md) — requirements (`US-*`, `FR-*`, `NFR-*`).
+- [`docs/contract/plan.md`](./docs/contract/plan.md) — architecture decisions (§1..§12).
+- [`docs/contract/tasks.md`](./docs/contract/tasks.md) — task breakdown + traceability matrix (`T001..`).
 
 ## Repo map
 
@@ -23,12 +24,9 @@ intercom-ticket-management/
 ├── backend/        FastAPI service + SQLite + OpenRouter integration       ← see backend/CLAUDE.md
 ├── webapp/         Vue 3 SPA — the kanban board + admin pages              ← see webapp/CLAUDE.md
 ├── extension/      Chrome MV3 popup + background service worker            ← see extension/CLAUDE.md
-├── docs/           Principles, architecture, long-form specs (superpowers/, design records)
+├── docs/           📚 Hub (docs/README.md) · handbook (PROJECT/FEATURES) · contract/ (spec·plan·tasks) · principles · superpowers/ design records
 ├── scripts/        dev.ps1 (single-command launcher), seed-db.ps1/.sh
 ├── design_bundle/  Static design assets referenced by DESIGN.md
-├── spec.md         Requirements — WHAT (US-*, FR-*, NFR-*)
-├── plan.md         Architecture + decisions — HOW (§1..§12)
-├── tasks.md        Task breakdown w/ traceability matrix (T001..)
 └── README.md       Quickstart + API surface table
 ```
 
@@ -79,7 +77,7 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 - Delegate broad codebase searches (>3 grep/glob rounds, "find every place that does X") to `Agent(subagent_type=Explore)` so the main context stays focused on the task. Direct `Grep` / `Glob` for targeted, single-file lookups.
 - Delegate independent parallel research (e.g. "summarise backend/app/services/sync.py + backend/app/clients/intercom.py side-by-side") to two `Agent` calls in one message. Don't run them sequentially in the main thread.
 - Do **not** delegate the actual edit. Cross-package edits (HydratedTicket, the `part_type` mapping, MAX_BULK_IDS) must run in the main thread with the corresponding skill loaded so the invariant guardrails apply.
-- Do **not** delegate when the answer is already in `docs/PROJECT.md`, `spec.md`, `plan.md`, or `tasks.md`. Read those directly — they exist precisely to short-circuit exploration.
+- Do **not** delegate when the answer is already in `docs/PROJECT.md`, `docs/contract/spec.md`, `docs/contract/plan.md`, or `docs/contract/tasks.md`. Read those directly — they exist precisely to short-circuit exploration.
 
 ## Scope guardrails
 
@@ -90,10 +88,10 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 
 ## When in doubt
 
-1. Read `spec.md` for the *what*.
-2. Read `plan.md` for the *how*.
+1. Read `docs/contract/spec.md` for the *what*.
+2. Read `docs/contract/plan.md` for the *how*.
 3. Read the sub-package `CLAUDE.md` for stack-specific rules.
-4. Grep for the relevant T-number in `tasks.md` to find the implementation footprint.
+4. Grep for the relevant T-number in `docs/contract/tasks.md` to find the implementation footprint.
 5. If still unclear — ask. Cost of a clarifying question = one round-trip; cost of a wrong guess across three packages = much higher.
 
 ## Don't
@@ -102,7 +100,7 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 - Don't introduce a monorepo tool / shared package / codegen step.
 - Don't deploy this anywhere (no Dockerfile, no CI/CD, no production config).
 - Don't add user auth / RBAC / tenants.
-- Don't extend the surface area without `spec.md` / `plan.md` / `tasks.md` updates first — those three docs are the source of truth and the traceability matrix.
+- Don't extend the surface area without `docs/contract/spec.md` / `docs/contract/plan.md` / `docs/contract/tasks.md` updates first — those three docs are the source of truth and the traceability matrix.
 
 ## Parallel sessions & worktrees
 
@@ -135,7 +133,7 @@ conflict at MERGE time — serialize or pre-assign them across sessions:
   sessions.
 - `webapp/package-lock.json` — never hand-merge; re-run `npm install` (in
   `webapp/`) after merge. Backend has no lockfile (pip `requirements.txt`).
-- Single-source docs — `spec.md`, `plan.md`, `tasks.md`, `docs/PROJECT.md`,
+- Single-source docs — `docs/contract/spec.md`, `docs/contract/plan.md`, `docs/contract/tasks.md`, `docs/PROJECT.md`,
   this `CLAUDE.md`. Append-heavy; coordinate or expect textual conflicts.
 
 **Keep branches short (<~2 days) and rebase on the default branch daily.**

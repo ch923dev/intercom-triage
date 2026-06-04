@@ -6,7 +6,7 @@
 > `ROADMAP.md`, and the README.
 >
 > **It points, it does not duplicate.** The contract source of truth stays in
-> `spec.md` (what) / `plan.md` (how) / `tasks.md` (traceability). The
+> `contract/spec.md` (what) / `contract/plan.md` (how) / `contract/tasks.md` (traceability). The
 > per-change rules + the 14 cross-package invariants stay in the `CLAUDE.md`
 > hierarchy (auto-loaded every session). When this doc and one of those
 > disagree, *they* win — fix this doc.
@@ -205,7 +205,7 @@ clustering — all reading customer-visible `parts[]` + operator notes only, nev
 
 ## 10. Feature & roadmap status
 
-The project is feature-complete against `spec.md` v1.7. The 2026-05 roadmap is
+The project is feature-complete against `contract/spec.md` v1.7. The 2026-05 roadmap is
 now an execution log (full ledger with commit SHAs + the original phase tables:
 [`docs/_archive/ROADMAP.md`](./_archive/ROADMAP.md)).
 
@@ -267,7 +267,7 @@ Where knowledge lives now, and the boundary this handbook respects:
 | **`docs/PROJECT.md`** (this) | System orientation: architecture, data-flow, stack, data model, API surface, feature status, glossary. | Canonical living handbook. |
 | **`docs/FEATURES.md`** | Exhaustive feature catalog by capability area, with code anchors + surfaces. | Canonical feature reference. |
 | `CLAUDE.md` (+ `backend/`, `webapp/`, `extension/`) | Per-change rules + the 14 invariants. Auto-loaded every session. | Canonical, authoritative. **Not folded here.** |
-| `spec.md` / `plan.md` / `tasks.md` | Requirements (US/FR/NFR) · architecture decisions (§1–§18) · traceability matrix (T001–T160). | Contract source of truth. **Not folded here** (charter-protected). |
+| `contract/spec.md` / `contract/plan.md` / `contract/tasks.md` | Requirements (US/FR/NFR) · architecture decisions (§1–§18) · traceability matrix (T001–T160). | Contract source of truth. **Not folded here** (charter-protected). |
 | `docs/principles.md` | The four engineering principles. | Live; referenced by every sub-package CLAUDE.md. |
 | `webapp/DESIGN.md` | Design-system source of truth (tokens/palette/components). | Live. |
 | `*/README.md`, `SECURITY.md` | Per-package quickstart + secrets/threat model. | Live reference. |
