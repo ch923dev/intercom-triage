@@ -17,7 +17,7 @@
 
 A local, single-operator tool that pre-categorizes and summarizes recent
 Intercom conversations so the operator scans and routes from one Kanban board
-instead of opening each ticket. Three packages, three stacks, all on
+instead of opening each ticket. Two packages, two stacks, all on
 `localhost`.
 
 **Charter (the constraint is the product).** One workspace, one taxonomy, one
@@ -28,15 +28,14 @@ team leaderboards, CSAT, autonomous action agents, multi-channel. See the root
 
 ---
 
-## 2. Three packages at a glance
+## 2. Two packages at a glance
 
 | Package | Stack | Role | Guide |
 |---|---|---|---|
-| `extension/` | Plain ES modules, Chrome MV3, no build | Read-only toolbar mini-board + Urgent badge over the backend. **No Intercom access.** | [`extension/CLAUDE.md`](../extension/CLAUDE.md) |
 | `backend/` | FastAPI + async SQLAlchemy 2.0 + SQLite + OpenRouter + Intercom REST | **The ingestion path.** Polls `api.intercom.io` with an Access Token, normalizes, categorizes (cache-aware) against the operator's taxonomy, stores, and serves the board. Embeddings, clustering, playbooks, stats. | [`backend/CLAUDE.md`](../backend/CLAUDE.md) |
 | `webapp/` | Vue 3 + Pinia + Vite + TS (no router) | The Kanban board + admin/settings pages. Optimistic-update Pinia store is the heart. | [`webapp/CLAUDE.md`](../webapp/CLAUDE.md), [`webapp/DESIGN.md`](../webapp/DESIGN.md) |
 
-Three stacks intentionally — **do not merge them.** No monorepo tool, shared
+Two stacks intentionally — **do not merge them.** No monorepo tool, shared
 package, or codegen step.
 
 ---
@@ -50,8 +49,8 @@ workspace Access Token (`app/clients/intercom.py`), normalizes payloads to
 manual `POST /tickets/sync`. It categorizes via OpenRouter (semaphore-bounded,
 cache-aware on the customer-visible content signature) against the curated
 taxonomy, stores rows in SQLite, and serves the board via `GET /tickets`. The
-webapp and the extension popup mini-board both read from the backend; mutations
-(override, resolve, follow-up, bulk, park…) go back through the same HTTP API.
+webapp reads from the backend; mutations (override, resolve, follow-up, bulk,
+park…) go back through the same HTTP API.
 
 ```
         Intercom official REST API (api.intercom.io, Access Token)
@@ -64,10 +63,8 @@ webapp and the extension popup mini-board both read from the backend; mutations
                   └──────────────┬───────────────────┘
                                  │ categorize + cache + store
                                  ▼
-                          ┌──────┴──────┐
-                          ▼             ▼
-                  GET /tickets     GET /tickets
-                   (webapp)        (popup mini-board)
+                          GET /tickets
+                            (webapp)
                   PATCH/PUT/POST: override · resolve · reopen · followup ·
                                  note · bulk · ai-resolve · park · dismiss-chip
 ```
@@ -85,16 +82,11 @@ detail fetch for conversations already stored unchanged.
 .\scripts\dev.ps1
 ```
 
-Extension is loaded once manually: `chrome://extensions` → Developer mode →
-Load unpacked → select `extension/`. Reload it after every code change.
-
 First boot: backend creates `backend/data/triage.db`, seeds 7 default
 categories (Urgent, Bug, Feature Request, Question, Billing, Complaint, Other),
 inserts the singleton settings row. A missing `OPENROUTER_API_KEY` does **not**
 block startup — `/health` reports it; ingest writes every ticket to the
-fallback category until the key is set. The operator enters the Intercom
-workspace `app_id` (e.g. `j3dxf22l`) in the popup setup screen once
-(`chrome.storage.local.intercomAppId`).
+fallback category until the key is set.
 
 ---
 
@@ -105,7 +97,6 @@ workspace `app_id` (e.g. `j3dxf22l`) in the popup setup screen once
 | backend | Python 3.11+ (3.12 tested), FastAPI 0.135.4, SQLAlchemy 2.0 (async), Alembic, pydantic v2, httpx |
 | embeddings/ML | sentence-transformers 5.5.1 + torch 2.8.0 (CPU, `all-MiniLM-L6-v2`, 384-dim), sqlite-vec 0.1.9 (pre-v1, pinned exact), scikit-learn 1.6.1 (HDBSCAN clustering) |
 | webapp | Vue 3.5, Pinia 2.3, Vite 6, TypeScript 5.6, vue-tsc, ESLint 9, Prettier 3, Vitest 2 |
-| extension | Plain ES modules, MV3, no build step, no dependencies |
 | AI | OpenRouter (`anthropic/claude-sonnet-4.5` default; swap via `OPENROUTER_MODEL`) |
 | storage | SQLite (default, `backend/data/triage.db`) · Postgres swap via `DATABASE_URL` |
 
@@ -143,7 +134,7 @@ the wire (invariant #5). Migrations are forward-only Alembic revisions
 invariants."** Enforced by `scripts/check-invariants.ps1` (PreToolUse hook).
 One-line index only:
 
-1. Backend owns Intercom ingestion via an Access Token (`api.intercom.io`); the extension has no Intercom access.
+1. Backend owns Intercom ingestion via an Access Token (`api.intercom.io`); the backend client is the only ingestion path.
 2. `HydratedTicket` spans two packages (backend schema ↔ webapp type), produced by the backend normalizer — edit together or break the board.
 3. `part_type` mapping (official API): `comment`→`parts[]`, `note`→`internal_notes[]`, events skipped, `source` first.
 4. `parts[]` is customer-visible (fed to AI); `internal_notes[]` is team-only (never fed to AI).
@@ -205,7 +196,7 @@ clustering — all reading customer-visible `parts[]` + operator notes only, nev
 
 ## 10. Feature & roadmap status
 
-The project is feature-complete against `contract/spec.md` v1.7. The 2026-05 roadmap is
+The project is feature-complete against `contract/spec.md` v1.9. The 2026-05 roadmap is
 now an execution log (full ledger with commit SHAs + the original phase tables:
 [`docs/_archive/ROADMAP.md`](./_archive/ROADMAP.md)).
 
@@ -224,8 +215,7 @@ detection, playbook auto-match.
 
 | ID | Item | Notes |
 |---|---|---|
-| 4.3 / **T100** | Webhook + SSE live updates | `conversation.user.created`/`replied` → push to webapp + popup instead of poll-on-open. Heaviest deferred feature. |
-| 4.4 / **T105** | Bulk actions in the extension popup | Mirror the webapp bulk bar; deferred for popup ergonomics. |
+| 4.3 / **T100** | Webhook + SSE live updates | `conversation.user.created`/`replied` → push to webapp instead of poll-on-open. Heaviest deferred feature. |
 
 ---
 
@@ -235,10 +225,9 @@ detection, playbook auto-match.
 |---|---|---|
 | backend | `ruff check app tests && ruff format --check app tests && mypy app && pytest -q` | `/qa-backend` |
 | webapp | `npm run lint && npm run format:check && npm run typecheck && npm test && npm run build` | `/qa-webapp` |
-| extension | Reload unpacked → sync → confirm popup renders + badge count + no console errors | `/qa-extension` |
 
 `/qa-all` runs backend + webapp back-to-back. Last full run (2026-05-28):
-backend 409 tests, webapp 215 tests, extension 20 tests — all green.
+backend 409 tests, webapp 215 tests — all green.
 
 ---
 
@@ -251,7 +240,7 @@ backend 409 tests, webapp 215 tests, extension 20 tests — all green.
 - **proposal** — an AI-suggested new category, pending operator approve/merge/reject.
 - **fallback** — the catch-all category a ticket lands in when AI is unavailable or returns garbage; fallback results are never cached.
 - **resolved_source** — why a ticket is resolved: `manual` / `intercom_closed` / `non_actionable` / `ai_resolved`.
-- **non-actionable** — a resolved sub-state (spam / thanks / auto-reply / out-of-office / other); its own board column / popup tab, split at the view layer.
+- **non-actionable** — a resolved sub-state (spam / thanks / auto-reply / out-of-office / other); its own board column, split at the view layer.
 - **parked** — board-state "waiting on customer/third-party/internal" with a wake time; XOR-locked trio, never co-resolved, surfaced via a filter chip.
 - **playbook** — durable, category-scoped operator response recipe; not cache, survives re-sync (invariant #13).
 - **snippet** — global canned reply with `{{var}}` slots; lighter than a playbook.
@@ -266,7 +255,7 @@ Where knowledge lives now, and the boundary this handbook respects:
 |---|---|---|
 | **`docs/PROJECT.md`** (this) | System orientation: architecture, data-flow, stack, data model, API surface, feature status, glossary. | Canonical living handbook. |
 | **`docs/FEATURES.md`** | Exhaustive feature catalog by capability area, with code anchors + surfaces. | Canonical feature reference. |
-| `CLAUDE.md` (+ `backend/`, `webapp/`, `extension/`) | Per-change rules + the 14 invariants. Auto-loaded every session. | Canonical, authoritative. **Not folded here.** |
+| `CLAUDE.md` (+ `backend/`, `webapp/`) | Per-change rules + the 14 invariants. Auto-loaded every session. | Canonical, authoritative. **Not folded here.** |
 | `contract/spec.md` / `contract/plan.md` / `contract/tasks.md` | Requirements (US/FR/NFR) · architecture decisions (§1–§18) · traceability matrix (T001–T160). | Contract source of truth. **Not folded here** (charter-protected). |
 | `docs/principles.md` | The four engineering principles. | Live; referenced by every sub-package CLAUDE.md. |
 | `webapp/DESIGN.md` | Design-system source of truth (tokens/palette/components). | Live. |
