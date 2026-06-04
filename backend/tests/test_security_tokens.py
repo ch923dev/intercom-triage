@@ -44,3 +44,24 @@ def test_verify_rejects_expired() -> None:
 def test_verify_rejects_garbage() -> None:
     with pytest.raises(tokens.TokenError):
         tokens.verify_access_token(SECRET, "not-a-jwt")
+
+
+def test_refresh_token_is_random_and_hash_is_stable() -> None:
+    raw1 = tokens.generate_refresh_token()
+    raw2 = tokens.generate_refresh_token()
+    assert raw1 != raw2
+    assert len(raw1) >= 32
+    assert tokens.hash_refresh_token(raw1) == tokens.hash_refresh_token(raw1)
+    assert tokens.hash_refresh_token(raw1) != tokens.hash_refresh_token(raw2)
+
+
+def test_encrypt_decrypt_upstream_roundtrips() -> None:
+    key = tokens.generate_encryption_key()
+    blob = tokens.encrypt_secret(key, "onlysales-refresh-xyz")
+    assert blob != "onlysales-refresh-xyz"
+    assert tokens.decrypt_secret(key, blob) == "onlysales-refresh-xyz"
+
+
+def test_encrypt_with_empty_key_returns_none() -> None:
+    assert tokens.encrypt_secret("", "anything") is None
+    assert tokens.decrypt_secret("", "anything") is None
