@@ -709,6 +709,11 @@ class Ticket(Base):
     resolved_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    # Phase 3 (T170) — assignment. assigned_to NULL = unassigned.
+    assigned_to: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
         Index("ix_tickets_updated_at", "updated_at"),
@@ -762,6 +767,7 @@ class Ticket(Base):
             "IN ('auto_reply','thanks','spam','out_of_office','other'))",
             name="tickets_non_actionable_kind_check",
         ),
+        Index("ix_tickets_assigned_to", "assigned_to"),
     )
 
 

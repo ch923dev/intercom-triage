@@ -541,10 +541,7 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
             ).all()
         }
         actor_ids: set[int] = {row.resolved_by for row in rows if row.resolved_by is not None}
-        for _r in rows:
-            _at: int | None = getattr(_r, "assigned_to", None)
-            if _at is not None:
-                actor_ids.add(_at)
+        actor_ids |= {row.assigned_to for row in rows if row.assigned_to is not None}
         actor_ids |= {o.acted_by for o in overrides.values() if o.acted_by is not None}
         users = (
             {
@@ -623,12 +620,8 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
                     and _ov.acted_by is not None
                     else None
                 ),
-                assigned_to=(
-                    users.get(_assigned_to)
-                    if (_assigned_to := getattr(row, "assigned_to", None)) is not None
-                    else None
-                ),
-                assigned_at=getattr(row, "assigned_at", None),
+                assigned_to=(users.get(row.assigned_to) if row.assigned_to is not None else None),
+                assigned_at=row.assigned_at,
                 non_actionable_kind=row.non_actionable_kind,  # type: ignore[arg-type]
                 ai_resolve_enabled=effective_ai_resolve,
                 ai_resolve_override=row.ai_resolve_enabled,
