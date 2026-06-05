@@ -149,9 +149,10 @@ async def bulk_dismiss_chip(
 async def bulk_non_actionable(
     body: BulkTicketIds,
     session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(get_current_user),
 ) -> BulkResult:
     """Mark N tickets non-actionable. Already-resolved rows fail with 409."""
-    return await bulk_svc.bulk_mark_non_actionable(session, body.ticket_ids)
+    return await bulk_svc.bulk_mark_non_actionable(session, body.ticket_ids, resolved_by=user.id)
 
 
 @router.post("/bulk/park", response_model=BulkResult)
@@ -216,9 +217,10 @@ async def resolve_ticket(
 async def mark_ticket_non_actionable(
     ticket_id: str,
     session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(get_current_user),
 ) -> ResolveResponse:
     """Mark a ticket non-actionable. 409 if already resolved, 404 if unknown."""
-    out = await resolution_svc.mark_non_actionable(session, ticket_id)
+    out = await resolution_svc.mark_non_actionable(session, ticket_id, resolved_by=user.id)
     return ResolveResponse(resolved_at=out.resolved_at, resolved_source=out.resolved_source)
 
 

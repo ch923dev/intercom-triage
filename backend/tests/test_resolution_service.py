@@ -158,7 +158,7 @@ async def test_mark_non_actionable_stamps_source(session: AsyncSession) -> None:
     )
     await session.commit()
 
-    out = await mark_non_actionable(session, "t-na-svc-1")
+    out = await mark_non_actionable(session, "t-na-svc-1", resolved_by=None)
     assert out.resolved_source == "non_actionable"
     assert out.resolved_at is not None
 
@@ -196,7 +196,7 @@ async def test_mark_non_actionable_409_when_already_resolved(session: AsyncSessi
     await session.commit()
 
     with pytest.raises(HTTPException) as exc:
-        await mark_non_actionable(session, "t-na-svc-2")
+        await mark_non_actionable(session, "t-na-svc-2", resolved_by=None)
     assert exc.value.status_code == 409
 
 
@@ -207,5 +207,5 @@ async def test_mark_non_actionable_404_unknown(session: AsyncSession) -> None:
     from app.services.resolution import mark_non_actionable
 
     with pytest.raises(HTTPException) as exc:
-        await mark_non_actionable(session, "ghost")
+        await mark_non_actionable(session, "ghost", resolved_by=None)
     assert exc.value.status_code == 404

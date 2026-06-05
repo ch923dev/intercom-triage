@@ -121,7 +121,7 @@ def apply_unpark(row: Ticket) -> None:
     clear_parked(row)
 
 
-def apply_mark_non_actionable(row: Ticket) -> ResolveOutcome:
+def apply_mark_non_actionable(row: Ticket, *, resolved_by: int | None) -> ResolveOutcome:
     """Mutate a Ticket row to mark it non-actionable. Does NOT commit.
 
     Sub-state of resolved — sets resolved_at + resolved_source='non_actionable'.
@@ -134,6 +134,7 @@ def apply_mark_non_actionable(row: Ticket) -> ResolveOutcome:
     row.resolved_source = "non_actionable"
     # Manual marks carry no AI kind (D3). Explicit for the CHECK-coupling pattern.
     row.non_actionable_kind = None
+    row.resolved_by = resolved_by
     clear_parked(row)
     return ResolveOutcome(resolved_at=now, resolved_source="non_actionable")
 
@@ -157,10 +158,12 @@ async def reopen(session: AsyncSession, ticket_id: str) -> None:
     metrics.incr("tickets_reopened_total")
 
 
-async def mark_non_actionable(session: AsyncSession, ticket_id: str) -> ResolveOutcome:
+async def mark_non_actionable(
+    session: AsyncSession, ticket_id: str, *, resolved_by: int | None
+) -> ResolveOutcome:
     """Mark a ticket non-actionable. 409 if already resolved, 404 if unknown."""
     row = await get_or_404(session, ticket_id)
-    outcome = apply_mark_non_actionable(row)
+    outcome = apply_mark_non_actionable(row, resolved_by=resolved_by)
     await session.commit()
     metrics.incr("tickets_resolved_total.non_actionable")
     return outcome

@@ -107,12 +107,14 @@ async def bulk_reopen(session: AsyncSession, ticket_ids: list[str]) -> BulkResul
     return result
 
 
-async def bulk_mark_non_actionable(session: AsyncSession, ticket_ids: list[str]) -> BulkResult:
+async def bulk_mark_non_actionable(
+    session: AsyncSession, ticket_ids: list[str], *, resolved_by: int | None
+) -> BulkResult:
     """Mark N tickets non-actionable. Already-resolved rows fail with 409."""
 
     async def per_id(tid: str) -> None:
         row = await resolution_svc.get_or_404(session, tid)
-        resolution_svc.apply_mark_non_actionable(row)
+        resolution_svc.apply_mark_non_actionable(row, resolved_by=resolved_by)
         metrics.incr("tickets_resolved_total.non_actionable")
 
     result = await _run_per_id(session, ticket_ids, per_id)
