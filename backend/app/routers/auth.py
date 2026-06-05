@@ -19,17 +19,22 @@ from app.services import auth as svc
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-_login_limiter: FixedWindowLimiter | None = None
+_ip_limiter: FixedWindowLimiter | None = None
+_email_limiter: FixedWindowLimiter | None = None
 
 
-def _limiter(config: AppConfig) -> FixedWindowLimiter:
-    global _login_limiter
-    if _login_limiter is None:
-        _login_limiter = FixedWindowLimiter(
+def _limiters(config: AppConfig) -> tuple[FixedWindowLimiter, FixedWindowLimiter]:
+    global _ip_limiter, _email_limiter
+    if _ip_limiter is None or _email_limiter is None:
+        _ip_limiter = FixedWindowLimiter(
             max_attempts=config.login_rate_max_attempts,
             window_seconds=config.login_rate_window_seconds,
         )
-    return _login_limiter
+        _email_limiter = FixedWindowLimiter(
+            max_attempts=config.login_rate_max_attempts,
+            window_seconds=config.login_rate_window_seconds,
+        )
+    return _ip_limiter, _email_limiter
 
 
 def _set_refresh_cookie(response: Response, config: AppConfig, value: str) -> None:
@@ -71,7 +76,10 @@ async def login(
     config: AppConfig = Depends(get_app_config),
 ) -> LoginResponse:
     client_ip = request.client.host if request.client else "unknown"
-    if not _limiter(config).allow(f"{client_ip}:{body.email}"):
+    ip_limiter, email_limiter = _limiters(config)
+    ip_ok = ip_limiter.allow(client_ip)
+    email_ok = email_limiter.allow(body.email)
+    if not (ip_ok and email_ok):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="too many attempts"
         )

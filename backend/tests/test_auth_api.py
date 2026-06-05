@@ -63,6 +63,46 @@ async def test_login_rejects_bad_password(login_app: FastAPI) -> None:
 
 
 @pytest.mark.asyncio
+async def test_login_rate_limited_per_ip_across_emails(login_app: FastAPI) -> None:
+    """Per-IP limiter trips even when the email changes each attempt.
+
+    The old combined-key limiter keyed on f"{ip}:{email}", so each distinct
+    email opened a fresh bucket and the per-IP cap was never enforced.  The new
+    dual-limiter records the IP separately, so after login_rate_max_attempts
+    (default 10) attempts from the same IP — regardless of which email —
+    the 11th attempt must return 429.
+    """
+    import app.routers.auth as auth_router
+
+    # Reset module-level limiter globals so this test starts from a clean slate
+    # even if other tests already initialised them.
+    auth_router._ip_limiter = None
+    auth_router._email_limiter = None
+    try:
+        transport = ASGITransport(app=login_app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            # Fire 10 attempts — each with a DIFFERENT email so the old combined key
+            # would never trip.  Bad password so OnlySales always returns 401.
+            for i in range(10):
+                r = await ac.post(
+                    "/auth/login",
+                    json={"email": f"user{i}@example.com", "password": "bad"},
+                )
+                assert r.status_code == 401, f"attempt {i}: expected 401, got {r.status_code}"
+
+            # 11th attempt — per-IP window is now exhausted regardless of email.
+            r = await ac.post(
+                "/auth/login",
+                json={"email": "new_email@example.com", "password": "bad"},
+            )
+            assert r.status_code == 429, f"expected 429 (per-IP rate limit), got {r.status_code}"
+    finally:
+        # Tear down so the exhausted buckets don't bleed into subsequent tests.
+        auth_router._ip_limiter = None
+        auth_router._email_limiter = None
+
+
+@pytest.mark.asyncio
 async def test_refresh_rotates_and_logout_revokes(login_app: FastAPI) -> None:
     transport = ASGITransport(app=login_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
