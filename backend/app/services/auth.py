@@ -85,19 +85,18 @@ async def complete_login(
     return IssuedSession(access_token=access, refresh_cookie=raw_refresh, user=user)
 
 
-async def _active_session(session: AsyncSession, raw_refresh: str) -> SessionRow:
-    row = await session.scalar(
-        select(SessionRow).where(
-            SessionRow.refresh_token_hash == tokens.hash_refresh_token(raw_refresh)
-        )
-    )
-    if row is None:
-        raise AuthSessionError("unknown refresh token")
-    if row.revoked_at is not None:
-        raise AuthSessionError("session revoked")
-    if row.expires_at <= naive_utcnow():
-        raise AuthSessionError("session expired")
-    return row
+async def _lookup_session(
+    session: AsyncSession, raw_refresh: str
+) -> tuple[SessionRow | None, bool]:
+    """Find the session by current hash, else by the previous (rotated-away)
+    hash. Returns (row, reused) — reused=True means a superseded token was
+    replayed (theft signal)."""
+    h = tokens.hash_refresh_token(raw_refresh)
+    row = await session.scalar(select(SessionRow).where(SessionRow.refresh_token_hash == h))
+    if row is not None:
+        return row, False
+    prior = await session.scalar(select(SessionRow).where(SessionRow.prev_refresh_token_hash == h))
+    return prior, prior is not None
 
 
 async def rotate_session(
@@ -108,12 +107,24 @@ async def rotate_session(
     access_ttl: int,
     refresh_ttl: int,
 ) -> IssuedSession:
-    row = await _active_session(session, raw_refresh)
+    row, reused = await _lookup_session(session, raw_refresh)
+    if row is None:
+        raise AuthSessionError("unknown refresh token")
+    if reused:
+        if row.revoked_at is None:
+            row.revoked_at = naive_utcnow()
+            await session.commit()
+        raise AuthSessionError("refresh token reuse detected")
+    if row.revoked_at is not None:
+        raise AuthSessionError("session revoked")
+    if row.expires_at <= naive_utcnow():
+        raise AuthSessionError("session expired")
     user = await session.get(User, row.user_id)
     if user is None or not user.is_active:
         raise AuthSessionError("user inactive")
     new_raw = tokens.generate_refresh_token()
     now = naive_utcnow()
+    row.prev_refresh_token_hash = row.refresh_token_hash
     row.refresh_token_hash = tokens.hash_refresh_token(new_raw)
     row.last_used_at = now
     row.expires_at = now + timedelta(seconds=refresh_ttl)
