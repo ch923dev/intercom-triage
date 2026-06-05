@@ -224,7 +224,8 @@ const parkedTagLabel = computed(() => {
         isClosed ||
         labels.length ||
         props.ticket.resolution_chip_state ||
-        props.ticket.parked_at !== null
+        props.ticket.parked_at !== null ||
+        props.ticket.assigned_to !== null
       "
       class="tags"
     >
@@ -245,6 +246,9 @@ const parkedTagLabel = computed(() => {
       </span>
       <span v-if="noteLines" class="tag note">Notes ({{ noteLines }})</span>
       <ResolutionChip :ticket="props.ticket" />
+      <span v-if="props.ticket.assigned_to" class="tag assignee">
+        @{{ props.ticket.assigned_to.name ?? props.ticket.assigned_to.id }}
+      </span>
     </div>
   </article>
 </template>

@@ -188,6 +188,20 @@ async function onLogout() {
       <span v-if="readyCount > 0" class="ready-badge mono">★ {{ readyCount }}</span>
     </button>
 
+    <button
+      v-if="tickets.myTickets.length > 0 || tickets.myQueueOnly"
+      class="pill my-queue"
+      :class="{ active: tickets.myQueueOnly }"
+      :title="
+        tickets.myQueueOnly
+          ? 'Showing My Queue — click to clear'
+          : 'Show only your assigned tickets'
+      "
+      @click="tickets.toggleMyQueueOnly()"
+    >
+      <span class="mono">My Queue</span>
+    </button>
+
     <!-- Follow-up status pill (T051) — accent-pulse while an alarm is firing. -->
     <button
       v-if="followups.pendingCount > 0"
@@ -349,6 +363,18 @@ async function onLogout() {
 }
 .pill.parked .ready-badge {
   margin-left: 6px;
+  color: var(--accent);
+}
+.pill.my-queue {
+  cursor: pointer;
+}
+.pill.my-queue:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.pill.my-queue.active {
+  background: var(--chip-bg);
+  border-color: var(--accent);
   color: var(--accent);
 }
 /* Search — the label is the visual chip; the input inside is borderless. */

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { ParkedReason, Ticket } from '@/types/api';
+import AssigneePicker from './AssigneePicker.vue';
 import CollapsibleSection from './CollapsibleSection.vue';
 import ParkMenu from '@/components/ParkMenu.vue';
 import { useTicketsStore } from '@/stores/tickets';
@@ -94,6 +95,7 @@ async function onUnpark() {
         by {{ ticket.resolved_by.name ?? 'unknown' }}
       </span>
     </div>
+    <AssigneePicker :ticket-id="ticket.id" :assigned-to="ticket.assigned_to" />
     <div class="presets">
       <button v-if="ticket.resolved_at" class="chip" @click="onReopen">Reopen</button>
       <button v-else-if="ticket.parked_at" class="chip" @click="onUnpark">Unpark</button>

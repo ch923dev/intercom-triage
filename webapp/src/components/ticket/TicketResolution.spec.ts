@@ -1,11 +1,21 @@
 // TicketResolution flyout spec — Mark-non-actionable button visibility
 // per ticket state. Reference: spec §10.2.
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import TicketResolution from './TicketResolution.vue';
 import type { Ticket } from '@/types/api';
+
+vi.mock('@/api/client', () => ({
+  api: {
+    listUsers: vi.fn().mockResolvedValue([]),
+    assignTicket: vi.fn(),
+    listTickets: vi.fn().mockResolvedValue([]),
+  },
+  setAccessToken: vi.fn(),
+  onAuthLost: vi.fn(),
+}));
 
 const NOW = '2026-05-25T00:00:00.000Z';
 
