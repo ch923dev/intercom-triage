@@ -90,6 +90,9 @@ async function onUnpark() {
         {{ parkedLabel }}
       </span>
       <span v-else class="status-pill mono">Open</span>
+      <span v-if="ticket.resolved_at && ticket.resolved_by" class="status-by">
+        by {{ ticket.resolved_by.name ?? 'unknown' }}
+      </span>
     </div>
     <div class="presets">
       <button v-if="ticket.resolved_at" class="chip" @click="onReopen">Reopen</button>
@@ -150,6 +153,11 @@ async function onUnpark() {
 .status-row {
   display: flex;
   align-items: center;
+  gap: 6px;
+}
+.status-by {
+  font-size: 0.85em;
+  opacity: 0.7;
 }
 .status-pill.ready {
   color: var(--accent);
