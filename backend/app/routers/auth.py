@@ -13,7 +13,7 @@ from app.config import AppConfig
 from app.db import get_session
 from app.deps import CurrentUser, get_app_config, get_current_user, get_onlysales
 from app.models import User
-from app.schemas import LoginRequest, LoginResponse, MeResponse, UserOut
+from app.schemas import LoginRequest, LoginResponse, MeResponse, UserOut, UserRef
 from app.security.ratelimit import FixedWindowLimiter
 from app.services import auth as svc
 
@@ -169,10 +169,10 @@ async def me(
 users_router = APIRouter(prefix="/users", tags=["users"])
 
 
-@users_router.get("", response_model=list[UserOut])
+@users_router.get("", response_model=list[UserRef])
 async def list_users(
     session: AsyncSession = Depends(get_session),
     _user: CurrentUser = Depends(get_current_user),
-) -> list[UserOut]:
+) -> list[UserRef]:
     rows = (await session.scalars(select(User).where(User.is_active.is_(True)))).all()
-    return [_user_out(r) for r in rows]
+    return [UserRef(id=r.id, name=r.name) for r in rows]

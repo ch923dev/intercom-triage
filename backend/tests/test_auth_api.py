@@ -103,6 +103,15 @@ async def test_login_rate_limited_per_ip_across_emails(login_app: FastAPI) -> No
 
 
 @pytest.mark.asyncio
+async def test_users_list_excludes_onlysales_id_and_scope(client: AsyncClient) -> None:
+    resp = await client.get("/users")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert rows and "onlysales_id" not in rows[0] and "scope" not in rows[0]
+    assert set(rows[0].keys()) == {"id", "name"}
+
+
+@pytest.mark.asyncio
 async def test_refresh_rotates_and_logout_revokes(login_app: FastAPI) -> None:
     transport = ASGITransport(app=login_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
