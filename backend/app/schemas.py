@@ -801,7 +801,7 @@ class UserRef(BaseModel):
 
 
 class AssignRequest(BaseModel):
-    user_id: int | None  # null clears the assignment
+    user_id: int | None  # required; pass null to unassign (omission is rejected)
 
 
 class AssignResponse(BaseModel):

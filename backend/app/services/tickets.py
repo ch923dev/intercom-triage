@@ -465,25 +465,30 @@ async def edit_ticket(
     metrics.incr("tickets_edited_total")
 
 
+def apply_assign(row: Ticket, *, user: User | None) -> None:
+    """Set (or, with user=None, clear) a ticket's assignment fields. Does NOT
+    commit; caller validates the user and owns the transaction."""
+    row.assigned_to = user.id if user is not None else None
+    row.assigned_at = naive_utcnow() if user is not None else None
+
+
 async def assign(
     session: AsyncSession, ticket_id: str, *, user_id: int | None
 ) -> tuple[UserRef | None, datetime | None]:
     """Assign (or, with user_id=None, unassign) a ticket. 404 unknown ticket,
     422 unknown/inactive user."""
-    row = await session.get(Ticket, ticket_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"ticket {ticket_id!r} not found")
+    from app.services import resolution as resolution_svc
+
+    row = await resolution_svc.get_or_404(session, ticket_id)
     if user_id is None:
-        row.assigned_to = None
-        row.assigned_at = None
+        apply_assign(row, user=None)
         await session.commit()
         metrics.incr("tickets_assigned_total")
         return None, None
     user = await session.get(User, user_id)
     if user is None or not user.is_active:
         raise HTTPException(status_code=422, detail=f"user {user_id} not found")
-    row.assigned_to = user_id
-    row.assigned_at = naive_utcnow()
+    apply_assign(row, user=user)
     await session.commit()
     metrics.incr("tickets_assigned_total")
     return UserRef(id=user.id, name=user.name), row.assigned_at

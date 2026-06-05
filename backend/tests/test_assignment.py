@@ -48,3 +48,8 @@ async def test_bulk_assign(client, session) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert set(body["ok_ids"]) == {"a", "b"}
+    # Verify DB state: bulk closure actually mutated both rows.
+    session.expire_all()
+    for tid in ("a", "b"):
+        row = await session.get(Ticket, tid)
+        assert row is not None and row.assigned_to == 1 and row.assigned_at is not None
