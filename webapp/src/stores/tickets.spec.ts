@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useTicketsStore } from './tickets';
+import { useAuthStore } from './auth';
 import type { Ticket } from '@/types/api';
 
 vi.mock('@/api/client', () => ({
@@ -22,7 +23,11 @@ vi.mock('@/api/client', () => ({
     overrideCategory: vi.fn(),
     editTicket: vi.fn(),
     listTickets: vi.fn(),
+    assignTicket: vi.fn(),
+    bulkAssign: vi.fn(),
   },
+  setAccessToken: vi.fn(),
+  onAuthLost: vi.fn(),
 }));
 
 const NOW = '2026-05-25T00:00:00.000Z';
@@ -536,5 +541,49 @@ describe('ticketsStore.bulkReopen partial-failure rollback', () => {
     expect(s.resolvedTickets.map((t) => t.id)).toEqual(['X', 'A', 'B', 'C', 'Y']);
     // None leaked into the open list.
     expect(s.tickets.map((t) => t.id)).toEqual([]);
+  });
+});
+
+describe('ticketsStore.myTickets + myQueueOnly (T14)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('myTickets filters to the current user', () => {
+    const auth = useAuthStore();
+    auth.user = { id: 7, onlysales_id: 'o', email: 'e', name: 'Me', scope: null };
+    const tickets = useTicketsStore();
+    tickets.tickets.push(
+      fakeTicket('a', { assigned_to: { id: 7, name: 'Me' } }),
+      fakeTicket('b', { assigned_to: { id: 9, name: 'Other' } }),
+      fakeTicket('c', { assigned_to: null }),
+    );
+    expect(tickets.myTickets.map((t) => t.id)).toEqual(['a']);
+  });
+
+  it('myTickets returns empty when no user is logged in', () => {
+    const auth = useAuthStore();
+    auth.user = null;
+    const tickets = useTicketsStore();
+    tickets.tickets.push(fakeTicket('a', { assigned_to: { id: 7, name: 'Me' } }));
+    expect(tickets.myTickets).toEqual([]);
+  });
+
+  it('myQueueOnly toggle narrows facetVisibleTickets to current user', () => {
+    const auth = useAuthStore();
+    auth.user = { id: 7, onlysales_id: 'o', email: 'e', name: 'Me', scope: null };
+    const tickets = useTicketsStore();
+    tickets.tickets.push(
+      fakeTicket('a', { assigned_to: { id: 7, name: 'Me' } }),
+      fakeTicket('b', { assigned_to: { id: 9, name: 'Other' } }),
+      fakeTicket('c', { assigned_to: null }),
+    );
+
+    expect(tickets.facetVisibleTickets.map((t) => t.id).sort()).toEqual(['a', 'b', 'c']);
+    tickets.toggleMyQueueOnly();
+    expect(tickets.facetVisibleTickets.map((t) => t.id)).toEqual(['a']);
+    tickets.toggleMyQueueOnly();
+    expect(tickets.facetVisibleTickets.map((t) => t.id).sort()).toEqual(['a', 'b', 'c']);
   });
 });

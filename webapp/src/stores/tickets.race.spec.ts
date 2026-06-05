@@ -33,7 +33,11 @@ vi.mock('@/api/client', () => ({
     overrideCategory: vi.fn(),
     editTicket: vi.fn(),
     listTickets: vi.fn(),
+    assignTicket: vi.fn(),
+    bulkAssign: vi.fn(),
   },
+  setAccessToken: vi.fn(),
+  onAuthLost: vi.fn(),
 }));
 
 const NOW = '2026-05-25T00:00:00.000Z';

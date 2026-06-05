@@ -15,6 +15,8 @@ vi.mock('@/api/client', () => ({
     listCategories: vi.fn().mockResolvedValue({ categories: [], pending_proposals: [] }),
     listFollowups: vi.fn().mockResolvedValue([]),
   },
+  setAccessToken: vi.fn(),
+  onAuthLost: vi.fn(),
 }));
 
 const NOW = '2026-05-25T00:00:00.000Z';

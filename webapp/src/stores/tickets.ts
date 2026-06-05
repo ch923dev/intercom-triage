@@ -8,6 +8,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
+import { useAuthStore } from '@/stores/auth';
 import type { BulkResult, NonActionableKind, ParkedReason, Ticket } from '@/types/api';
 import { NON_ACTIONABLE_KIND_LABELS } from '@/utils/nonActionable';
 import { needsReview } from '@/utils/review';
@@ -41,6 +42,8 @@ interface TicketsState {
 }
 
 export const useTicketsStore = defineStore('tickets', () => {
+  const auth = useAuthStore();
+
   const state = ref<TicketsState>({
     tickets: [],
     loading: false,
@@ -213,6 +216,18 @@ export const useTicketsStore = defineStore('tickets', () => {
    *  open list (resolved_at is null), so this is a straight filter. */
   const parkedTickets = computed(() => state.value.tickets.filter((t) => t.parked_at !== null));
 
+  /** Tickets assigned to the currently logged-in user. */
+  const myTickets = computed(() =>
+    auth.user ? state.value.tickets.filter((t) => t.assigned_to?.id === auth.user!.id) : [],
+  );
+
+  /** When true, the board narrows every category column to tickets assigned to
+   *  the current user (My Queue). Toggled from the Topbar. */
+  const myQueueOnly = ref(false);
+  function toggleMyQueueOnly() {
+    myQueueOnly.value = !myQueueOnly.value;
+  }
+
   /** Count of parked tickets whose wake time has passed ("ready to resume"). */
   const readyParkedCount = computed(() => {
     const now = Date.now();
@@ -232,6 +247,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     base = parkedOnly.value
       ? base.filter((t) => t.parked_at !== null)
       : base.filter((t) => t.parked_at === null);
+    if (myQueueOnly.value) base = base.filter((t) => t.assigned_to?.id === auth.user?.id);
     if (!isFilterActive.value) return base;
     const now = Date.now();
     return base.filter((t) =>
@@ -625,6 +641,35 @@ export const useTicketsStore = defineStore('tickets', () => {
     }
   }
 
+  // ── Assignment (T14) ──────────────────────────────────────────────────────
+
+  /** Assign (or unassign) a ticket; reflects the server response immediately. */
+  async function assign(ticketId: string, userId: number | null) {
+    const { assigned_to, assigned_at } = await api.assignTicket(ticketId, userId);
+    const t = state.value.tickets.find((x) => x.id === ticketId);
+    if (t) {
+      t.assigned_to = assigned_to;
+      t.assigned_at = assigned_at;
+    }
+  }
+
+  /** Bulk assign (or unassign) N tickets. Returns the BulkResult so the caller
+   *  can render a toast. Optimistic: stamps a client-side assigned_at for ok ids;
+   *  reconciled on the next board refresh. */
+  async function bulkAssign(ids: string[], userId: number | null): Promise<BulkResult> {
+    const capped = overCapResult(ids);
+    if (capped) return capped;
+    const result = await api.bulkAssign(ids, userId);
+    for (const id of result.ok_ids) {
+      const t = state.value.tickets.find((x) => x.id === id);
+      if (t) {
+        t.assigned_to = userId === null ? null : (t.assigned_to ?? null);
+        t.assigned_at = userId === null ? null : new Date().toISOString();
+      }
+    }
+    return result;
+  }
+
   // ── Bulk actions (Phase 12, plan §8d) ──────────────────────────────────────
   //
   // Pattern: snapshot affected rows → optimistic mutate → API call →
@@ -977,5 +1022,11 @@ export const useTicketsStore = defineStore('tickets', () => {
     unparkTicket,
     bulkPark,
     bulkUnpark,
+    // Assignment (T14)
+    myTickets,
+    myQueueOnly,
+    toggleMyQueueOnly,
+    assign,
+    bulkAssign,
   };
 });

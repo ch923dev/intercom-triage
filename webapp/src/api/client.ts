@@ -24,8 +24,9 @@ import type {
   SuggestedPlaybook,
   Ticket,
   TicketNote,
+  UserRef,
 } from '@/types/api';
-import type { LoginRequest, LoginResponse, MeResponse, User } from '@/types/auth';
+import type { LoginRequest, LoginResponse, MeResponse } from '@/types/auth';
 
 const BASE = '/api';
 
@@ -156,6 +157,12 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ category_id: categoryId }),
     }),
+
+  assignTicket: (ticketId: string, userId: number | null) =>
+    request<{ assigned_to: UserRef | null; assigned_at: string | null }>(
+      `/tickets/${ticketId}/assign`,
+      { method: 'PATCH', body: JSON.stringify({ user_id: userId }) },
+    ),
 
   /** Operator-editable title + summary. Omit a field to leave it unchanged;
    *  pass `""` (empty string) to clear the override and let the next sync
@@ -320,6 +327,13 @@ export const api = {
       body: JSON.stringify({ ticket_ids: ticketIds, category_id: categoryId }),
     }),
 
+  /** Assign (or unassign) N tickets to a user. */
+  bulkAssign: (ticketIds: string[], userId: number | null): Promise<BulkResult> =>
+    request('/tickets/bulk/assign', {
+      method: 'PATCH',
+      body: JSON.stringify({ ticket_ids: ticketIds, user_id: userId }),
+    }),
+
   /** Suppress the resolution chip on N tickets. */
   bulkDismissChip: (ticketIds: string[]): Promise<BulkResult> =>
     request('/tickets/bulk/dismiss-chip', {
@@ -420,7 +434,7 @@ export const api = {
   refreshSession: (): Promise<LoginResponse> => request('/auth/refresh', { method: 'POST' }),
   logout: (): Promise<void> => request('/auth/logout', { method: 'POST' }),
   me: (): Promise<MeResponse> => request('/auth/me'),
-  listUsers: (): Promise<User[]> => request('/users'),
+  listUsers: (): Promise<UserRef[]> => request('/users'),
 
   // ── cluster content gaps (roadmap 3.2) ────────────────────────────────────
   /** Recurring-issue clusters whose dominant effective category has no active
