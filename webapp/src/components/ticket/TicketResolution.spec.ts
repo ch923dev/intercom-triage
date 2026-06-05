@@ -105,6 +105,6 @@ describe('TicketResolution', () => {
         }),
       },
     });
-    expect(w.text()).toContain('Alice');
+    expect(w.text()).toContain('by Alice');
   });
 });

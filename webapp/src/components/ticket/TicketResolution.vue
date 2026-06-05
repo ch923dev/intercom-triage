@@ -157,7 +157,7 @@ async function onUnpark() {
 }
 .status-by {
   font-size: 0.85em;
-  opacity: 0.7;
+  color: var(--ink-3);
 }
 .status-pill.ready {
   color: var(--accent);
