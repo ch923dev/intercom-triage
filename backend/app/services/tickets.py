@@ -19,7 +19,7 @@ from app.ai.pipeline import CategorizationResult, categorize_many
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig
 from app.metrics import metrics
-from app.models import AICacheEntry, Category, Followup, Override, Ticket, TicketNote
+from app.models import AICacheEntry, Category, Followup, Override, Ticket, TicketNote, User
 from app.schemas import (
     FilterSettings,
     FollowupRead,
@@ -27,6 +27,7 @@ from app.schemas import (
     IngestResponse,
     TicketNoteRead,
     TicketSchema,
+    UserRef,
 )
 from app.services.cache import get_cached, set_cached
 from app.services.categories import get_fallback
@@ -539,11 +540,26 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
                 )
             ).all()
         }
+        actor_ids: set[int] = {row.resolved_by for row in rows if row.resolved_by is not None}
+        for _r in rows:
+            _at: int | None = getattr(_r, "assigned_to", None)
+            if _at is not None:
+                actor_ids.add(_at)
+        actor_ids |= {o.acted_by for o in overrides.values() if o.acted_by is not None}
+        users = (
+            {
+                u.id: UserRef(id=u.id, name=u.name)
+                for u in (await session.scalars(select(User).where(User.id.in_(actor_ids)))).all()
+            }
+            if actor_ids
+            else {}
+        )
     else:
         overrides = {}
         followups = {}
         notes = {}
         ai_cache = {}
+        users = {}
 
     composed: list[TicketSchema] = []
     for row in rows:
@@ -599,6 +615,20 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
                 note=TicketNoteRead.model_validate(note) if note is not None else None,
                 resolved_at=row.resolved_at,
                 resolved_source=row.resolved_source,  # type: ignore[arg-type]
+                resolved_by=users.get(row.resolved_by) if row.resolved_by is not None else None,
+                acted_by=(
+                    users.get(_ov.acted_by)
+                    if user_override
+                    and (_ov := overrides.get(row.id)) is not None
+                    and _ov.acted_by is not None
+                    else None
+                ),
+                assigned_to=(
+                    users.get(_assigned_to)
+                    if (_assigned_to := getattr(row, "assigned_to", None)) is not None
+                    else None
+                ),
+                assigned_at=getattr(row, "assigned_at", None),
                 non_actionable_kind=row.non_actionable_kind,  # type: ignore[arg-type]
                 ai_resolve_enabled=effective_ai_resolve,
                 ai_resolve_override=row.ai_resolve_enabled,

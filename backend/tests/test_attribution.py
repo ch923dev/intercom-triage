@@ -63,3 +63,21 @@ async def test_bulk_non_actionable_stamps_resolved_by(client, session) -> None:
     for tid in ("bna1", "bna2"):
         row = await session.get(Ticket, tid)
         assert row is not None and row.resolved_by == 1 and row.resolved_source == "non_actionable"
+
+
+async def test_board_surfaces_resolved_by_name(client, session) -> None:
+    await _seed_ticket(session, "t2")
+    await client.post("/tickets/t2/resolve")
+    resp = await client.get("/tickets?resolved=true")
+    assert resp.status_code == 200
+    row = next(t for t in resp.json() if t["id"] == "t2")
+    assert row["resolved_by"] == {"id": 1, "name": "Seed Operator"}
+
+
+async def test_board_surfaces_acted_by_name(client, session) -> None:
+    await _seed_ticket(session, "t3")
+    await client.patch("/tickets/t3/category", json={"category_id": 1})
+    resp = await client.get("/tickets")
+    assert resp.status_code == 200
+    row = next(t for t in resp.json() if t["id"] == "t3")
+    assert row["acted_by"] == {"id": 1, "name": "Seed Operator"}
