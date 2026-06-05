@@ -22,7 +22,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.metrics import metrics
-from app.models import Category, Override, Ticket
+from app.models import Category, Override, Ticket, User
 from app.schemas import BulkFailure, BulkResult, ParkedReason
 from app.services import followups as followups_svc
 from app.services import resolution as resolution_svc
@@ -242,4 +242,31 @@ async def bulk_clear_followup(session: AsyncSession, ticket_ids: list[str]) -> B
 
     result = await _run_per_id(session, ticket_ids, per_id)
     _record_outcome("followup_clear", result)
+    return result
+
+
+# ── Assignment ────────────────────────────────────────────────────────────────
+
+
+async def bulk_assign(
+    session: AsyncSession, ticket_ids: list[str], *, user_id: int | None
+) -> BulkResult:
+    """Assign (or unassign, user_id=None) N tickets. 422 up-front for an unknown
+    user; per-id 404 for an unknown ticket."""
+    if user_id is not None:
+        user = await session.get(User, user_id)
+        if user is None or not user.is_active:
+            raise HTTPException(status_code=422, detail=f"user {user_id} not found")
+    now = naive_utcnow()
+
+    async def per_id(tid: str) -> None:
+        ticket = await session.get(Ticket, tid)
+        if ticket is None:
+            raise HTTPException(status_code=404, detail=f"ticket {tid!r} not found")
+        ticket.assigned_to = user_id
+        ticket.assigned_at = now if user_id is not None else None
+        metrics.incr("tickets_assigned_total")
+
+    result = await _run_per_id(session, ticket_ids, per_id)
+    _record_outcome("assign", result)
     return result

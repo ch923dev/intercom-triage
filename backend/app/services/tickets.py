@@ -465,6 +465,30 @@ async def edit_ticket(
     metrics.incr("tickets_edited_total")
 
 
+async def assign(
+    session: AsyncSession, ticket_id: str, *, user_id: int | None
+) -> tuple[UserRef | None, datetime | None]:
+    """Assign (or, with user_id=None, unassign) a ticket. 404 unknown ticket,
+    422 unknown/inactive user."""
+    row = await session.get(Ticket, ticket_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"ticket {ticket_id!r} not found")
+    if user_id is None:
+        row.assigned_to = None
+        row.assigned_at = None
+        await session.commit()
+        metrics.incr("tickets_assigned_total")
+        return None, None
+    user = await session.get(User, user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=422, detail=f"user {user_id} not found")
+    row.assigned_to = user_id
+    row.assigned_at = naive_utcnow()
+    await session.commit()
+    metrics.incr("tickets_assigned_total")
+    return UserRef(id=user.id, name=user.name), row.assigned_at
+
+
 async def get_sync_state(session: AsyncSession) -> dict[str, datetime]:
     """Return `{ticket_id: updated_at}` for every stored ticket.
 

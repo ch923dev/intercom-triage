@@ -12,6 +12,9 @@ from app.db import get_session
 from app.deps import CurrentUser, get_app_config, get_current_user, get_intercom, get_openrouter
 from app.schemas import (
     AIResolveSet,
+    AssignRequest,
+    AssignResponse,
+    BulkAssign,
     BulkCategoryUpdate,
     BulkParkRequest,
     BulkResult,
@@ -173,6 +176,16 @@ async def bulk_unpark(
     return await bulk_svc.bulk_unpark(session, body.ticket_ids)
 
 
+@router.patch("/bulk/assign", response_model=BulkResult)
+async def bulk_assign(
+    body: BulkAssign,
+    session: AsyncSession = Depends(get_session),
+    _user: CurrentUser = Depends(get_current_user),
+) -> BulkResult:
+    """Assign N tickets to one operator (user_id=null clears). Per-id ok/failed."""
+    return await bulk_svc.bulk_assign(session, body.ticket_ids, user_id=body.user_id)
+
+
 @router.patch("/{ticket_id}/category", response_model=OverrideResponse)
 async def override_category(
     ticket_id: str,
@@ -279,3 +292,15 @@ async def dismiss_chip(
     """Suppress the resolution chip until `tickets.updated_at` advances."""
     await resolution_svc.dismiss_chip(session, ticket_id)
     return OkResponse()
+
+
+@router.patch("/{ticket_id}/assign", response_model=AssignResponse)
+async def assign_ticket(
+    ticket_id: str,
+    body: AssignRequest,
+    session: AsyncSession = Depends(get_session),
+    _user: CurrentUser = Depends(get_current_user),
+) -> AssignResponse:
+    """Assign a ticket to an operator (user_id=null clears it)."""
+    ref, at = await svc.assign(session, ticket_id, user_id=body.user_id)
+    return AssignResponse(assigned_to=ref, assigned_at=at)

@@ -800,6 +800,21 @@ class UserRef(BaseModel):
     name: str | None
 
 
+class AssignRequest(BaseModel):
+    user_id: int | None  # null clears the assignment
+
+
+class AssignResponse(BaseModel):
+    assigned_to: UserRef | None
+    assigned_at: UTCDatetime | None
+
+
+class BulkAssign(BulkTicketIds):
+    """`PATCH /tickets/bulk/assign` body — assign N tickets to one operator (or null)."""
+
+    user_id: int | None
+
+
 class LoginResponse(BaseModel):
     access_token: str
     user: UserOut
