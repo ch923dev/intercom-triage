@@ -19,7 +19,7 @@ from app.config import AppConfig, get_config
 from app.db import make_engine, make_session_factory
 from app.deps import CurrentUser, get_current_user, require_session_or_bearer
 from app.main import create_app
-from app.models import init_db
+from app.models import User, init_db
 
 
 class FakeEncoder:
@@ -92,6 +92,20 @@ async def app(test_config: AppConfig) -> AsyncIterator[FastAPI]:
     engine = make_engine(test_config.database_url)
     session_factory = make_session_factory(engine)
     await init_db(engine, session_factory)
+
+    # The get_current_user override returns id=1; seed the matching mirror user
+    # so attribution / assignment FKs (resolved_by, assigned_to) resolve.
+    async with session_factory() as seed_session:
+        seed_session.add(
+            User(
+                id=1,
+                onlysales_id="seed-oid",
+                email="op@test",
+                name="Seed Operator",
+                scope="admin",
+            )
+        )
+        await seed_session.commit()
 
     application.state.engine = engine
     application.state.session_factory = session_factory
