@@ -496,6 +496,11 @@ class TicketSchema(HydratedTicket):
     parked_until: UTCDatetime | None = None
     parked_reason: ParkedReason | None = None
     parked_note: str | None = None
+    # Phase 2/3 (T169/T170) — attribution + assignment. Board-state only.
+    resolved_by: UserRef | None = None
+    acted_by: UserRef | None = None
+    assigned_to: UserRef | None = None
+    assigned_at: UTCDatetime | None = None
 
 
 class CategoryUpdate(BaseModel):
@@ -785,6 +790,14 @@ class UserOut(BaseModel):
     email: str
     name: str | None
     scope: str | None
+
+
+class UserRef(BaseModel):
+    """Lightweight actor reference embedded on the board ticket — id + name only.
+    Board-state only; never on HydratedTicket (invariant #2)."""
+
+    id: int
+    name: str | None
 
 
 class LoginResponse(BaseModel):
