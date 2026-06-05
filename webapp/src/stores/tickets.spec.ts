@@ -586,4 +586,151 @@ describe('ticketsStore.myTickets + myQueueOnly (T14)', () => {
     tickets.toggleMyQueueOnly();
     expect(tickets.facetVisibleTickets.map((t) => t.id).sort()).toEqual(['a', 'b', 'c']);
   });
+
+  it('myQueueOnly returns empty when no user is logged in (Fix 2)', () => {
+    const auth = useAuthStore();
+    auth.user = null;
+    const tickets = useTicketsStore();
+    // A ticket with assigned_to: null — without the fix this would match
+    // `undefined === undefined` and incorrectly appear in My Queue.
+    tickets.tickets.push(fakeTicket('a', { assigned_to: null }));
+    tickets.toggleMyQueueOnly();
+    expect(tickets.facetVisibleTickets).toEqual([]);
+  });
+});
+
+describe('ticketsStore.assign race guard (Fix 1)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('holds isMutating while the API call is in flight', async () => {
+    const { api } = await import('@/api/client');
+    const d = deferred<{ assigned_to: null; assigned_at: null }>();
+    (api.assignTicket as ReturnType<typeof vi.fn>).mockReturnValue(d.promise);
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('x'));
+
+    const inFlight = s.assign('x', null);
+    expect(s.isMutating).toBe(true);
+
+    d.resolve({ assigned_to: null, assigned_at: null });
+    await inFlight;
+    expect(s.isMutating).toBe(false);
+  });
+
+  it('lowers isMutating even on API failure', async () => {
+    const { api } = await import('@/api/client');
+    (api.assignTicket as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('net'));
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('x'));
+
+    await expect(s.assign('x', 1)).rejects.toThrow('net');
+    expect(s.isMutating).toBe(false);
+  });
+
+  it('blocks silentRefresh while assign is in flight', async () => {
+    const { api } = await import('@/api/client');
+    const d = deferred<{ assigned_to: null; assigned_at: null }>();
+    (api.assignTicket as ReturnType<typeof vi.fn>).mockReturnValue(d.promise);
+    (api.listTickets as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('x'));
+
+    const inFlight = s.assign('x', null);
+    await s.silentRefresh();
+    expect(api.listTickets).not.toHaveBeenCalled();
+
+    d.resolve({ assigned_to: null, assigned_at: null });
+    await inFlight;
+  });
+});
+
+describe('ticketsStore.bulkAssign race guard + self-assign fill (Fix 1 + Fix 3)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('holds isMutating while the bulk API call is in flight', async () => {
+    const { api } = await import('@/api/client');
+    const d = deferred<{ ok_ids: string[]; failed: [] }>();
+    (api.bulkAssign as ReturnType<typeof vi.fn>).mockReturnValue(d.promise);
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a'));
+
+    const inFlight = s.bulkAssign(['a'], 7);
+    expect(s.isMutating).toBe(true);
+
+    d.resolve({ ok_ids: ['a'], failed: [] });
+    await inFlight;
+    expect(s.isMutating).toBe(false);
+  });
+
+  it('lowers isMutating even on bulk API failure', async () => {
+    const { api } = await import('@/api/client');
+    (api.bulkAssign as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('net'));
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a'));
+
+    await expect(s.bulkAssign(['a'], 7)).rejects.toThrow('net');
+    expect(s.isMutating).toBe(false);
+  });
+
+  it('fills assigned_to with selfRef for a previously-unassigned ticket bulk-assigned to self', async () => {
+    const { api } = await import('@/api/client');
+    (api.bulkAssign as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok_ids: ['a'],
+      failed: [],
+    });
+    const auth = useAuthStore();
+    auth.user = { id: 7, onlysales_id: 'o', email: 'e', name: 'Me', scope: null };
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a', { assigned_to: null }));
+
+    await s.bulkAssign(['a'], 7);
+
+    const t = s.tickets.find((x) => x.id === 'a')!;
+    expect(t.assigned_to).toEqual({ id: 7, name: 'Me' });
+    expect(t.assigned_at).not.toBeNull();
+    // The filled ticket must now appear in myTickets.
+    expect(s.myTickets.map((x) => x.id)).toContain('a');
+  });
+
+  it('does not fill assigned_to when bulk-assigning to a different user', async () => {
+    const { api } = await import('@/api/client');
+    (api.bulkAssign as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok_ids: ['a'],
+      failed: [],
+    });
+    const auth = useAuthStore();
+    auth.user = { id: 7, onlysales_id: 'o', email: 'e', name: 'Me', scope: null };
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a', { assigned_to: null }));
+
+    await s.bulkAssign(['a'], 99);
+
+    // Assigning to another user (id 99) with no prior assignee — stays null
+    // until the next refresh reconciles the server value.
+    const t = s.tickets.find((x) => x.id === 'a')!;
+    expect(t.assigned_to).toBeNull();
+  });
+
+  it('preserves an existing assigned_to when bulk-assigning to the same user', async () => {
+    const { api } = await import('@/api/client');
+    (api.bulkAssign as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok_ids: ['a'],
+      failed: [],
+    });
+    const auth = useAuthStore();
+    auth.user = { id: 7, onlysales_id: 'o', email: 'e', name: 'Me', scope: null };
+    const existing: { id: number; name: string | null } = { id: 7, name: 'Me' };
+    const s = useTicketsStore();
+    s.tickets.push(fakeTicket('a', { assigned_to: existing }));
+
+    await s.bulkAssign(['a'], 7);
+
+    expect(s.tickets.find((x) => x.id === 'a')!.assigned_to).toStrictEqual(existing);
+  });
 });

@@ -247,7 +247,8 @@ export const useTicketsStore = defineStore('tickets', () => {
     base = parkedOnly.value
       ? base.filter((t) => t.parked_at !== null)
       : base.filter((t) => t.parked_at === null);
-    if (myQueueOnly.value) base = base.filter((t) => t.assigned_to?.id === auth.user?.id);
+    if (myQueueOnly.value)
+      base = auth.user ? base.filter((t) => t.assigned_to?.id === auth.user!.id) : [];
     if (!isFilterActive.value) return base;
     const now = Date.now();
     return base.filter((t) =>
@@ -645,11 +646,16 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   /** Assign (or unassign) a ticket; reflects the server response immediately. */
   async function assign(ticketId: string, userId: number | null) {
-    const { assigned_to, assigned_at } = await api.assignTicket(ticketId, userId);
-    const t = state.value.tickets.find((x) => x.id === ticketId);
-    if (t) {
-      t.assigned_to = assigned_to;
-      t.assigned_at = assigned_at;
+    beginMutation();
+    try {
+      const { assigned_to, assigned_at } = await api.assignTicket(ticketId, userId);
+      const t = state.value.tickets.find((x) => x.id === ticketId);
+      if (t) {
+        t.assigned_to = assigned_to;
+        t.assigned_at = assigned_at;
+      }
+    } finally {
+      endMutation();
     }
   }
 
@@ -659,15 +665,24 @@ export const useTicketsStore = defineStore('tickets', () => {
   async function bulkAssign(ids: string[], userId: number | null): Promise<BulkResult> {
     const capped = overCapResult(ids);
     if (capped) return capped;
-    const result = await api.bulkAssign(ids, userId);
-    for (const id of result.ok_ids) {
-      const t = state.value.tickets.find((x) => x.id === id);
-      if (t) {
-        t.assigned_to = userId === null ? null : (t.assigned_to ?? null);
-        t.assigned_at = userId === null ? null : new Date().toISOString();
+    // Self-ref for the common bulk-self-assign path: fills assigned_to on
+    // previously-unassigned tickets so they appear in My Queue immediately.
+    const selfRef = auth.user ? { id: auth.user.id, name: auth.user.name } : null;
+    beginMutation();
+    try {
+      const result = await api.bulkAssign(ids, userId);
+      for (const id of result.ok_ids) {
+        const t = state.value.tickets.find((x) => x.id === id);
+        if (t) {
+          t.assigned_to =
+            userId === null ? null : (t.assigned_to ?? (userId === selfRef?.id ? selfRef : null));
+          t.assigned_at = userId === null ? null : new Date().toISOString();
+        }
       }
+      return result;
+    } finally {
+      endMutation();
     }
-    return result;
   }
 
   // ── Bulk actions (Phase 12, plan §8d) ──────────────────────────────────────
