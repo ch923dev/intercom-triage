@@ -4,7 +4,8 @@
      (T035), the ticket flyout (T050/T052), and the once-per-second alarm loop
      (T051). -->
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, watch } from 'vue';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import LoginView from '@/components/LoginView.vue';
 import AlarmBanners from '@/components/AlarmBanners.vue';
 import Board from '@/components/Board.vue';
 import BulkActionBar from '@/components/BulkActionBar.vue';
@@ -19,6 +20,7 @@ import StatsPage from '@/components/StatsPage.vue';
 import TicketFlyout from '@/components/TicketFlyout.vue';
 import Topbar from '@/components/Topbar.vue';
 import { useKeyboardTriage } from '@/composables/useKeyboardTriage';
+import { useAuthStore } from '@/stores/auth';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
 import { useNoteEntriesStore } from '@/stores/noteEntries';
@@ -30,6 +32,8 @@ import { useViewStore } from '@/stores/view';
 import { useTweaksStore } from '@/stores/tweaks';
 import { notify, permission } from '@/utils/notify';
 
+const auth = useAuthStore();
+const authReady = ref(false);
 const categories = useCategoriesStore();
 const settings = useSettingsStore();
 const tickets = useTicketsStore();
@@ -44,13 +48,27 @@ const triage = useKeyboardTriage();
 const COLUMN_STEP = 296; // column width (280) + gutter
 
 onMounted(async () => {
+  await auth.bootstrap();
+  authReady.value = true;
+  if (!auth.isAuthenticated) return;
+  await loadAll();
+});
+
+async function loadAll() {
   await settings.load();
   await categories.load();
   await Promise.all([followups.load(), notes.load(), noteEntries.load()]);
   // An unreachable backend leaves the board empty + raises an inline error;
   // the empty-state points the operator at the backend sync path.
   await tickets.refresh().catch(() => undefined);
-});
+}
+
+watch(
+  () => auth.isAuthenticated,
+  (now, before) => {
+    if (now && !before) void loadAll();
+  },
+);
 
 // ── Alarm loop (T051) ─────────────────────────────────────────────────────────
 //
@@ -240,7 +258,9 @@ watch(
 </script>
 
 <template>
-  <div class="app">
+  <div v-if="!authReady" class="status mono">Loading…</div>
+  <LoginView v-else-if="!auth.isAuthenticated" />
+  <div v-else class="app">
     <Topbar />
 
     <div v-if="categories.loading" class="status mono">Loading…</div>
