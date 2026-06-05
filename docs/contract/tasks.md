@@ -1,6 +1,6 @@
 # Intercom Triage — Tasks
 
-**Status:** ready · **Version:** 1.7 · **Implements:** `spec.md` v1.8, `plan.md` v1.8
+**Status:** ready · **Version:** 2.0 · **Implements:** `spec.md` v2.0, `plan.md` v2.0
 
 Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](../_archive/tasks/).
 
@@ -14,6 +14,8 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - `✓` = shipped and live in `main`.
 - `⊘` = superseded. Detail file retains the original body and names the replacement.
 - No marker = still open / backlog.
+
+**Changes from v2.0 (MHU charter pivot — auth + multi-user):** hosted, authenticated, shared-team board. New Phase 20 (T168–T171): auth core (OnlySales-delegated login, stateless access JWT, DB-backed rotating refresh token, migrations 0021–0022), refresh reuse-detection + rate-limit hardening, attribution columns (`resolved_by`/`acted_by`, migration 0023), assignment + My Queue (`assigned_to`/`assigned_at`, migration 0024). Adds US-040–US-043, FR-063–FR-073, NFR-011–NFR-014. Plan §19. CLAUDE.md Scope guardrails + invariants #15–#19 updated.
 
 **Changes from v1.7 (Intercom ingestion pivot):** the backend now fetches Intercom directly from the official `api.intercom.io` REST API with a workspace Access Token, replacing the extension session scrape. New Phase 19 (T161–T166): Intercom client, normalizer, sync orchestration + `POST /tickets/sync`, background poller + config/health, extension reduction, docs/charter. Rewrote FR-001 + FR-031, added NFR-010. `GET /tickets/sync-state` route retired (the service stays, internal).
 
@@ -205,10 +207,17 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T166 ✓ — Docs/charter: invariants #1/#2/#3 rewrite, spec FR-001/FR-031 + NFR-010, plan §2/§4/§6, PROJECT/FEATURES, SECURITY (two secrets) + gitleaks Intercom-token rule, README, sub-package CLAUDE.md.
 - T167 ✓ — Remove the Chrome extension entirely: deleted `extension/`, the CORS `chrome-extension://` regex, `webapp/.../ExtensionCallout.vue` (→ `EmptyBoard.vue`), `qa-extension`, and `check-invariants.ps1` extension rules; scrubbed spec/plan/tasks/PROJECT/FEATURES/README + the 14 invariants (#1/#10/#14). Continuation of T165. spec v1.9, inv #1.
 
+### Phase 20 — Auth & multi-user (MHU charter pivot)
+
+- T168 ✓ — Auth core: OnlySales-delegated login (`POST /auth/login`), stateless HS256 access JWT (~30 min, offline-verified), DB-backed rotating refresh token (sha256-hashed, httpOnly+Secure+SameSite cookie), `users` + `sessions` tables (migrations 0021–0022), `get_current_user` gate on all routers except allowlist, webapp login screen + in-memory access token + silent refresh + 401→refresh→retry loop. FR-063/FR-064/FR-065/FR-066/FR-067/FR-073, US-040, NFR-011/NFR-012, plan §19.
+- T169 ✓ — Refresh reuse-detection + rate-limit hardening: `sessions.prev_refresh_token_hash` (migration 0022 — included in T168 chain); replaying a rotated-away token revokes the entire session chain immediately; `POST /auth/login` rate-limited per source IP and per target email with bucket eviction. FR-065/FR-068/FR-069, US-043, NFR-013/NFR-014, plan §19.
+- T170 ✓ — Attribution: migration 0023 adds `tickets.resolved_by` + `overrides.acted_by` (FK → users, SET NULL); manual resolve / mark-non-actionable / category override (single + bulk) stamp the acting operator; AI/system paths leave null; board composes `UserRef {id, name}` via user-join; flyout shows "resolved by \<name\>". FR-072, US-042, plan §19.
+- T171 ✓ — Assignment + My Queue: migration 0024 adds `tickets.assigned_to` + `assigned_at` (FK → users, nullable, SET NULL, indexed); `PATCH /tickets/{id}/assign` + `/tickets/bulk/assign` (null clears; unknown user → 422; bounded by MAX_BULK_IDS); `GET /users` trimmed to `{id, name}`; webapp `myQueueOnly` filter chip + `AssigneePicker` + card tag + Topbar chip. FR-070/FR-071, US-041, plan §19.
+
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
-- T103 — Multi-user expansion: add a `users` table + simple session cookie auth + per-user overrides and settings. *(out of scope — `CLAUDE.md`)*
+- T103 ⊘ — Multi-user expansion: add a `users` table + simple session cookie auth + per-user overrides and settings. *(superseded by T168–T171 — MHU charter pivot)*
 - T104 ✓ — Alembic migrations.
 - T107 ✓ — Structured `non_actionable_kind` column on tickets + ai_cache (migration 0020); AI emits/parses + strict schema; cached; stamped on AI non_actionable auto-mark, cleared on every reopen path; surfaced on TicketSchema; webapp chip label + per-kind filter; extension popup chip. FR-062/US-019, plan §8c, migration 0020. Branch feat/t107-non-actionable-kind. *(Cross-package backend+webapp+extension at the API-contract level; HydratedTicket / invariant #2 untouched — non_actionable_kind is board-state on TicketSchema, like triage facets T142.)*
 
@@ -318,3 +327,22 @@ Every requirement maps to at least one task.
 | FR-062 | T107 |
 | NFR-009 | T160 |
 | NFR-010 | T164 |
+| US-040 | T168, T169 |
+| US-041 | T171 |
+| US-042 | T170 |
+| US-043 | T169 |
+| FR-063 | T168 |
+| FR-064 | T168 |
+| FR-065 | T168, T169 |
+| FR-066 | T168 |
+| FR-067 | T168 |
+| FR-068 | T169 |
+| FR-069 | T169 |
+| FR-070 | T171 |
+| FR-071 | T171 |
+| FR-072 | T170 |
+| FR-073 | T168 |
+| NFR-011 | T168 |
+| NFR-012 | T168 |
+| NFR-013 | T169 |
+| NFR-014 | T169 |

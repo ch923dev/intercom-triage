@@ -67,6 +67,39 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     columns and surfaced via a parked-only filter chip (roadmap 4.1 / T106).
     Reason `other` may carry an optional free-text `parked_note` (≤200 chars),
     cleared with the trio.
+15. **Auth required on every route except the allowlist.** `get_current_user` is
+    applied to every router. The explicit allowlist is: `/health`, `/auth/login`,
+    `/auth/refresh`. Attachment image `GET` endpoints also accept the session
+    cookie in lieu of a Bearer token; all mutation endpoints accept Bearer only.
+    Adding a new router without the dependency is a security regression.
+16. **Session = stateless access JWT + DB-backed rotating refresh token with
+    reuse-detection.** The access JWT (~30 min, HS256) is verified offline per
+    request. The refresh token is stored as a `sha256` hash only
+    (`sessions.refresh_token_hash`); the raw token is never written to the DB or
+    logs. On every `POST /auth/refresh` the token rotates: the old hash moves to
+    `prev_refresh_token_hash`. Replaying a rotated-away token matches
+    `prev_refresh_token_hash` and **immediately revokes the entire session chain**
+    (reuse-detection). Two browser tabs sharing one cookie, or a double-fired
+    refresh, can trip this and force a re-login — accepted for small-team scope
+    (plan §19 double-refresh tradeoff, NFR-014).
+17. **Attribution + assignment fields are board-state only — never on
+    `HydratedTicket`.** `tickets.resolved_by` / `overrides.acted_by` /
+    `tickets.assigned_to` / `tickets.assigned_at` live on `TicketSchema` /
+    `Override` (the board response layer) and are composed via a `users` join at
+    read time as `UserRef {id, name}`. They are never on `HydratedTicket`
+    (invariant #2 untouched). AI-driven and system paths leave attribution null;
+    `_upsert_ticket` never writes the attribution/assignment fields, so they
+    survive re-sync by construction.
+18. **Per-user follow-ups/notes are DEFERRED (Phase 4). Settings stays shared.**
+    `note_entries.user_id` does not yet exist as an active column. The `settings`
+    singleton row (`CHECK (id = 1)`) is team-wide — every operator reads and
+    writes the same settings. Do not add per-user settings or per-user follow-up
+    filtering until Phase 4 is explicitly designed and tasks.md is updated.
+19. **No password is ever stored or logged.** Login proxies straight to OnlySales;
+    our backend only persists the Fernet-encrypted upstream OnlySales refresh
+    token (`sessions.onlysales_refresh_encrypted`). No password field exists on
+    any model. Never log `request.body()` on the login endpoint or any auth
+    path.
 
 ## Subagent doctrine
 
@@ -77,9 +110,11 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 
 ## Scope guardrails
 
-- Single-operator local tool, not a SaaS. One workspace, one taxonomy, one operator, one machine. No multi-tenancy, auth, deployment infra, hosted observability, public surfaces.
+- **Auth + multi-user are IN scope** (charter pivot — MHU). The tool is a hosted, authenticated, shared-team board. Multiple operators sign in with OnlySales credentials; one shared ticket pool, one taxonomy, one settings row — all team-wide. Identity is delegated to OnlySales (our backend never stores a password).
+- **Multi-tenancy is OUT of scope.** No `tenant_id`, no per-tenant data isolation, no per-user Intercom tokens. Every authenticated user sees the same board.
+- **Per-user follow-ups/notes** are deferred (Phase 4 — `note_entries.user_id` not yet active). `Settings` remains a shared team-wide singleton.
+- **pgvector/semantic layer on Postgres** is deferred — hosted v1 runs embeddings/clustering off.
 - Two packages, two stacks, intentionally. **Don't merge them.** webapp = Vue 3 + Vite (SPA); backend = FastAPI (HTTP). No monorepo tool, shared package, codegen step.
-- `localhost:4000` (backend) + `localhost:5173` (webapp dev). Vite proxies `/api/*` → `127.0.0.1:4000`. No reverse proxy, Docker, nginx.
 - Cross-package changes (schema, ingest shape, API contract) ship in one PR. Don't merge backend half of a contract change without the webapp half.
 
 ## When in doubt
@@ -94,8 +129,9 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 
 - Don't add a SECOND Intercom integration. The backend `IntercomClient` (`backend/app/clients/intercom.py`) is the only ingestion path; don't give the webapp Intercom access.
 - Don't introduce a monorepo tool / shared package / codegen step.
-- Don't deploy this anywhere (no Dockerfile, no CI/CD, no production config).
-- Don't add user auth / RBAC / tenants.
+- Don't deploy this anywhere (no Dockerfile, no CI/CD, no production config). *(Hosted deployment is the operator's concern — we ship no infra config.)*
+- Don't add **multi-tenancy** (`tenant_id`, per-tenant data isolation). Auth + multi-user are in scope; tenant isolation is explicitly out. Don't add RBAC enforcement beyond what is already stored in `scope` (captured for a future phase, not enforced in v1).
+- Don't store or log passwords, raw refresh tokens, or the upstream OnlySales token in plaintext. Login proxies to OnlySales; only the Fernet-encrypted upstream refresh token is persisted.
 - Don't extend the surface area without `docs/contract/spec.md` / `docs/contract/plan.md` / `docs/contract/tasks.md` updates first — those three docs are the source of truth and the traceability matrix.
 
 ## Parallel sessions & worktrees

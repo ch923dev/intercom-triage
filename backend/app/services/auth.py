@@ -111,6 +111,18 @@ async def rotate_session(
     if row is None:
         raise AuthSessionError("unknown refresh token")
     if reused:
+        # Reuse-detection: a rotated-away token was replayed — treat as a theft
+        # signal and revoke the entire session chain immediately.
+        #
+        # Accepted tradeoff (plan §19, NFR-014): two browser tabs sharing one
+        # cookie, or a double-fired refresh (two concurrent 401-retry paths
+        # racing before the first refresh completes), can both present the same
+        # now-superseded token and trip this branch, forcing a re-login.  For a
+        # small team the incidence is low and the security guarantee (a replayed
+        # stolen token ends the chain) outweighs the friction.  If this becomes
+        # a problem the fix is to serialize refresh requests in the webapp with
+        # an in-flight Promise deduplicator, or to introduce a short
+        # prev_token_grace_window — neither is implemented in v1.
         if row.revoked_at is None:
             row.revoked_at = naive_utcnow()
             await session.commit()
