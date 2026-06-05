@@ -279,7 +279,14 @@ export const api = {
     fd.append('ticket_id', ticketId);
     // Cannot use `request()` directly — multipart needs no `content-type` header
     // (browser sets the boundary). Replicate the error envelope manually.
-    return fetch(`${BASE}/attachments`, { method: 'POST', body: fd }).then(async (resp) => {
+    const headers: Record<string, string> = {};
+    if (accessToken) headers['authorization'] = `Bearer ${accessToken}`;
+    return fetch(`${BASE}/attachments`, {
+      method: 'POST',
+      body: fd,
+      headers,
+      credentials: 'include',
+    }).then(async (resp) => {
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}));
         throw new ApiError(resp.status, body, `POST /attachments → ${resp.status}`);
