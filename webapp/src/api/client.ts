@@ -25,6 +25,7 @@ import type {
   Ticket,
   TicketNote,
 } from '@/types/api';
+import type { LoginRequest, LoginResponse, MeResponse, User } from '@/types/auth';
 
 const BASE = '/api';
 
@@ -39,11 +40,65 @@ export class ApiError extends Error {
   }
 }
 
+// ── auth state (in-memory only; never localStorage) ─────────────────────────
+let accessToken: string | null = null;
+let authLostHandler: (() => void) | null = null;
+let refreshInFlight: Promise<boolean> | null = null;
+
+export function setAccessToken(token: string | null): void {
+  accessToken = token;
+}
+
+export function onAuthLost(handler: () => void): void {
+  authLostHandler = handler;
+}
+
+/** Single-flight refresh. Resolves true if a new access token was obtained. */
+async function refreshAccessToken(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const resp = await fetch(BASE + '/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+      });
+      if (!resp.ok) return false;
+      const body = (await resp.json()) as { access_token: string };
+      accessToken = body.access_token;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+async function rawFetch(path: string, init: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    ...((init.headers as Record<string, string>) ?? {}),
+  };
+  if (accessToken) headers['authorization'] = `Bearer ${accessToken}`;
+  return fetch(BASE + path, { ...init, headers, credentials: 'include' });
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const resp = await fetch(BASE + path, {
-    headers: { 'content-type': 'application/json', ...(init.headers ?? {}) },
-    ...init,
-  });
+  let resp = await rawFetch(path, init);
+
+  // Don't try to refresh the refresh/login calls themselves.
+  const isAuthCall = path.startsWith('/auth/');
+  if (resp.status === 401 && !isAuthCall) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      resp = await rawFetch(path, init);
+    } else {
+      authLostHandler?.();
+    }
+  }
+
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
     throw new ApiError(resp.status, body, `${init.method ?? 'GET'} ${path} → ${resp.status}`);
@@ -351,6 +406,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ticket_id: ticketId }),
     }),
+
+  // ── auth ────────────────────────────────────────────────────────────────
+  login: (body: LoginRequest): Promise<LoginResponse> =>
+    request('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+  refreshSession: (): Promise<LoginResponse> => request('/auth/refresh', { method: 'POST' }),
+  logout: (): Promise<void> => request('/auth/logout', { method: 'POST' }),
+  me: (): Promise<MeResponse> => request('/auth/me'),
+  listUsers: (): Promise<User[]> => request('/users'),
 
   // ── cluster content gaps (roadmap 3.2) ────────────────────────────────────
   /** Recurring-issue clusters whose dominant effective category has no active
