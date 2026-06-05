@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai import embeddings
 from app.config import AppConfig, get_config
 from app.db import make_engine, make_session_factory
-from app.deps import CurrentUser, get_current_user
+from app.deps import CurrentUser, get_current_user, require_session_or_bearer
 from app.main import create_app
 from app.models import init_db
 
@@ -102,6 +102,7 @@ async def app(test_config: AppConfig) -> AsyncIterator[FastAPI]:
     application.dependency_overrides[get_current_user] = lambda: CurrentUser(
         id=1, onlysales_id="seed-oid", email="op@test", scope="admin"
     )
+    application.dependency_overrides[require_session_or_bearer] = lambda: None
 
     yield application
 

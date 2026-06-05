@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import AppConfig
 from app.db import get_session
-from app.deps import get_app_config
+from app.deps import CurrentUser, get_app_config, get_current_user, require_session_or_bearer
 from app.models import NoteAttachment
 from app.schemas import NoteAttachmentDeleted, NoteAttachmentRead
 from app.services import attachments as svc
@@ -56,6 +56,7 @@ async def post_attachment(
     ticket_id: str = Form(..., min_length=1),
     session: AsyncSession = Depends(get_session),
     config: AppConfig = Depends(get_app_config),
+    _user: CurrentUser = Depends(get_current_user),
 ) -> NoteAttachmentRead:
     """Upload a single file. Multipart fields: file (binary), owner_kind,
     owner_id, ticket_id. Content-addressed dedup is transparent to the caller."""
@@ -84,6 +85,7 @@ async def post_attachment(
 async def list_attachments(
     ticket_id: str,
     session: AsyncSession = Depends(get_session),
+    _user: CurrentUser = Depends(get_current_user),
 ) -> list[NoteAttachmentRead]:
     """All non-deleted attachments for a ticket (both owner_kinds)."""
     rows = await svc.list_for_ticket(session, ticket_id)
@@ -95,6 +97,7 @@ async def get_raw(
     attachment_id: int,
     session: AsyncSession = Depends(get_session),
     config: AppConfig = Depends(get_app_config),
+    _auth: None = Depends(require_session_or_bearer),
 ) -> FileResponse:
     """Stream the file bytes. Images render inline; every other type is forced
     to download (`Content-Disposition: attachment`) so an uploaded HTML/SVG file
@@ -119,6 +122,7 @@ async def get_thumb(
     attachment_id: int,
     session: AsyncSession = Depends(get_session),
     config: AppConfig = Depends(get_app_config),
+    _auth: None = Depends(require_session_or_bearer),
 ) -> FileResponse:
     """Return the 256px-max-side WebP thumbnail for an image. 404 otherwise."""
     row = await svc.get(session, attachment_id)
@@ -132,6 +136,7 @@ async def get_thumb(
 async def delete_attachment(
     attachment_id: int,
     session: AsyncSession = Depends(get_session),
+    _user: CurrentUser = Depends(get_current_user),
 ) -> NoteAttachmentDeleted:
     """Soft-delete. Idempotent on a row already deleted."""
     row = await svc.soft_delete(session, attachment_id)

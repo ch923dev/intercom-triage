@@ -320,7 +320,7 @@ def create_app() -> FastAPI:
     app.include_router(note_entries_router.router, dependencies=protected)
     app.include_router(playbooks_router.router, dependencies=protected)
     app.include_router(snippets_router.router, dependencies=protected)
-    app.include_router(attachments_router.router, dependencies=protected)
+    app.include_router(attachments_router.router)
     app.include_router(clusters_router.router, dependencies=protected)
     app.include_router(metrics_router.router, dependencies=protected)
     app.include_router(stats_router.router, dependencies=protected)
