@@ -199,7 +199,7 @@ async function onLogout() {
       "
       @click="tickets.toggleMyQueueOnly()"
     >
-      <span class="mono">My Queue</span>
+      <span class="mono">{{ tickets.myTickets.length }} My Queue</span>
     </button>
 
     <!-- Follow-up status pill (T051) — accent-pulse while an alarm is firing. -->

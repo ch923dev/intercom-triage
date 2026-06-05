@@ -7,24 +7,37 @@ import type { UserRef } from '@/types/api';
 const props = defineProps<{ ticketId: string; assignedTo: UserRef | null }>();
 const tickets = useTicketsStore();
 const users = ref<UserRef[]>([]);
+const busy = ref(false);
+const loadError = ref(false);
 
 onMounted(async () => {
-  users.value = await api.listUsers();
+  try {
+    users.value = await api.listUsers();
+  } catch {
+    loadError.value = true;
+  }
 });
 
 async function onChange(e: Event) {
-  const raw = (e.target as HTMLSelectElement).value;
-  await tickets.assign(props.ticketId, raw === '' ? null : Number(raw));
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    const raw = (e.target as HTMLSelectElement).value;
+    await tickets.assign(props.ticketId, raw === '' ? null : Number(raw));
+  } finally {
+    busy.value = false;
+  }
 }
 </script>
 
 <template>
   <label class="assignee">
     Assigned
-    <select :value="props.assignedTo?.id ?? ''" @change="onChange">
+    <select :value="props.assignedTo?.id ?? ''" :disabled="busy" @change="onChange">
       <option value="">Unassigned</option>
       <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name ?? `#${u.id}` }}</option>
     </select>
+    <span v-if="loadError" class="err">Could not load users</span>
   </label>
 </template>
 
@@ -35,5 +48,9 @@ async function onChange(e: Event) {
   align-items: center;
   font-size: 0.85rem;
   color: var(--ink-2);
+}
+.err {
+  font-size: 0.75rem;
+  color: var(--accent);
 }
 </style>
