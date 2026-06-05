@@ -218,6 +218,9 @@ class Override(Base):
         ForeignKey("categories.id", ondelete="CASCADE"),
         nullable=False,
     )
+    acted_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     set_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=text("CURRENT_TIMESTAMP"),
@@ -702,6 +705,10 @@ class Ticket(Base):
     # Roadmap 4.2 (T107) — structured kind for non-actionable tickets. Only set
     # when resolved_source = 'non_actionable'; nullable; AI-derived.
     non_actionable_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Phase 2 (T169) — attribution. Board-state only; AI/system resolve → NULL.
+    resolved_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     __table_args__ = (
         Index("ix_tickets_updated_at", "updated_at"),
