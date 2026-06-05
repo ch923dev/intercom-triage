@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.config import MAX_BULK_IDS
 from app.models import Ticket
 from app.util import naive_utcnow
 
@@ -53,3 +54,9 @@ async def test_bulk_assign(client, session) -> None:
     for tid in ("a", "b"):
         row = await session.get(Ticket, tid)
         assert row is not None and row.assigned_to == 1 and row.assigned_at is not None
+
+
+async def test_bulk_assign_over_cap_422(client) -> None:
+    ids = [f"t{i}" for i in range(MAX_BULK_IDS + 1)]
+    resp = await client.patch("/tickets/bulk/assign", json={"ticket_ids": ids, "user_id": 1})
+    assert resp.status_code == 422
