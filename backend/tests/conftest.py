@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai import embeddings
 from app.config import AppConfig, get_config
 from app.db import make_engine, make_session_factory
+from app.deps import CurrentUser, get_current_user
 from app.main import create_app
 from app.models import init_db
 
@@ -76,6 +77,8 @@ def test_config(tmp_path_factory: pytest.TempPathFactory) -> AppConfig:
         cache_ttl_seconds=300,
         ai_concurrency=4,
         attachments_dir=attachments_root,
+        session_jwt_secret="test-session-secret",
+        session_cookie_secure=False,  # http://test base URL — no Secure flag
     )
 
 
@@ -94,7 +97,11 @@ async def app(test_config: AppConfig) -> AsyncIterator[FastAPI]:
     application.state.session_factory = session_factory
     application.state.config = test_config
     application.state.openrouter = None
+    application.state.onlysales = None
     application.dependency_overrides[get_config] = lambda: test_config
+    application.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=1, onlysales_id="seed-oid", email="op@test", scope="admin"
+    )
 
     yield application
 
@@ -104,6 +111,15 @@ async def app(test_config: AppConfig) -> AsyncIterator[FastAPI]:
 
 @pytest_asyncio.fixture
 async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def unauth_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    """Client with NO get_current_user override — for testing the 401 gate."""
+    app.dependency_overrides.pop(get_current_user, None)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
