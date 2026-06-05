@@ -28,3 +28,16 @@ def test_keys_are_independent() -> None:
     limiter = FixedWindowLimiter(max_attempts=1, window_seconds=60, now=lambda: clock["t"])
     assert limiter.allow("a") is True
     assert limiter.allow("b") is True
+
+
+def test_evicts_fully_elapsed_windows() -> None:
+    clock = {"t": 0.0}
+    limiter = FixedWindowLimiter(max_attempts=2, window_seconds=10, now=lambda: clock["t"])
+    assert limiter.allow("a") is True
+    assert limiter.allow("b") is True
+    # advance past the window — both buckets are now stale
+    clock["t"] = 11.0
+    limiter.allow("c")  # triggers eviction
+    assert "a" not in limiter._buckets
+    assert "b" not in limiter._buckets
+    assert "c" in limiter._buckets
