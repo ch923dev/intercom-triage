@@ -320,6 +320,7 @@ class Session(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     refresh_token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    prev_refresh_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     onlysales_refresh_encrypted: Mapped[str | None] = mapped_column(Text)
     issued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -328,6 +329,7 @@ class Session(Base):
 
     __table_args__ = (
         Index("ix_sessions_refresh_hash", "refresh_token_hash"),
+        Index("ix_sessions_prev_refresh_hash", "prev_refresh_token_hash"),
         Index("ix_sessions_user_id", "user_id"),
     )
 

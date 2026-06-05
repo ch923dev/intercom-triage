@@ -41,3 +41,23 @@ async def test_user_and_session_roundtrip(session) -> None:
     assert got_sess is not None
     assert got_sess.user_id == user.id
     assert got_sess.revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_session_stores_prev_refresh_hash(session) -> None:
+    user = User(onlysales_id="oid-x", email="x@x")
+    session.add(user)
+    await session.flush()
+    row = SessionRow(
+        id="sess-1",
+        user_id=user.id,
+        refresh_token_hash="h2",
+        prev_refresh_token_hash="h1",
+        issued_at=naive_utcnow(),
+        expires_at=naive_utcnow(),
+        last_used_at=naive_utcnow(),
+    )
+    session.add(row)
+    await session.flush()
+    got = await session.get(SessionRow, "sess-1")
+    assert got is not None and got.prev_refresh_token_hash == "h1"
