@@ -67,6 +67,12 @@ DERIVED_FIELDS = {
     "ai_resolution_confidence",
     "ai_resolution_reason",
     "resolution_chip_state",
+    # Phase 2/3 attribution + assignment (T169/T170) — resolved via side-table
+    # joins (users / overrides / assignments), not straight ticket row columns.
+    "resolved_by",
+    "acted_by",
+    "assigned_to",
+    "assigned_at",
 }
 
 

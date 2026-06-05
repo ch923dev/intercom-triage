@@ -79,12 +79,14 @@ def _record_outcome(op: str, result: BulkResult) -> None:
 # ── Resolution ────────────────────────────────────────────────────────────────
 
 
-async def bulk_resolve(session: AsyncSession, ticket_ids: list[str]) -> BulkResult:
+async def bulk_resolve(
+    session: AsyncSession, ticket_ids: list[str], *, resolved_by: int | None
+) -> BulkResult:
     """Resolve N tickets as `manual`. Already-resolved rows fail with 409."""
 
     async def per_id(tid: str) -> None:
         row = await resolution_svc.get_or_404(session, tid)
-        resolution_svc.apply_resolve(row)
+        resolution_svc.apply_resolve(row, resolved_by=resolved_by)
         metrics.incr("tickets_resolved_total.manual")
 
     result = await _run_per_id(session, ticket_ids, per_id)
@@ -125,6 +127,8 @@ async def bulk_recategorize(
     session: AsyncSession,
     ticket_ids: list[str],
     category_id: int,
+    *,
+    acted_by: int | None,
 ) -> BulkResult:
     """Assign one category to N tickets via overrides. Unknown category → 422
     raised up to the endpoint; unknown ticket id → per-id 404 in `failed[]`.
@@ -145,10 +149,13 @@ async def bulk_recategorize(
         override = await session.get(Override, tid)
         now = naive_utcnow()
         if override is None:
-            session.add(Override(ticket_id=tid, category_id=category_id, set_at=now))
+            session.add(
+                Override(ticket_id=tid, category_id=category_id, set_at=now, acted_by=acted_by)
+            )
         else:
             override.category_id = category_id
             override.set_at = now
+            override.acted_by = acted_by
         metrics.incr("overrides_set_total")
 
     result = await _run_per_id(session, ticket_ids, per_id)

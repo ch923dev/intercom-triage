@@ -9,7 +9,7 @@ from app.clients.intercom import IntercomClient
 from app.clients.openrouter import OpenRouterClient
 from app.config import MAX_INGEST_TICKETS, AppConfig
 from app.db import get_session
-from app.deps import get_app_config, get_intercom, get_openrouter
+from app.deps import CurrentUser, get_app_config, get_current_user, get_intercom, get_openrouter
 from app.schemas import (
     AIResolveSet,
     BulkCategoryUpdate,
@@ -108,9 +108,10 @@ async def ingest_tickets(
 async def bulk_resolve(
     body: BulkTicketIds,
     session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(get_current_user),
 ) -> BulkResult:
     """Mark N tickets manually resolved. Returns per-id ok/failed."""
-    return await bulk_svc.bulk_resolve(session, body.ticket_ids)
+    return await bulk_svc.bulk_resolve(session, body.ticket_ids, resolved_by=user.id)
 
 
 @router.post("/bulk/reopen", response_model=BulkResult)
@@ -126,10 +127,13 @@ async def bulk_reopen(
 async def bulk_recategorize(
     body: BulkCategoryUpdate,
     session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(get_current_user),
 ) -> BulkResult:
     """Assign one category to N tickets via override rows. 422 if the category
     is unknown or archived; per-id 404s land in `failed[]`."""
-    return await bulk_svc.bulk_recategorize(session, body.ticket_ids, body.category_id)
+    return await bulk_svc.bulk_recategorize(
+        session, body.ticket_ids, body.category_id, acted_by=user.id
+    )
 
 
 @router.post("/bulk/dismiss-chip", response_model=BulkResult)
@@ -173,9 +177,10 @@ async def override_category(
     ticket_id: str,
     body: CategoryUpdate,
     session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(get_current_user),
 ) -> OverrideResponse:
     """T026 — persist a manual category override for a ticket."""
-    category_id = await svc.set_override(session, ticket_id, body.category_id)
+    category_id = await svc.set_override(session, ticket_id, body.category_id, acted_by=user.id)
     return OverrideResponse(category_id=category_id)
 
 
@@ -200,9 +205,10 @@ async def edit_ticket(
 async def resolve_ticket(
     ticket_id: str,
     session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(get_current_user),
 ) -> ResolveResponse:
     """Manual resolve. 409 if already resolved, 404 if unknown."""
-    out = await resolution_svc.resolve(session, ticket_id)
+    out = await resolution_svc.resolve(session, ticket_id, resolved_by=user.id)
     return ResolveResponse(resolved_at=out.resolved_at, resolved_source=out.resolved_source)
 
 

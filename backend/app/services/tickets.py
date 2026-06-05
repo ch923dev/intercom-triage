@@ -96,6 +96,8 @@ async def set_override(
     session: AsyncSession,
     ticket_id: str,
     category_id: int,
+    *,
+    acted_by: int | None,
 ) -> int:
     """Upsert an override row with `set_at = now`. Returns the category id.
 
@@ -121,11 +123,13 @@ async def set_override(
                 ticket_id=ticket_id,
                 category_id=category_id,
                 set_at=naive_utcnow(),
+                acted_by=acted_by,
             ),
         )
     else:
         override.category_id = category_id
         override.set_at = naive_utcnow()
+        override.acted_by = acted_by
     await session.commit()
     metrics.incr("overrides_set_total")
     return category_id

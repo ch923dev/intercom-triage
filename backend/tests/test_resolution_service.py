@@ -37,7 +37,7 @@ async def test_resolve_marks_manual_and_returns_datetime(session):
     session.add(_make_open_ticket("t1"))
     await session.commit()
 
-    out = await svc.resolve(session, "t1")
+    out = await svc.resolve(session, "t1", resolved_by=None)
     assert out.resolved_source == "manual"
     row = await session.get(Ticket, "t1")
     assert row.resolved_at is not None
@@ -52,7 +52,7 @@ async def test_resolve_409_if_already_resolved(session):
     session.add(t)
     await session.commit()
     with pytest.raises(HTTPException) as exc:
-        await svc.resolve(session, "t2")
+        await svc.resolve(session, "t2", resolved_by=None)
     assert exc.value.status_code == 409
 
 
@@ -122,7 +122,10 @@ async def test_dismiss_chip_sets_dismissed_at_to_updated_at(session):
 
 @pytest.mark.asyncio
 async def test_404_on_unknown_ticket(session):
-    for fn in (svc.resolve, svc.reopen, svc.dismiss_chip):
+    with pytest.raises(HTTPException) as exc:
+        await svc.resolve(session, "ghost", resolved_by=None)
+    assert exc.value.status_code == 404
+    for fn in (svc.reopen, svc.dismiss_chip):
         with pytest.raises(HTTPException) as exc:
             await fn(session, "ghost")
         assert exc.value.status_code == 404
