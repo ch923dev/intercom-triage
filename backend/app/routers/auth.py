@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -18,6 +19,7 @@ from app.security.ratelimit import FixedWindowLimiter
 from app.services import auth as svc
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 _ip_limiter: FixedWindowLimiter | None = None
 _email_limiter: FixedWindowLimiter | None = None
@@ -50,9 +52,12 @@ def _set_refresh_cookie(response: Response, config: AppConfig, value: str) -> No
 
 
 def _check_origin(request: Request, config: AppConfig) -> None:
-    """CSRF defense for cookie-authenticated endpoints: Origin must be allowed."""
+    """CSRF defense for cookie-authenticated endpoints: the request must carry an
+    allowed same-origin `Origin` header. A *missing* Origin is rejected
+    (fail-closed) so a cross-site form/script POST that omits the header cannot
+    drive the cookie-authenticated refresh/logout."""
     origin = request.headers.get("origin")
-    if origin is not None and origin not in config.cors_allowed_origins:
+    if origin is None or origin not in config.cors_allowed_origins:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="bad origin")
 
 
@@ -86,7 +91,13 @@ async def login(
     try:
         identity = await onlysales.login(email=body.email, password=body.password)
     except OnlySalesAuthError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        # Log the real upstream reason server-side, but return a single generic
+        # message: distinguishing "no such user" from "bad password" would let an
+        # attacker enumerate accounts. (The detail never contains the password.)
+        logger.warning("login rejected for %s: %s", body.email, exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid email or password"
+        ) from exc
     issued = await svc.complete_login(
         session,
         identity=identity,

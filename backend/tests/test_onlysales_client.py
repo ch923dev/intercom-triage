@@ -55,6 +55,25 @@ async def test_login_raises_on_bad_credentials(httpx_mock: HTTPXMock) -> None:
 
 
 @pytest.mark.asyncio
+async def test_login_raises_on_non_json_upstream_body(httpx_mock: HTTPXMock) -> None:
+    """A gateway HTML error page (502/504, Cloudflare interstitial) must surface as
+    OnlySalesAuthError — NOT a raw JSONDecodeError that escapes the client and
+    becomes an opaque 500 at the login route."""
+    httpx_mock.add_response(
+        url=f"{BASE}/auth/login",
+        method="POST",
+        status_code=502,
+        text="<html>502 Bad Gateway</html>",
+    )
+    client = OnlySalesClient(base=BASE)
+    try:
+        with pytest.raises(OnlySalesAuthError):
+            await client.login(email="op@example.com", password="pw")
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_login_raises_when_no_access_token(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
         url=f"{BASE}/auth/login", method="POST", json={"name": "AccountNotVerified"}

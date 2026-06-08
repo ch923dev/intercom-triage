@@ -60,6 +60,9 @@ async def test_login_rejects_bad_password(login_app: FastAPI) -> None:
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.post("/auth/login", json={"email": "op@example.com", "password": "bad"})
         assert resp.status_code == 401
+        # Generic message — the upstream OnlySales detail (which can distinguish
+        # "no such user" from "bad password" → user enumeration) must NOT leak.
+        assert resp.json()["detail"] == "invalid email or password"
 
 
 @pytest.mark.asyncio
@@ -111,6 +114,11 @@ async def test_users_list_excludes_onlysales_id_and_scope(client: AsyncClient) -
     assert set(rows[0].keys()) == {"id", "name"}
 
 
+# The cookie-authenticated endpoints (/auth/refresh, /auth/logout) require a
+# same-origin request; cors_allowed_origins defaults to the two :5173 origins.
+ALLOWED_ORIGIN = {"origin": "http://localhost:5173"}
+
+
 @pytest.mark.asyncio
 async def test_refresh_rotates_and_logout_revokes(login_app: FastAPI) -> None:
     transport = ASGITransport(app=login_app)
@@ -118,12 +126,32 @@ async def test_refresh_rotates_and_logout_revokes(login_app: FastAPI) -> None:
         login = await ac.post("/auth/login", json={"email": "op@example.com", "password": "good"})
         assert login.status_code == 200
 
-        refreshed = await ac.post("/auth/refresh")
+        refreshed = await ac.post("/auth/refresh", headers=ALLOWED_ORIGIN)
         assert refreshed.status_code == 200
         assert refreshed.json()["access_token"]
 
-        out = await ac.post("/auth/logout")
+        out = await ac.post("/auth/logout", headers=ALLOWED_ORIGIN)
         assert out.status_code == 204
 
-        again = await ac.post("/auth/refresh")
+        again = await ac.post("/auth/refresh", headers=ALLOWED_ORIGIN)
         assert again.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_missing_or_cross_origin(login_app: FastAPI) -> None:
+    """CSRF defense: the cookie-authenticated refresh must reject a request with a
+    missing Origin (fail-closed) or a cross-site Origin — not just rotate the token
+    for anyone holding the cookie."""
+    transport = ASGITransport(app=login_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        login = await ac.post("/auth/login", json={"email": "op@example.com", "password": "good"})
+        assert login.status_code == 200
+
+        # No Origin header → 403 (the prior fail-open let this through).
+        assert (await ac.post("/auth/refresh")).status_code == 403
+        # Cross-site Origin → 403.
+        bad = await ac.post("/auth/refresh", headers={"origin": "https://evil.example"})
+        assert bad.status_code == 403
+        # Same-origin → 200.
+        ok = await ac.post("/auth/refresh", headers=ALLOWED_ORIGIN)
+        assert ok.status_code == 200

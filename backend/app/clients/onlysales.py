@@ -89,7 +89,12 @@ class OnlySalesClient:
             )
         except httpx.HTTPError as exc:
             raise OnlySalesAuthError(f"OnlySales unreachable: {exc}") from exc
-        body = resp.json() if resp.content else {}
+        try:
+            body = resp.json() if resp.content else {}
+        except ValueError as exc:  # non-JSON body (gateway HTML 502/504, etc.)
+            raise OnlySalesAuthError(
+                f"OnlySales returned a non-JSON response ({resp.status_code})"
+            ) from exc
         if resp.status_code != 200:
             raise OnlySalesAuthError(_extract_error(body, f"Login failed ({resp.status_code})"))
         if not isinstance(body, dict):
@@ -103,7 +108,12 @@ class OnlySalesClient:
             )
         except httpx.HTTPError as exc:
             raise OnlySalesAuthError(f"OnlySales unreachable: {exc}") from exc
-        body = resp.json() if resp.content else {}
+        try:
+            body = resp.json() if resp.content else {}
+        except ValueError as exc:  # non-JSON body (gateway HTML 502/504, etc.)
+            raise OnlySalesAuthError(
+                f"OnlySales returned a non-JSON response ({resp.status_code})"
+            ) from exc
         if resp.status_code != 200 or not isinstance(body, dict):
             raise OnlySalesAuthError(_extract_error(body, "Token refresh failed"))
         return _parse_identity(body)
