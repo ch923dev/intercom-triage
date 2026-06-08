@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { Ticket } from '@/types/api';
-import { computed } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { formatShortDateTime } from '@/utils/time';
+import ImageLightbox from '@/components/ImageLightbox.vue';
 
 // ── Conversation timeline ────────────────────────────────────────────────────
 // One chronological stream: customer messages, teammate replies, and Intercom
@@ -15,6 +16,7 @@ interface TimelineItem {
   kind: TimelineKind;
   author: { name: string | null };
   body: string;
+  images: string[];
   created_at: string;
 }
 
@@ -35,18 +37,32 @@ const timeline = computed<TimelineItem[]>(() => {
       kind: (p.is_admin ? 'admin' : 'customer') as TimelineKind,
       author: p.author,
       body: p.body,
+      images: p.images ?? [],
       created_at: p.created_at,
     })),
     ...t.internal_notes.map((n) => ({
       kind: 'note' as TimelineKind,
       author: n.author,
       body: n.body,
+      images: n.images ?? [],
       created_at: n.created_at,
     })),
   ];
 
   return items.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
 });
+
+// Intercom signs inline-image CDN URLs with a ~2-day expiry, so an older
+// ticket's screenshots 404. Track failures to swap in a placeholder.
+const failedImages = reactive(new Set<string>());
+
+// One ticket message's images open in the shared lightbox (zoom / pan / ←→).
+const lightboxImages = ref<{ url: string }[]>([]);
+const lightboxIndex = ref<number | null>(null);
+function openLightbox(urls: string[], i: number) {
+  lightboxImages.value = urls.map((url) => ({ url }));
+  lightboxIndex.value = i;
+}
 
 /** Up-to-two-letter initials for an avatar; `?` when the name is missing. */
 function initials(name: string | null): string {
@@ -78,7 +94,26 @@ function initials(name: string | null): string {
             <span class="note-author">{{ m.author.name ?? 'Teammate' }}</span>
             <span class="note-time">{{ formatShortDateTime(m.created_at) }}</span>
           </div>
-          <p class="note-body">{{ m.body }}</p>
+          <p v-if="m.body" class="note-body">{{ m.body }}</p>
+          <div v-if="m.images.length" class="msg-images">
+            <template v-for="(url, j) in m.images" :key="url">
+              <button
+                v-if="!failedImages.has(url)"
+                type="button"
+                class="msg-image-btn"
+                @click="openLightbox(m.images, j)"
+              >
+                <img
+                  :src="url"
+                  class="msg-image"
+                  loading="lazy"
+                  alt="attached image"
+                  @error="failedImages.add(url)"
+                />
+              </button>
+              <span v-else class="msg-image-missing mono">image unavailable (expired)</span>
+            </template>
+          </div>
         </div>
 
         <!-- Chat message — customer (left) or teammate reply (right). -->
@@ -91,11 +126,34 @@ function initials(name: string | null): string {
               </span>
               <span class="bubble-time">{{ formatShortDateTime(m.created_at) }}</span>
             </div>
-            <div class="bubble" :class="m.kind">{{ m.body }}</div>
+            <div class="bubble" :class="m.kind">
+              <span v-if="m.body" class="bubble-text">{{ m.body }}</span>
+              <div v-if="m.images.length" class="msg-images">
+                <template v-for="(url, j) in m.images" :key="url">
+                  <button
+                    v-if="!failedImages.has(url)"
+                    type="button"
+                    class="msg-image-btn"
+                    @click="openLightbox(m.images, j)"
+                  >
+                    <img
+                      :src="url"
+                      class="msg-image"
+                      loading="lazy"
+                      alt="attached image"
+                      @error="failedImages.add(url)"
+                    />
+                  </button>
+                  <span v-else class="msg-image-missing mono">image unavailable (expired)</span>
+                </template>
+              </div>
+            </div>
           </div>
         </div>
       </template>
     </div>
+
+    <ImageLightbox v-model:index="lightboxIndex" :images="lightboxImages" />
   </div>
 </template>
 
@@ -283,5 +341,37 @@ html[data-theme='dark'] .note-tag {
   color: var(--ink-2);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Inline images lifted from the Intercom body (pasted screenshots) — shown at
+   reading size, click opens the shared lightbox (zoom / pan / ←→). */
+.msg-images {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.msg-images:first-child {
+  margin-top: 0;
+}
+.msg-image-btn {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+.msg-image {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 8px;
+  border: var(--hairline) solid var(--line);
+}
+.msg-image-missing {
+  font-size: 10px;
+  font-style: italic;
+  color: var(--ink-3);
 }
 </style>

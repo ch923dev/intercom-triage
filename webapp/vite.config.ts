@@ -17,6 +17,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     host: '127.0.0.1',
+    allowedHosts: ['vertebrae-marmalade-bleep.ngrok-free.dev'],
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:4000',

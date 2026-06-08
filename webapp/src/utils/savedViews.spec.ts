@@ -31,6 +31,7 @@ function part(created_at: string, is_admin = false): ConversationPart {
     body: 'x',
     created_at,
     is_admin,
+    images: [],
   };
 }
 

@@ -11,8 +11,13 @@ Routing replaces the reverse-engineered numeric `renderable_type` codes
   - `source` (opening message)            → parts[]   (is_admin per author type)
   - part_type=comment, customer author    → parts[]   (is_admin=False)
   - part_type=comment, admin/bot author   → parts[]   (is_admin=True)
+  - part_type=assignment WITH a body      → parts[]   (Intercom's "reply and
+                                            assign" rides the admin's reply on the
+                                            assignment event, not a separate
+                                            comment — observed live. Empty
+                                            assignments fall through the body guard)
   - part_type=note                        → internal_notes[]  (invariant #4)
-  - assignment / open / close / snoozed / … → skipped
+  - open / close / snoozed / reply-time notice / … → skipped
   - unknown part_type                     → skipped + logged (code + id, no body)
 """
 
@@ -33,11 +38,19 @@ _MAX_BODY_CHARS = 8000
 # customer. Drives `is_admin` on a part + whether `source` counts as admin.
 _ADMIN_AUTHOR_TYPES = frozenset({"admin", "bot", "team"})
 
+# Part types whose body, when present, is a real customer-visible thread message.
+# `comment` is the normal reply; `assignment` carries the admin's text when they
+# use Intercom's "reply and assign" — the reply rides on the assignment event
+# rather than a separate comment (observed live). Both route to parts[]; an empty
+# one is dropped by the body guard, so pure routing assignments don't leak in.
+_COMMENT_PART_TYPES = frozenset({"comment", "assignment"})
+
 # Customer-visible message parts go to parts[]; team notes to internal_notes[].
-# Everything else (routing / state events) is skipped — they carry no thread text.
+# Everything else (routing / state events, auto channel notices) is skipped —
+# they carry no real reply text. Listing the auto reply-time/channel notice here
+# keeps it out of both parts[] and the unknown-type log.
 _SKIP_PART_TYPES = frozenset(
     {
-        "assignment",
         "default_assignment",
         "away_mode_assignment",
         "message_strategy_assignment",
@@ -46,8 +59,11 @@ _SKIP_PART_TYPES = frozenset(
         "snoozed",
         "unsnoozed",
         "participant",
+        "participant_added",
+        "participant_removed",
         "language_detection_details",
         "conversation_attribute_updated_by_admin",
+        "channel_and_reply_time_expectation",
     }
 )
 
@@ -55,6 +71,17 @@ _BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _BLOCK_CLOSE_RE = re.compile(r"</(p|div|li|h[1-6]|tr|blockquote)>", re.IGNORECASE)
 _LI_OPEN_RE = re.compile(r"<li[^>]*>", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
+_IMG_SRC_RE = re.compile(r"""<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+
+
+def extract_image_urls(value: str | None) -> list[str]:
+    """Inline `<img src=…>` URLs from an Intercom HTML body. Pasted screenshots
+    are embedded in the body markup, not the `attachments[]` array, so strip_html
+    would silently drop them. The signed CDN URL carries `&amp;`-escaped query
+    params — decode so the link stays valid."""
+    if not value:
+        return []
+    return [html.unescape(m.group(1)) for m in _IMG_SRC_RE.finditer(value)]
 
 
 def strip_html(value: str | None) -> str:
@@ -73,6 +100,15 @@ def strip_html(value: str | None) -> str:
     text = html.unescape(text).replace(" ", " ")
     lines = [line.strip() for line in text.splitlines()]
     return "\n".join(line for line in lines if line)[:_MAX_BODY_CHARS]
+
+
+def _decode_entities(value: Any) -> str | None:
+    """Decode HTML entities in a short display field. Intercom entity-encodes
+    free-text fields (contact/author name, company, conversation title) the same
+    way it encodes message bodies — e.g. `O&#39;Neill`. Bodies pass through
+    `strip_html` (which unescapes); these fields bypass it, so Vue would render
+    the raw entity. Non-str (incl. None) → None."""
+    return html.unescape(value) if isinstance(value, str) else None
 
 
 def attachment_fallback(attachments: Any) -> str:
@@ -110,7 +146,7 @@ def normalize_part_author(raw: Any) -> TicketAuthorSchema:
     rid = raw.get("id")
     return TicketAuthorSchema(
         id=str(rid) if rid is not None else None,
-        name=raw.get("name"),
+        name=_decode_entities(raw.get("name")),
         email=raw.get("email"),
         type=raw.get("type"),
     )
@@ -127,7 +163,7 @@ def _compose_location(contact: dict[str, Any]) -> str | None:
         legacy = legacy if isinstance(legacy, dict) else {}
         parts = [legacy.get("city_name"), legacy.get("region_name"), legacy.get("country_name")]
     composed = [p for p in parts if isinstance(p, str) and p.strip()]
-    return ", ".join(composed) or None
+    return _decode_entities(", ".join(composed)) or None
 
 
 def _contact_company(contact: dict[str, Any]) -> str | None:
@@ -137,7 +173,7 @@ def _contact_company(contact: dict[str, Any]) -> str | None:
     data = companies.get("data") if isinstance(companies, dict) else None
     if isinstance(data, list) and data and isinstance(data[0], dict):
         name = data[0].get("name")
-        return name if isinstance(name, str) and name.strip() else None
+        return _decode_entities(name) if isinstance(name, str) and name.strip() else None
     return None
 
 
@@ -170,7 +206,7 @@ def normalize_customer_author(
 
     return TicketAuthorSchema(
         id=str(chosen_id) if chosen_id is not None else None,
-        name=(contact.get("name") if contact else None) or src.get("name"),
+        name=_decode_entities((contact.get("name") if contact else None) or src.get("name")),
         email=(contact.get("email") if contact else None) or src.get("email"),
         type=src.get("type") or "user",
         location=_compose_location(contact) if contact else None,
@@ -230,12 +266,14 @@ def normalize_conversation(
     internal_notes: list[ConversationPartSchema] = []
 
     # The opening message lives only on `source`, never in conversation_parts.
+    source_images = extract_image_urls(source.get("body"))
     source_body = strip_html(source.get("body")) or attachment_fallback(source.get("attachments"))
-    if source_body:
+    if source_body or source_images:
         parts.append(
             ConversationPartSchema(
                 author=normalize_part_author(source_author) if source_author else author,
                 body=source_body,
+                images=source_images,
                 created_at=created_at,
                 is_admin=source_author.get("type") in _ADMIN_AUTHOR_TYPES,
             )
@@ -246,26 +284,29 @@ def normalize_conversation(
         raw_part_author = part.get("author")
         part_author: dict[str, Any] = raw_part_author if isinstance(raw_part_author, dict) else {}
         part_created = _epoch_to_naive_utc(part.get("created_at"), created_at)
+        images = extract_image_urls(part.get("body"))
         body = strip_html(part.get("body")) or attachment_fallback(part.get("attachments"))
 
-        if part_type == "comment":
-            if not body:
+        if part_type in _COMMENT_PART_TYPES:
+            if not body and not images:
                 continue
             parts.append(
                 ConversationPartSchema(
                     author=normalize_part_author(part_author),
                     body=body,
+                    images=images,
                     created_at=part_created,
                     is_admin=part_author.get("type") in _ADMIN_AUTHOR_TYPES,
                 )
             )
         elif part_type == "note":
-            if not body:
+            if not body and not images:
                 continue
             internal_notes.append(
                 ConversationPartSchema(
                     author=normalize_part_author(part_author),
                     body=body,
+                    images=images,
                     created_at=part_created,
                     is_admin=True,
                 )
@@ -281,7 +322,7 @@ def normalize_conversation(
 
     return HydratedTicket(
         id=convo_id,
-        title=detail.get("title"),
+        title=_decode_entities(detail.get("title")),
         state=_coerce_state(detail.get("state")),
         priority=priority,
         created_at=created_at,

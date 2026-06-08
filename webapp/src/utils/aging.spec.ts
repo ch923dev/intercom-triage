@@ -22,6 +22,7 @@ function part(agoMs: number, is_admin: boolean): ConversationPart {
     body: '',
     created_at: new Date(NOW - agoMs).toISOString(),
     is_admin,
+    images: [],
   };
 }
 

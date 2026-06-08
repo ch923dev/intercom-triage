@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.intercom import IntercomClient
@@ -63,11 +63,20 @@ async def sync_now(
     openrouter: OpenRouterClient | None = Depends(get_openrouter),
     intercom: IntercomClient | None = Depends(get_intercom),
     config: AppConfig = Depends(get_app_config),
+    lookback_hours: int | None = Query(
+        default=None,
+        ge=1,
+        description="Bound the search to conversations updated within the last N "
+        "hours (e.g. 24=1 day, 168=1 week). Omit for the unbounded historical fetch.",
+    ),
 ) -> SyncResponse:
     """Run one Intercom fetch+ingest cycle now (the same cycle the background
     poller runs). 503 when no Access Token is configured — there's nothing to
     poll. Exists for scripts/curl; there is no UI button (the poller is the
-    primary trigger)."""
+    primary trigger).
+
+    `lookback_hours` optionally bounds the fetch to a recent window (server-side
+    Intercom `updated_at >` filter); omitted = unbounded (all active)."""
     if intercom is None:
         raise HTTPException(
             status_code=503, detail="Intercom not configured (set INTERCOM_ACCESS_TOKEN)"
@@ -77,6 +86,7 @@ async def sync_now(
         openrouter=openrouter,
         intercom=intercom,
         config=config,
+        lookback_hours=lookback_hours,
     )
 
 

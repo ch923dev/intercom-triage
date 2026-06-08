@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,10 +82,23 @@ async def run_sync_cycle(
     openrouter: OpenRouterClient | None,
     intercom: IntercomClient,
     config: AppConfig,
+    lookback_hours: int | None = None,
 ) -> SyncResponse:
-    """Run one Intercom fetch+ingest cycle and return its counts."""
+    """Run one Intercom fetch+ingest cycle and return its counts.
+
+    `lookback_hours` (when > 0) bounds the search to conversations whose
+    `updated_at` is within the window — a server-side Intercom filter. None/0
+    keeps the historical unbounded behavior (all active conversations).
+    """
     settings = await get_settings(session)
     states = list(settings.states) or ["open"]
+
+    # POSIX epoch cutoff for the Intercom `updated_at > X` filter. Uses an
+    # aware-UTC clock (not naive_utcnow) because this is an API epoch, not a DB
+    # write — naive .timestamp() would assume local time and skew the window.
+    updated_after: int | None = None
+    if lookback_hours is not None and lookback_hours > 0:
+        updated_after = int((datetime.now(UTC) - timedelta(hours=lookback_hours)).timestamp())
 
     # Skip-known: the stored {id: updated_at} map, in epoch seconds for a cheap
     # numeric compare against the search summary's `updated_at`.
@@ -101,7 +115,7 @@ async def run_sync_cycle(
     to_fetch: list[str] = []
     skipped_known = 0
 
-    async for summary in intercom.search_conversations(states=states):
+    async for summary in intercom.search_conversations(states=states, updated_after=updated_after):
         sid = str(summary.get("id"))
         seen_ids.add(sid)
         updated = summary.get("updated_at")

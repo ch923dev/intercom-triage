@@ -82,6 +82,9 @@ export interface ConversationPart {
    *  `comment` with an admin author). Inbound customer messages → false.
    *  Internal team notes (part_type `note`) live in `Ticket.internal_notes`. */
   is_admin: boolean;
+  /** Inline image URLs lifted from the Intercom HTML body (pasted screenshots).
+   *  Signed CDN links that expire (~2 days), so an old ticket may 404. */
+  images: string[];
 }
 
 export interface Followup {

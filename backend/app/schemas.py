@@ -432,6 +432,10 @@ class ConversationPartSchema(BaseModel):
     # True for admin/bot replies visible to the customer (Intercom `part_type`
     # `comment` with an admin/bot/team author). Inbound customer messages → False.
     is_admin: bool = False
+    # Inline `<img>` URLs lifted from the Intercom HTML body. Pasted screenshots
+    # live in the body markup, not `attachments[]`, so strip_html drops them — we
+    # surface them for the webapp to render. Signed CDN URLs that expire (~2 days).
+    images: list[str] = []
 
 
 class HydratedTicket(BaseModel):

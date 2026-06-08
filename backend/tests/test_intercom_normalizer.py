@@ -102,8 +102,48 @@ def test_event_parts_skipped() -> None:
         }
     )
     ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
-    # Only source + the one real comment survive; events carry no text.
+    # Only source + the one real comment survive; bodyless events carry no text.
     assert [p.body for p in ticket.parts] == ["Hello there", "real message"]
+
+
+def test_assignment_with_body_surfaces_as_admin_reply() -> None:
+    # Intercom's "reply and assign" attaches the admin's reply text to an
+    # `assignment` event (observed live). A bodyless assignment is still skipped;
+    # a bodied one is a real customer-visible reply and must reach parts[].
+    detail = _detail(
+        conversation_parts={
+            "conversation_parts": [
+                _part("default_assignment", author_type="bot", body=""),  # routing, dropped
+                _part("assignment", author_type="admin", body="Good morning, here is the fix"),
+                _part("comment", author_type="user", body="thanks"),
+            ]
+        }
+    )
+    ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+    bodies = [p.body for p in ticket.parts]
+    assert "Good morning, here is the fix" in bodies
+    reply = next(p for p in ticket.parts if p.body == "Good morning, here is the fix")
+    assert reply.is_admin is True
+    assert ticket.internal_notes == []  # never an internal note (invariant #4)
+
+
+def test_reply_time_notice_skipped_not_logged_unknown() -> None:
+    # The auto "you'll get replies here · reply time 1 day" channel notice
+    # (part_type=channel_and_reply_time_expectation, bot author) is boilerplate —
+    # kept out of parts[] AND out of the unknown-part_type log.
+    detail = _detail(
+        conversation_parts={
+            "conversation_parts": [
+                _part(
+                    "channel_and_reply_time_expectation",
+                    author_type="bot",
+                    body="You'll get replies here and in your email",
+                ),
+            ]
+        }
+    )
+    ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+    assert all("replies here" not in p.body for p in ticket.parts)
 
 
 def test_unknown_part_type_skipped_without_crash() -> None:
@@ -163,6 +203,46 @@ def test_contact_enrichment_populates_panel_fields() -> None:
     assert a.company == "Analytical Engines"
 
 
+def test_entity_encoded_display_fields_decoded() -> None:
+    # Intercom HTML-entity-encodes free-text fields (name/company/title) the same
+    # way it encodes bodies; these short fields bypass strip_html, so the
+    # normalizer must decode them or the webapp renders `O&#39;Neill` literally.
+    contact = {
+        "id": "contact_1",
+        "name": "Vincent O&#39;Neill",
+        "companies": {"data": [{"name": "Jones &amp; Co"}]},
+        "location": {"city": "Côte d&#39;Or", "region": None, "country": "FR"},
+    }
+    ticket = normalize_conversation(
+        _detail(title="Can&#39;t log in &amp; reset"),
+        workspace_app_id="ws",
+        customer_contact=contact,
+    )
+    assert ticket.author.name == "Vincent O'Neill"
+    assert ticket.author.company == "Jones & Co"
+    assert ticket.author.location == "Côte d'Or, FR"
+    assert ticket.title == "Can't log in & reset"
+
+
+def test_entity_encoded_part_author_name_decoded() -> None:
+    detail = _detail(
+        conversation_parts={
+            "conversation_parts": [
+                {
+                    "part_type": "comment",
+                    "author": {"type": "admin", "id": "a1", "name": "O&#39;Brien"},
+                    "body": "reply",
+                    "created_at": _EPOCH,
+                    "attachments": [],
+                }
+            ]
+        }
+    )
+    ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+    admin = [p for p in ticket.parts if p.is_admin]
+    assert any(p.author.name == "O'Brien" for p in admin)
+
+
 def test_missing_contact_degrades_to_source_author() -> None:
     ticket = normalize_conversation(_detail(), workspace_app_id="ws", customer_contact=None)
     a = ticket.author
@@ -186,6 +266,70 @@ def test_strip_html_and_attachment_fallback() -> None:
     assert attachment_fallback([{"name": "report.pdf"}]) == "[attachment: report.pdf]"
     assert attachment_fallback([{}]) == "[attachment]"
     assert attachment_fallback(None) == ""
+
+
+def test_inline_image_extracted_from_body() -> None:
+    # Intercom embeds pasted screenshots as inline <img> in the body HTML (not in
+    # attachments[]); strip_html drops the tag, so the URL must be surfaced
+    # separately or the operator never sees the screenshot. The signed CDN URL
+    # carries &amp;-escaped query params that must be decoded to stay valid.
+    img = (
+        '<div class="intercom-container">'
+        '<img src="https://cdn.example.com/s.png?a=1&amp;b=2"></div>'
+        "<p>see screenshot</p>"
+    )
+    detail = _detail(
+        source={
+            "author": {"type": "user", "id": "u1", "name": "Ada"},
+            "body": img,
+            "attachments": [],
+        }
+    )
+    ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+    assert ticket.parts[0].body == "see screenshot"
+    assert ticket.parts[0].images == ["https://cdn.example.com/s.png?a=1&b=2"]
+
+
+def test_image_only_part_emitted_with_empty_body() -> None:
+    # A message/note that is *only* an image (no text) must still surface — the
+    # old `if not body: continue` guard would have dropped it entirely.
+    detail = _detail(
+        source={"author": {"type": "user", "id": "u1"}, "body": "", "attachments": []},
+        conversation_parts={
+            "conversation_parts": [
+                {
+                    "part_type": "comment",
+                    "author": {"type": "user", "id": "u1"},
+                    "body": '<img src="https://cdn.example.com/only.png">',
+                    "created_at": _EPOCH,
+                    "attachments": [],
+                }
+            ]
+        },
+    )
+    ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+    assert any(
+        p.images == ["https://cdn.example.com/only.png"] and p.body == "" for p in ticket.parts
+    )
+
+
+def test_inline_image_in_note_extracted() -> None:
+    detail = _detail(
+        conversation_parts={
+            "conversation_parts": [
+                {
+                    "part_type": "note",
+                    "author": {"type": "admin", "id": "a1", "name": "Tess"},
+                    "body": '<p>fyi</p><img src="https://cdn.example.com/n.png">',
+                    "created_at": _EPOCH,
+                    "attachments": [],
+                }
+            ]
+        }
+    )
+    ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+    assert ticket.internal_notes[0].images == ["https://cdn.example.com/n.png"]
+    assert ticket.internal_notes[0].body == "fyi"
 
 
 def test_attachment_only_part_uses_fallback_body() -> None:
