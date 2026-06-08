@@ -44,28 +44,5 @@
       "Bash(git branch --list*)",
       "Bash(git stash list*)"
     ]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-invariants.ps1"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-reflection.ps1"
-          }
-        ]
-      }
-    ]
   }
 }

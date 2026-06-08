@@ -77,3 +77,7 @@ desktop.ini
 
 # ── Brainstorm visual companion ───────────────────────────────────────────────
 .superpowers/
+
+# FleetView canvas layout (local UI state)
+canvas.json
+canvas.json.bak
