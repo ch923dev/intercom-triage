@@ -58,8 +58,9 @@ async function loadAll() {
   await settings.load();
   await categories.load();
   await Promise.all([followups.load(), notes.load(), noteEntries.load()]);
-  // An unreachable backend leaves the board empty + raises an inline error;
-  // the empty-state points the operator at the backend sync path.
+  // A failed board load records tickets.error; the board view surfaces it as an
+  // error state (distinct from the genuine empty "nothing synced" board). Caught
+  // here so a partial backend failure doesn't reject the whole bootstrap.
   await tickets.refresh().catch(() => undefined);
 }
 
@@ -269,7 +270,10 @@ watch(
     </div>
     <template v-else>
       <template v-if="view.view === 'board'">
-        <EmptyBoard v-if="tickets.isEmpty" />
+        <div v-if="tickets.error && tickets.isEmpty" class="status error mono">
+          Couldn't load the board — {{ tickets.error }}
+        </div>
+        <EmptyBoard v-else-if="tickets.isEmpty" />
         <Board v-else @board-click="onBoardBackgroundClick" />
       </template>
       <FollowupBoard v-else-if="view.view === 'followups'" />

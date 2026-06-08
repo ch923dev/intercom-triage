@@ -7,6 +7,7 @@ revoke_by_refresh / revoke_all_for_user: logout.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.onlysales import OnlySalesIdentity
 from app.models import Session as SessionRow
 from app.models import User
+from app.observability import log_event
 from app.security import tokens
 from app.util import naive_utcnow
 
@@ -112,7 +114,10 @@ async def rotate_session(
         raise AuthSessionError("unknown refresh token")
     if reused:
         # Reuse-detection: a rotated-away token was replayed — treat as a theft
-        # signal and revoke the entire session chain immediately.
+        # signal and revoke this session immediately. There is no session-family
+        # id; this single row *is* the chain, so revoking it ends the lineage.
+        # Emit a WARNING so a genuine replay is visible in the logs (and
+        # distinguishable from the benign double-refresh described below).
         #
         # Accepted tradeoff (plan §19, NFR-014): two browser tabs sharing one
         # cookie, or a double-fired refresh (two concurrent 401-retry paths
@@ -123,6 +128,12 @@ async def rotate_session(
         # a problem the fix is to serialize refresh requests in the webapp with
         # an in-flight Promise deduplicator, or to introduce a short
         # prev_token_grace_window — neither is implemented in v1.
+        log_event(
+            "refresh_reuse_detected",
+            level=logging.WARNING,
+            session_id=row.id,
+            user_id=row.user_id,
+        )
         if row.revoked_at is None:
             row.revoked_at = naive_utcnow()
             await session.commit()

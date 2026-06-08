@@ -56,8 +56,8 @@ def mint_access_token(
 def verify_access_token(secret: str, token: str) -> AccessClaims:
     """Decode + validate signature/exp/type. Raises TokenError on any failure."""
     try:
-        payload = jwt.decode(token, secret, algorithms=[_ALGO])
-    except jwt.PyJWTError as exc:  # signature, expiry, malformed — all subclasses
+        payload = jwt.decode(token, secret, algorithms=[_ALGO], options={"require": ["exp", "sub"]})
+    except jwt.PyJWTError as exc:  # signature, expiry, malformed, missing-claim — all subclasses
         raise TokenError(str(exc)) from exc
     if payload.get("type") != "access":
         raise TokenError("not an access token")

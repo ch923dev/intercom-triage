@@ -65,6 +65,15 @@ def test_verify_rejects_non_hs256_algorithm() -> None:
         tokens.verify_access_token(SECRET, other_alg)
 
 
+def test_verify_rejects_token_missing_exp() -> None:
+    """A token with no `exp` claim must be rejected — verify *requires* exp so an
+    expiry-less forgery can't sidestep the lifetime check entirely."""
+    payload = {"sub": "1", "oid": "a", "email": "e", "scope": None, "type": "access"}
+    forged = jwt.encode(payload, SECRET, algorithm="HS256")  # no exp
+    with pytest.raises(tokens.TokenError):
+        tokens.verify_access_token(SECRET, forged)
+
+
 def test_refresh_token_is_random_and_hash_is_stable() -> None:
     raw1 = tokens.generate_refresh_token()
     raw2 = tokens.generate_refresh_token()

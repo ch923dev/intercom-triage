@@ -9,6 +9,7 @@ const tickets = useTicketsStore();
 const users = ref<UserRef[]>([]);
 const busy = ref(false);
 const loadError = ref(false);
+const assignError = ref(false);
 
 onMounted(async () => {
   try {
@@ -21,9 +22,17 @@ onMounted(async () => {
 async function onChange(e: Event) {
   if (busy.value) return;
   busy.value = true;
+  assignError.value = false;
+  const select = e.target as HTMLSelectElement;
   try {
-    const raw = (e.target as HTMLSelectElement).value;
+    const raw = select.value;
     await tickets.assign(props.ticketId, raw === '' ? null : Number(raw));
+  } catch {
+    // The store leaves assignment untouched on failure (it mutates only after the
+    // await resolves), so snap the control back to server truth rather than strand
+    // the rejected pick, and surface the failure to the operator.
+    assignError.value = true;
+    select.value = String(props.assignedTo?.id ?? '');
   } finally {
     busy.value = false;
   }
@@ -38,6 +47,7 @@ async function onChange(e: Event) {
       <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name ?? `#${u.id}` }}</option>
     </select>
     <span v-if="loadError" class="err">Could not load users</span>
+    <span v-else-if="assignError" class="err">Couldn't assign — try again</span>
   </label>
 </template>
 

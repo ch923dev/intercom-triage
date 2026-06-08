@@ -767,6 +767,10 @@ class Ticket(Base):
             "IN ('auto_reply','thanks','spam','out_of_office','other'))",
             name="tickets_non_actionable_kind_check",
         ),
+        CheckConstraint(
+            "(assigned_to IS NULL) = (assigned_at IS NULL)",
+            name="tickets_assigned_pair_check",
+        ),
         Index("ix_tickets_assigned_to", "assigned_to"),
     )
 

@@ -155,3 +155,64 @@ async def test_refresh_rejects_missing_or_cross_origin(login_app: FastAPI) -> No
         # Same-origin → 200.
         ok = await ac.post("/auth/refresh", headers=ALLOWED_ORIGIN)
         assert ok.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_login_cookie_has_security_flags(login_app: FastAPI) -> None:
+    """The refresh cookie must carry HttpOnly + SameSite + Path=/ on the actual
+    Set-Cookie header — asserting config defaults alone wouldn't prove the
+    response emits them. Secure is absent only because test_config sets
+    session_cookie_secure=False for the http:// test base URL."""
+    transport = ASGITransport(app=login_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/auth/login", json={"email": "op@example.com", "password": "good"})
+        assert resp.status_code == 200
+        set_cookie = resp.headers["set-cookie"].lower()
+        assert "triage_refresh=" in set_cookie
+        assert "httponly" in set_cookie
+        assert "samesite=lax" in set_cookie
+        assert "path=/" in set_cookie
+        assert "secure" not in set_cookie  # session_cookie_secure=False in test_config
+
+
+@pytest.mark.asyncio
+async def test_logout_all_revokes_session(login_app: FastAPI) -> None:
+    """POST /auth/logout-all (Bearer-guarded) revokes the caller's session so a
+    subsequent cookie refresh fails."""
+    transport = ASGITransport(app=login_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        login = await ac.post("/auth/login", json={"email": "op@example.com", "password": "good"})
+        assert login.status_code == 200
+        token = login.json()["access_token"]
+
+        out = await ac.post("/auth/logout-all", headers={"Authorization": f"Bearer {token}"})
+        assert out.status_code == 204
+
+        again = await ac.post("/auth/refresh", headers=ALLOWED_ORIGIN)
+        assert again.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limited_per_email_independent_of_ip(login_app: FastAPI) -> None:
+    """The per-EMAIL limiter trips on repeated attempts at ONE email even when the
+    per-IP limiter would not — here the IP limiter is neutralised with a huge cap,
+    so only the email half can return 429. The per-IP test can't exercise this."""
+    import app.routers.auth as auth_router
+    from app.security.ratelimit import FixedWindowLimiter
+
+    auth_router._ip_limiter = FixedWindowLimiter(max_attempts=10_000, window_seconds=60)
+    auth_router._email_limiter = FixedWindowLimiter(max_attempts=10, window_seconds=60)
+    try:
+        transport = ASGITransport(app=login_app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            for i in range(10):
+                r = await ac.post(
+                    "/auth/login", json={"email": "same@example.com", "password": "bad"}
+                )
+                assert r.status_code == 401, f"attempt {i}: {r.status_code}"
+            # 11th attempt at the SAME email — per-email window exhausted.
+            r = await ac.post("/auth/login", json={"email": "same@example.com", "password": "bad"})
+            assert r.status_code == 429
+    finally:
+        auth_router._ip_limiter = None
+        auth_router._email_limiter = None

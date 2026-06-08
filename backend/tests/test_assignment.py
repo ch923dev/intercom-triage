@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+from sqlalchemy.exc import IntegrityError
+
 from app.config import MAX_BULK_IDS
 from app.models import Ticket
 from app.util import naive_utcnow
@@ -60,3 +63,36 @@ async def test_bulk_assign_over_cap_422(client) -> None:
     ids = [f"t{i}" for i in range(MAX_BULK_IDS + 1)]
     resp = await client.patch("/tickets/bulk/assign", json={"ticket_ids": ids, "user_id": 1})
     assert resp.status_code == 422
+
+
+async def test_board_surfaces_assigned_to_name(client, session) -> None:
+    """The board read composes assigned_to as a UserRef {id, name} via the users
+    join — not the raw integer id (invariant #17)."""
+    await _seed(session, "tb")
+    resp = await client.patch("/tickets/tb/assign", json={"user_id": 1})
+    assert resp.status_code == 200
+    board = await client.get("/tickets")
+    assert board.status_code == 200
+    row = next(t for t in board.json() if t["id"] == "tb")
+    assert row["assigned_to"] == {"id": 1, "name": "Seed Operator"}
+
+
+async def test_assigned_pair_check_rejects_half_set(session) -> None:
+    """assigned_to and assigned_at must be both-null or both-set (CHECK), mirroring
+    the resolved/parked pairs — a half-set assignment can't be persisted. User 1 is
+    seeded by the app fixture, so the FK is satisfied and only the CHECK can fail."""
+    session.add(
+        Ticket(
+            id="t-assign-pair",
+            title="x",
+            state="open",
+            author={},
+            parts=[],
+            created_at=naive_utcnow(),
+            updated_at=naive_utcnow(),
+            assigned_to=1,  # set...
+            assigned_at=None,  # ...but no timestamp → must fail
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await session.commit()

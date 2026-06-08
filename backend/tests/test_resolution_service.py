@@ -78,12 +78,16 @@ def test_clear_resolution_nulls_the_full_quartet() -> None:
     t.resolved_at = naive_utcnow()
     t.resolved_source = "non_actionable"
     t.non_actionable_kind = "spam"
+    t.resolved_by = 7
 
     svc.clear_resolution(t)
 
     assert t.resolved_at is None
     assert t.resolved_source is None
     assert t.non_actionable_kind is None
+    # Attribution is part of the resolution quartet — a reopen must null it too,
+    # or a reopened ticket keeps a stale "resolved by" actor (invariant #17).
+    assert t.resolved_by is None
     assert t.resolution_cleared_at is not None
 
 

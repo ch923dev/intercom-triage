@@ -78,10 +78,17 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     (`sessions.refresh_token_hash`); the raw token is never written to the DB or
     logs. On every `POST /auth/refresh` the token rotates: the old hash moves to
     `prev_refresh_token_hash`. Replaying a rotated-away token matches
-    `prev_refresh_token_hash` and **immediately revokes the entire session chain**
-    (reuse-detection). Two browser tabs sharing one cookie, or a double-fired
-    refresh, can trip this and force a re-login — accepted for small-team scope
-    (plan §19 double-refresh tradeoff, NFR-014).
+    `prev_refresh_token_hash` and **immediately revokes the session**
+    (reuse-detection) — there is no session-family id, so this single row *is*
+    the chain. The branch logs `refresh_reuse_detected` (WARNING) so a genuine
+    replay is visible in the logs. Two browser tabs sharing one cookie, or a
+    double-fired refresh, can trip this and force a re-login — accepted for
+    small-team scope (plan §19 double-refresh tradeoff, NFR-014). Because the
+    access JWT is verified offline (no per-request DB read), `is_active` is not
+    re-checked mid-token: a deactivated user keeps a valid access token until it
+    expires (<= access TTL), and hard revocation lands on the next refresh
+    (`rotate_session` rejects an inactive user). `get_current_user` documents
+    this at the enforcement point.
 17. **Attribution + assignment fields are board-state only — never on
     `HydratedTicket`.** `tickets.resolved_by` / `overrides.acted_by` /
     `tickets.assigned_to` / `tickets.assigned_at` live on `TicketSchema` /

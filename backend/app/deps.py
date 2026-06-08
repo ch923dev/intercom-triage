@@ -55,7 +55,14 @@ def get_onlysales(request: Request) -> OnlySalesClient:
 
 
 def get_current_user(request: Request) -> CurrentUser:
-    """Verify the Bearer access token offline. 401 on any failure. No DB hit."""
+    """Verify the Bearer access token offline. 401 on any failure. No DB hit.
+
+    `is_active` is deliberately NOT re-checked here — that would cost a DB read
+    per request and defeat the stateless-JWT design (invariant #16). A user
+    deactivated mid-session therefore keeps a usable access token until it
+    expires (<= session_access_ttl_seconds, ~30 min); hard revocation lands on
+    the next /auth/refresh, which DOES reject an inactive user
+    (services.auth.rotate_session)."""
     header = request.headers.get("authorization", "")
     if not header.lower().startswith("bearer "):
         raise HTTPException(

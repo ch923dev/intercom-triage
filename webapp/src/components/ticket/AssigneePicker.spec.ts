@@ -53,4 +53,19 @@ describe('AssigneePicker', () => {
     await flushPromises();
     expect(wrapper.find('.err').exists()).toBe(true);
   });
+
+  it('surfaces an error and reverts the select when assign fails', async () => {
+    vi.mocked(api.assignTicket).mockRejectedValueOnce(new Error('boom'));
+    const wrapper = mount(AssigneePicker, {
+      props: { ticketId: 't1', assignedTo: { id: 2, name: 'Bob' } },
+    });
+    await flushPromises();
+    const select = wrapper.find('select');
+    await select.setValue('1'); // operator picks Alice
+    await flushPromises();
+    // assign rejected → an error hint shows AND the select snaps back to the
+    // server truth (Bob=2) instead of stranding the rejected pick.
+    expect(wrapper.find('.err').exists()).toBe(true);
+    expect((select.element as HTMLSelectElement).value).toBe('2');
+  });
 });

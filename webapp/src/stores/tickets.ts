@@ -109,6 +109,7 @@ export const useTicketsStore = defineStore('tickets', () => {
 
   const tickets = computed(() => state.value.tickets);
   const loading = computed(() => state.value.loading);
+  const error = computed(() => state.value.error);
   const lastRefresh = computed(() => state.value.lastRefresh);
 
   /** Subset of `state.tickets` matching the current `query`.
@@ -981,6 +982,7 @@ export const useTicketsStore = defineStore('tickets', () => {
   return {
     tickets,
     loading,
+    error,
     lastRefresh,
     query,
     visibleTickets,
