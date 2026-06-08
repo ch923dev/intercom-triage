@@ -6,7 +6,10 @@ from app.config import AppConfig
 
 
 def test_auth_defaults() -> None:
-    cfg = AppConfig(session_jwt_secret="x")
+    # _env_file=None so the operator's backend/.env (which sets e.g.
+    # SESSION_COOKIE_SECURE=false for plain-http local dev) can't shadow the
+    # code defaults this test pins.
+    cfg = AppConfig(_env_file=None, session_jwt_secret="x")
     assert cfg.session_jwt_secret == "x"
     assert cfg.session_access_ttl_seconds == 1800
     assert cfg.session_refresh_ttl_seconds == 30 * 24 * 3600
