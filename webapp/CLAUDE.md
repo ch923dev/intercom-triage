@@ -63,7 +63,7 @@ Dev server requires backend on `127.0.0.1:4000` — Vite proxies `/api/*` with t
 
 ## Architecture
 
-Vue 3 + Pinia + TypeScript SPA. One page, multiple "views" toggled via `view.view`: `board` / `followups` / `categories` / `proposals`. No router — `App.vue` is the shell and switches the active component.
+Vue 3 + Pinia + TypeScript SPA. One page, multiple "views" toggled via `view.view`: `board` / `followups` / `categories` / `proposals` / `playbooks` / `snippets` / `stats`. No router — `App.vue` is the shell and switches the active component, gated behind login (see **Auth gate** below).
 
 ### Data-flow pivot
 
@@ -76,8 +76,9 @@ Consequences:
 
 ### State: Pinia stores (`src/stores/`)
 
-Loaded in `App.vue:onMounted` in order: `settings` → `categories` → (`followups`, `notes`, `noteEntries` parallel) → `tickets`. Components import stores directly; no prop drilling.
+`App.vue:onMounted` first runs `auth.bootstrap()` (silent refresh); only an authenticated session loads the rest in order: `settings` → `categories` → (`followups`, `notes`, `noteEntries` parallel) → `tickets`. Components import stores directly; no prop drilling.
 
+- `auth` — login state + current `user`. `bootstrap()` silently restores the session on mount; `handleAuthLost()` is invoked by the HTTP layer when a refresh fails.
 - `tickets` — board source of truth. Two parallel lists (`tickets` = open, `resolvedTickets`) + `pendingOverrides`. `visibleTickets` filters by `query`; `byCategory`/`byProposal` derive from filtered list (search narrows columns); `byId` walks raw list (flyouts resolve filtered-out rows).
 - `settings` — server-backed `FilterSettings` (lookback, states, AI flags, `mute_alarms`).
 - `tweaks` — client-only (`localStorage`): dark mode, accent, density, `autoSyncSeconds`, `desktopNotifications`.
@@ -96,6 +97,10 @@ Mutating actions (`applyOverride`, `markResolved`, `reopen`, `editTicket`, all `
 ### Auto-sync loop
 
 `App.vue` arms a `setInterval` from `tweaks.autoSyncSeconds` calling `tickets.silentRefresh()` (no `loading=true`, no banner flicker). Skips ticks when `document.hidden` or when a manual refresh is in flight. Re-armed via `watch`; immediate silent refresh fires on `visibilitychange → visible`.
+
+### Auth gate
+
+The board is gated behind login. `App.vue` shows `LoginView` until `auth.isAuthenticated`. The access token lives **in-memory only** in `src/api/client.ts` (never `localStorage`); the refresh token is an httpOnly cookie set by the backend. `client.ts` injects `Authorization: Bearer …` and, on a 401, runs a single-flight `POST /auth/refresh` → retry; if refresh fails it calls the registered `authLost` handler → `auth.handleAuthLost()`. Never persist the access token to `localStorage` or touch the refresh cookie from JS.
 
 ### Components
 

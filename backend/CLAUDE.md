@@ -96,10 +96,10 @@ Shutdown reverses: cancel loops → close OpenRouter + Intercom → dispose engi
 
 ```
 app/
-├── main.py              lifespan + create_app + CORS (localhost:5173)
-├── config.py            pydantic-settings AppConfig (reads .env). MAX_BULK_IDS constant.
+├── main.py              lifespan + create_app + CORS + router registration (every route get_current_user except allowlist)
+├── config.py            pydantic-settings AppConfig (reads .env). MAX_BULK_IDS + auth/session/OnlySales settings.
 ├── db.py                async engine + session factory + get_session dependency
-├── deps.py              get_app_config + get_openrouter + get_intercom (read app.state)
+├── deps.py              get_app_config + get_openrouter + get_intercom + get_current_user / require_session_or_bearer (auth)
 ├── models.py            SQLAlchemy 2.0 + DEFAULT_CATEGORIES + init_db + SQLite PRAGMA listener
 ├── schemas.py           pydantic wire format. UTCDatetime / NaiveUTCDatetime Annotated types.
 ├── util.py              naive_utcnow()
@@ -108,19 +108,24 @@ app/
 ├── ai/
 │   ├── prompt.py        SYSTEM_PROMPT + build_messages
 │   └── pipeline.py      parse_response → resolve → categorize_many (semaphore-bounded)
+├── security/
+│   ├── tokens.py        HS256 JWT mint/verify (offline) + refresh-token hash/rotate + Fernet encrypt/decrypt
+│   └── ratelimit.py     in-memory IP+email login rate limiter
 ├── clients/openrouter.py  OpenRouter HTTP client (retries 429/5xx + jittered backoff)
 ├── clients/intercom.py    Intercom REST client (search/detail/contact; retries 429/5xx, rate-limit aware)
-├── routers/             health · categories · proposals · tickets · settings · followups ·
-│                        notes · note_entries · attachments · metrics
-└── services/            attachments · bulk · cache · categories · followups · note_entries ·
-                         notes · proposals · resolution · settings · sync · intercom_normalizer · tickets
+├── clients/onlysales.py   OnlySales auth client (proxies login → pyapi.onlysales.io)
+├── routers/             health · auth (incl. users_router) · categories · proposals · tickets · settings ·
+│                        followups · notes · note_entries · attachments · clusters · metrics · stats · snippets · playbooks
+└── services/            auth · attachments · bulk · cache · categories · categorization_rule · clusters · followups ·
+                         note_entries · notes · playbooks · proposals · resolution · settings · snippets · stats ·
+                         sync · intercom_normalizer · tickets
 ```
 
 ### Data model (key invariants)
 
 - `categories` — `is_active=False` + `archived_at` archives a category; active rows enforce unique name (partial index `ux_categories_name_active`). Exactly one `is_fallback=True` row (partial unique).
-- `tickets` — PK is Intercom's string id. `parts` (customer-visible) + `internal_notes` (team-only). `resolved_at` ⇔ `resolved_source` (XOR CheckConstraint). `title_user_edited` / `summary_user_edited` are sticky across re-syncs.
-- `overrides` — manual category override; PK = `ticket_id`. Beats AI categorization iff `tickets.updated_at <= override.set_at`. Drag-out reopen clears `resolved_at` atomically in `set_override`.
+- `tickets` — PK is Intercom's string id. `parts` (customer-visible) + `internal_notes` (team-only). `resolved_at` ⇔ `resolved_source` (XOR CheckConstraint). `title_user_edited` / `summary_user_edited` are sticky across re-syncs. Attribution/assignment (`resolved_by` / `assigned_to` → `users`, `assigned_to` ⇔ `assigned_at` XOR) are board-state only, composed via a `users` join (inv #17).
+- `overrides` — manual category override; PK = `ticket_id`. Beats AI categorization iff `tickets.updated_at <= override.set_at`. `acted_by` → `users` stamps the operator (inv #17). Drag-out reopen clears `resolved_at` atomically in `set_override`.
 - `ai_cache` — XOR (`category_id` ⊕ `proposal_id`). `ticket_updated_at` column stores the **content signature** (last customer-visible part timestamp), not Intercom's `updated_at`. Fallback results are never cached.
 - `category_proposals` — pending until approved / merged / rejected. Partial unique on `name` while `status='pending'`. Approval converts proposal → category and rewrites dependent `ai_cache` / `tickets`.
 - `rejected_proposal_signatures` — normalized signatures (whitespace-collapsed lowercase) of previously rejected names. Pipeline raises `ValueError` on a match → fallback.
@@ -128,6 +133,8 @@ app/
 - `followups` — PK = `ticket_id`; PUT upserts. No FK to tickets — id is Intercom-owned.
 - `note_entries` — append-only investigation log. New row with `timer_min` set upserts the `followups` row in the same transaction. Soft-delete via `deleted_at`.
 - `note_attachments` — polymorphic owner (`entry` | `ticket`), content-addressed by sha256 on disk. `ticket_id` always populated for index-only list lookups.
+- `users` — local mirror of an OnlySales identity (`onlysales_id` / `email` / `name` / `scope` / `is_active` / `last_login_at`). **No password column** (inv #19). FK target for `tickets.resolved_by` / `tickets.assigned_to` / `overrides.acted_by`.
+- `sessions` — refresh-token ledger. `refresh_token_hash` + `prev_refresh_token_hash` (reuse-detection → revoke on replay), Fernet-encrypted `onlysales_refresh_encrypted`, `issued_at` / `expires_at` / `revoked_at` / `last_used_at`. Only sha256 hashes stored; raw tokens never persisted (inv #16/#19).
 
 ### AI pipeline
 

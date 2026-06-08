@@ -7,7 +7,7 @@
 >
 > **It points, it does not duplicate.** The contract source of truth stays in
 > `contract/spec.md` (what) / `contract/plan.md` (how) / `contract/tasks.md` (traceability). The
-> per-change rules + the 14 cross-package invariants stay in the `CLAUDE.md`
+> per-change rules + the 19 cross-package invariants stay in the `CLAUDE.md`
 > hierarchy (auto-loaded every session). When this doc and one of those
 > disagree, *they* win — fix this doc.
 
@@ -15,16 +15,24 @@
 
 ## 1. What it is & scope
 
-A local, single-operator tool that pre-categorizes and summarizes recent
-Intercom conversations so the operator scans and routes from one Kanban board
-instead of opening each ticket. Two packages, two stacks, all on
-`localhost`.
+A hosted, authenticated, shared-team tool that pre-categorizes and summarizes
+recent Intercom conversations so operators scan and route from one Kanban board
+instead of opening each ticket. Multiple operators sign in with their OnlySales
+credentials and work one shared ticket pool, one taxonomy, one settings row.
+Two packages, two stacks (localhost in dev).
 
-**Charter (the constraint is the product).** One workspace, one taxonomy, one
-operator, one machine. **No** multi-tenancy, auth, RBAC, cloud deploy, Docker,
-CI/CD, hosted observability, or public surface. Out-of-scope-by-design:
-team leaderboards, CSAT, autonomous action agents, multi-channel. See the root
-[`CLAUDE.md`](../CLAUDE.md) "Scope guardrails" / "Don't" sections.
+**Charter (the constraint is the product).** One Intercom workspace, one
+taxonomy, one shared board, many operators. Identity is delegated to OnlySales —
+the backend never stores a password. **In scope (charter pivot — MHU):** auth,
+multi-user collaboration, ticket assignment + My Queue, attribution, hosted
+deployment. **Out of scope by design:** multi-tenancy (no `tenant_id`, no
+per-tenant data isolation — every authenticated user sees the same board),
+per-user Intercom tokens, RBAC enforcement beyond the stored `scope`, replying
+from the tool, team leaderboards, CSAT, autonomous action agents, multi-channel.
+Per-user follow-ups/notes (`note_entries.user_id`) and the pgvector/semantic
+layer are deferred (Phase 4). We ship no infra config — hosted deployment is the
+operator's concern. See the root [`CLAUDE.md`](../CLAUDE.md) "Scope guardrails" /
+"Don't" sections.
 
 ---
 
@@ -32,7 +40,7 @@ team leaderboards, CSAT, autonomous action agents, multi-channel. See the root
 
 | Package | Stack | Role | Guide |
 |---|---|---|---|
-| `backend/` | FastAPI + async SQLAlchemy 2.0 + SQLite + OpenRouter + Intercom REST | **The ingestion path.** Polls `api.intercom.io` with an Access Token, normalizes, categorizes (cache-aware) against the operator's taxonomy, stores, and serves the board. Embeddings, clustering, playbooks, stats. | [`backend/CLAUDE.md`](../backend/CLAUDE.md) |
+| `backend/` | FastAPI + async SQLAlchemy 2.0 + SQLite + OpenRouter + Intercom REST | **The ingestion path + auth.** Polls `api.intercom.io` with an Access Token, normalizes, categorizes (cache-aware) against the operator's taxonomy, stores, and serves the board. Embeddings, clustering, playbooks, stats. Owns auth: OnlySales-delegated login + rotating DB-backed sessions; guards every route. | [`backend/CLAUDE.md`](../backend/CLAUDE.md) |
 | `webapp/` | Vue 3 + Pinia + Vite + TS (no router) | The Kanban board + admin/settings pages. Optimistic-update Pinia store is the heart. | [`webapp/CLAUDE.md`](../webapp/CLAUDE.md), [`webapp/DESIGN.md`](../webapp/DESIGN.md) |
 
 Two stacks intentionally — **do not merge them.** No monorepo tool, shared
@@ -72,6 +80,14 @@ park…) go back through the same HTTP API.
 Server-side skip-known (an internal `get_sync_state`) skips the per-conversation
 detail fetch for conversations already stored unchanged.
 
+**Auth boundary.** Every route except the allowlist (`/health`, `/auth/login`,
+`/auth/refresh`, `/auth/logout`) requires a bearer access JWT via
+`get_current_user` (inv #15). Login proxies to OnlySales; the backend mirrors
+the user, issues a stateless access JWT (~30 min) + a DB-backed rotating refresh
+token (httpOnly cookie), and stamps the acting operator on manual resolve /
+recategorize / assign (inv #17). The webapp gates the whole board behind login
+and refreshes the access token on 401.
+
 ---
 
 ## 4. Run the stack
@@ -98,6 +114,7 @@ fallback category until the key is set.
 | embeddings/ML | sentence-transformers 5.5.1 + torch 2.8.0 (CPU, `all-MiniLM-L6-v2`, 384-dim), sqlite-vec 0.1.9 (pre-v1, pinned exact), scikit-learn 1.6.1 (HDBSCAN clustering) |
 | webapp | Vue 3.5, Pinia 2.3, Vite 6, TypeScript 5.6, vue-tsc, ESLint 9, Prettier 3, Vitest 2 |
 | AI | OpenRouter (`anthropic/claude-sonnet-4.5` default; swap via `OPENROUTER_MODEL`) |
+| auth | OnlySales-delegated identity (`pyapi.onlysales.io`) · HS256 access JWT (PyJWT) · Fernet (`cryptography`) encrypts the upstream refresh token at rest · sha256 refresh-hash rotation |
 | storage | SQLite (default, `backend/data/triage.db`) · Postgres swap via `DATABASE_URL` |
 
 ---
@@ -106,15 +123,16 @@ fallback category until the key is set.
 
 SQLite (Postgres-swappable). Naive-UTC timestamps in the DB, `Z`-suffixed on
 the wire (invariant #5). Migrations are forward-only Alembic revisions
-(`backend/alembic/versions/0001…0020`).
+(`backend/alembic/versions/0001…0025`; auth tables landed 0021–0022,
+attribution/assignment 0023–0025).
 
 | Table | Purpose / key constraints |
 |---|---|
-| `tickets` | PK = Intercom string id. `parts` (customer-visible) + `internal_notes` (team-only). `resolved_at ⇔ resolved_source` XOR (`manual`/`intercom_closed`/`non_actionable`/`ai_resolved`). `non_actionable_kind` CHECK-coupled to `resolved_source='non_actionable'`. Parked trio (`parked_at`/`parked_until`/`parked_reason`) XOR-locked, never co-resolved. `title_user_edited`/`summary_user_edited` sticky. |
+| `tickets` | PK = Intercom string id. `parts` (customer-visible) + `internal_notes` (team-only). `resolved_at ⇔ resolved_source` XOR (`manual`/`intercom_closed`/`non_actionable`/`ai_resolved`). `non_actionable_kind` CHECK-coupled to `resolved_source='non_actionable'`. Parked trio (`parked_at`/`parked_until`/`parked_reason`) XOR-locked, never co-resolved. `title_user_edited`/`summary_user_edited` sticky. Attribution/assignment (`resolved_by`/`assigned_to`→`users`, `assigned_to ⇔ assigned_at` XOR) are board-state, composed via a join (inv #17). |
 | `ai_cache` | Per-ticket categorization cache. `category_id ⊕ proposal_id` XOR. `ticket_updated_at` stores the **content signature** (last customer-visible part timestamp), not Intercom `updated_at`. Fallback results never cached. Carries AI facets + `non_actionable_kind`. |
 | `categories` | `is_active=False`+`archived_at` archives. Unique name among active (partial index). Exactly one `is_fallback=True`. |
 | `category_proposals` | Pending → approved/merged/rejected. Partial-unique name while pending. |
-| `overrides` | PK = ticket_id. Manual category override; beats AI iff `tickets.updated_at ≤ set_at`. Drag-out reopen clears resolution atomically here. |
+| `overrides` | PK = ticket_id. Manual category override; beats AI iff `tickets.updated_at ≤ set_at`. `acted_by`→`users` (attribution, inv #17). Drag-out reopen clears resolution atomically here. |
 | `rejected_proposal_signatures` | Normalized signatures of rejected names; pipeline raises → fallback on match. |
 | `followups` | PK = ticket_id; PUT upserts. No FK (Intercom ids churn). |
 | `ticket_notes` | Per-ticket free-text note (legacy single-body). Empty body = deleted row. |
@@ -124,15 +142,17 @@ the wire (invariant #5). Migrations are forward-only Alembic revisions
 | `snippets` | Global canned replies; `{{var}}` substitution client-side. |
 | `ticket_embeddings` | 384-dim vectors (sqlite-vec). Separate store — never touches `ai_cache`. |
 | `ticket_clusters` / `ticket_cluster_members` | Offline recurring-issue clustering snapshot. |
-| `settings` | Singleton (`CHECK id = 1`). Filter + AI flags; `init_db` inserts it. |
+| `settings` | Singleton (`CHECK id = 1`). Filter + AI flags; `init_db` inserts it. Team-wide — no per-user settings (inv #18). |
+| `users` | Local mirror of an OnlySales identity (`onlysales_id`/`email`/`name`/`scope`/`is_active`/`last_login_at`). No password column (inv #19). FK target for attribution/assignment. |
+| `sessions` | Refresh-token ledger: `refresh_token_hash` + `prev_refresh_token_hash` (reuse-detection), Fernet-encrypted `onlysales_refresh_encrypted`, `issued_at`/`expires_at`/`revoked_at`/`last_used_at`. Raw tokens never stored (inv #16/#19). |
 
 ---
 
-## 7. The 14 cross-package invariants (index)
+## 7. The 19 cross-package invariants (index)
 
 **Canonical text + rationale: root [`CLAUDE.md`](../CLAUDE.md) "Cross-package
-invariants."** Enforced by `scripts/check-invariants.ps1` (PreToolUse hook).
-One-line index only:
+invariants."** (`scripts/check-invariants.ps1` lingers as a manual checker but is
+no longer wired as a hook — dropped in commit `43792e6`.) One-line index only:
 
 1. Backend owns Intercom ingestion via an Access Token (`api.intercom.io`); the backend client is the only ingestion path.
 2. `HydratedTicket` spans two packages (backend schema ↔ webapp type), produced by the backend normalizer — edit together or break the board.
@@ -148,6 +168,11 @@ One-line index only:
 12. Singleton `Settings` row, `CHECK (id = 1)`.
 13. Playbooks are durable operator knowledge, not cache.
 14. Parked is board-state (trio on the board response, not `HydratedTicket`), XOR-locked.
+15. Auth required on every route except the allowlist (`/health`, `/auth/login`, `/auth/refresh`, `/auth/logout`); attachment image GETs also accept the session cookie.
+16. Session = stateless access JWT + DB-backed rotating refresh token with reuse-detection; raw tokens never stored; `is_active` not re-checked mid-token (hard revocation lands on refresh).
+17. Attribution + assignment (`resolved_by`/`acted_by`/`assigned_to`/`assigned_at` as `UserRef`) are board-state only — never on `HydratedTicket` (#2 untouched).
+18. Per-user follow-ups/notes are DEFERRED (Phase 4 — `note_entries.user_id` absent); `Settings` stays a shared team-wide singleton.
+19. No password is ever stored or logged; only the Fernet-encrypted upstream OnlySales refresh token is persisted.
 
 ---
 
@@ -159,11 +184,12 @@ Router footprint: `backend/app/routers/`.
 | Group | Endpoints |
 |---|---|
 | health / metrics | `GET /health` · `GET /metrics` |
+| auth / users | `POST /auth/login` · `/auth/refresh` · `/auth/logout` · `/auth/logout-all` · `GET /auth/me` · `GET /users` |
 | categories | `GET /categories` · `POST /categories` · `PATCH /{id}` · `POST /{id}/archive` · `POST /{src}/merge-into/{dst}` |
 | proposals | `GET /proposals` · `POST /{id}/approve` · `/merge-into/{cat}` · `/reject` |
 | tickets (read/ingest) | `GET /tickets` · `POST /tickets/sync` (run a poll cycle) · `POST /tickets/ingest` (internal) |
-| tickets (single) | `PATCH /{id}/category` · `PATCH /{id}` · `POST /{id}/resolve` · `/non-actionable` · `/reopen` · `/park` · `/unpark` · `/dismiss-chip` · `PATCH /{id}/ai-resolve` |
-| tickets (bulk, capped 200) | `POST /tickets/bulk/resolve` · `/reopen` · `/dismiss-chip` · `/non-actionable` · `/park` · `/unpark` · `PATCH /tickets/bulk/category` — each returns `{ok_ids, failed[]}` |
+| tickets (single) | `PATCH /{id}/category` · `PATCH /{id}` · `POST /{id}/resolve` · `/non-actionable` · `/reopen` · `/park` · `/unpark` · `/dismiss-chip` · `PATCH /{id}/ai-resolve` · `PATCH /{id}/assign` |
+| tickets (bulk, capped 200) | `POST /tickets/bulk/resolve` · `/reopen` · `/dismiss-chip` · `/non-actionable` · `/park` · `/unpark` · `PATCH /tickets/bulk/category` · `PATCH /tickets/bulk/assign` — each returns `{ok_ids, failed[]}` |
 | followups | `GET /followups` · `PUT /followups/bulk` · `DELETE /followups/bulk` · `PUT /{id}` · `POST /{id}/snooze` · `/mark-fired` · `DELETE /{id}` |
 | notes | `GET /notes` · `PUT /notes/{id}` |
 | note entries | `GET /notes/entries` · `GET /notes/entries/{ticket_id}` · `POST /notes/entries` · `DELETE /notes/entries/{id}` |
@@ -196,20 +222,24 @@ clustering — all reading customer-visible `parts[]` + operator notes only, nev
 
 ## 10. Feature & roadmap status
 
-The project is feature-complete against `contract/spec.md` v1.9. The 2026-05 roadmap is
-now an execution log (full ledger with commit SHAs + the original phase tables:
+The project is feature-complete against `contract/spec.md` v2.0 (the MHU charter
+pivot — auth, multi-user, hosted). The 2026-05 roadmap is now an execution log
+(full ledger with commit SHAs + the original phase tables:
 [`docs/_archive/ROADMAP.md`](./_archive/ROADMAP.md)).
 
 Full per-feature catalog (every capability, by area, with code anchors):
 **[`docs/FEATURES.md`](./FEATURES.md)**.
 
 **Shipped to `main`:** Phases 0–3 + 4.1 (parked, T106) + 4.2 (`non_actionable_kind`,
-T107) + robustness R.1–R.5. That covers: priority/sentiment/multi-label, aging
+T107) + robustness R.1–R.5 + **MHU (auth, multi-user, ticket assignment + My
+Queue, attribution, security hardening — PR #10, US-040..043, T161..T171)**.
+That covers: priority/sentiment/multi-label, aging
 indicators, keyboard triage, saved views, priority-sorted queue, stats
 dashboard, cost meter, snippets, bulk pre-flight diff, structured JSON
 outputs, model cascade, needs-review lane, the local embedding layer, few-shot
 categorization, RAG draft replies, recurring-issue clustering, playbook-gap
-detection, playbook auto-match.
+detection, playbook auto-match, OnlySales-delegated login, rotating sessions
+with reuse-detection, per-ticket + bulk assignment, and operator attribution.
 
 **Open backlog** (the only live forward items):
 
@@ -226,8 +256,8 @@ detection, playbook auto-match.
 | backend | `ruff check app tests && ruff format --check app tests && mypy app && pytest -q` | `/qa-backend` |
 | webapp | `npm run lint && npm run format:check && npm run typecheck && npm test && npm run build` | `/qa-webapp` |
 
-`/qa-all` runs backend + webapp back-to-back. Last full run (2026-05-28):
-backend 409 tests, webapp 215 tests — all green.
+`/qa-all` runs backend + webapp back-to-back. Last full run (2026-06-08, PR #10
+merge): backend 518 tests, webapp 248 tests — all green.
 
 ---
 
@@ -244,6 +274,9 @@ backend 409 tests, webapp 215 tests — all green.
 - **parked** — board-state "waiting on customer/third-party/internal" with a wake time; XOR-locked trio, never co-resolved, surfaced via a filter chip.
 - **playbook** — durable, category-scoped operator response recipe; not cache, survives re-sync (invariant #13).
 - **snippet** — global canned reply with `{{var}}` slots; lighter than a playbook.
+- **session** — OnlySales-delegated login state: a stateless HS256 access JWT (~30 min, verified offline) + a DB-backed refresh token that rotates on every `/auth/refresh`; replaying a rotated token trips reuse-detection and revokes the session (inv #16).
+- **attribution** — the operator stamped on a manual action: `resolved_by` (who resolved), `acted_by` (who overrode the category), `assigned_to` (assignee). Board-state only, composed via a `users` join (inv #17).
+- **My Queue** — the board lane filtered to tickets assigned to the signed-in operator.
 
 ---
 
@@ -255,8 +288,8 @@ Where knowledge lives now, and the boundary this handbook respects:
 |---|---|---|
 | **`docs/PROJECT.md`** (this) | System orientation: architecture, data-flow, stack, data model, API surface, feature status, glossary. | Canonical living handbook. |
 | **`docs/FEATURES.md`** | Exhaustive feature catalog by capability area, with code anchors + surfaces. | Canonical feature reference. |
-| `CLAUDE.md` (+ `backend/`, `webapp/`) | Per-change rules + the 14 invariants. Auto-loaded every session. | Canonical, authoritative. **Not folded here.** |
-| `contract/spec.md` / `contract/plan.md` / `contract/tasks.md` | Requirements (US/FR/NFR) · architecture decisions (§1–§18) · traceability matrix (T001–T160). | Contract source of truth. **Not folded here** (charter-protected). |
+| `CLAUDE.md` (+ `backend/`, `webapp/`) | Per-change rules + the 19 invariants. Auto-loaded every session. | Canonical, authoritative. **Not folded here.** |
+| `contract/spec.md` / `contract/plan.md` / `contract/tasks.md` | Requirements (US/FR/NFR, US-001..043) · architecture decisions (§1–§19) · traceability matrix (T001–T171). | Contract source of truth. **Not folded here** (charter-protected). |
 | `docs/principles.md` | The four engineering principles. | Live; referenced by every sub-package CLAUDE.md. |
 | `webapp/DESIGN.md` | Design-system source of truth (tokens/palette/components). | Live. |
 | `*/README.md`, `SECURITY.md` | Per-package quickstart + secrets/threat model. | Live reference. |

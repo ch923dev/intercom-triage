@@ -6,7 +6,7 @@
 > without re-deriving it from code.
 >
 > Orientation + architecture: [`PROJECT.md`](./PROJECT.md). Requirements/IDs:
-> `contract/spec.md` (US-*/FR-*/NFR-*). Per-change rules + the 14 invariants: root
+> `contract/spec.md` (US-*/FR-*/NFR-*). Per-change rules + the 19 invariants: root
 > [`CLAUDE.md`](../CLAUDE.md). When this catalog and code disagree, code wins —
 > fix this file.
 
@@ -16,7 +16,7 @@
 
 - **surface**: `backend` (HTTP) · `ai` (OpenRouter/embeddings) · `webapp`
 - **status**: everything below is **shipped to `main`** unless tagged **[OPEN]**.
-- Counts: ~66 backend endpoints · 20 AI/ML features · ~50 user-facing UI features.
+- Counts: ~72 backend endpoints · 20 AI/ML features · ~50 user-facing UI features · auth + multi-user (MHU).
 
 ---
 
@@ -132,14 +132,30 @@ All enforce inv #4 (never feed/embed `internal_notes`) and inv #6 (embeddings li
 - **Sync cycle** — `run_sync_cycle`: server-side skip-known (internal `get_sync_state`), search → detail/contact fetch for changed/new, closure pass for open→closed, then the existing cache-aware ingest. (backend · `services/sync.py`)
 - **Poller + manual sync** — background poller (interval-gated, default off) + `POST /tickets/sync` (503 without a token); returns `{received, categorized, skipped_known, closed_detected}`. (backend · `main:_intercom_poll_loop`, `routers/tickets.py`)
 
+## K. Auth, multi-user & attribution (MHU)
+
+Shipped via PR #10 (charter pivot). Auth + multi-user are IN scope; multi-tenancy is OUT. Identity is delegated to OnlySales — no password is ever stored (inv #15/#16/#17/#18/#19).
+
+- **OnlySales-delegated login** — `POST /auth/login` proxies email/password straight to OnlySales (`pyapi.onlysales.io`), mirrors the user locally (no password column), and returns an access JWT + sets the refresh cookie. IP+email rate-limited. (backend · `routers/auth.py:login`, `clients/onlysales.py`, `services/auth.py:complete_login` · US-040/FR-063, inv #19)
+- **Stateless access JWT** — HS256, ~30 min, verified offline per request via `get_current_user` (no DB hit, no mid-token `is_active` recheck). (backend · `security/tokens.py:mint_access_token`/`verify_access_token`, `deps.py` · inv #16)
+- **Rotating refresh + reuse-detection** — `POST /auth/refresh` rotates the DB-backed refresh token (old hash → `prev_refresh_token_hash`); replaying a rotated token revokes the session and logs `refresh_reuse_detected`. CSRF-guarded (Origin check). Only sha256 hashes are stored. (backend · `services/auth.py:rotate_session`, `models.py:Session` · US-043/FR-070..073, inv #16)
+- **Upstream token encryption at rest** — the OnlySales refresh token is Fernet-encrypted (`session_refresh_encryption_key`) before storage; empty key → not stored. (backend · `security/tokens.py:encrypt_secret`/`decrypt_secret` · inv #19)
+- **Logout / logout-all** — `POST /auth/logout` revokes the current session (cookie-auth); `POST /auth/logout-all` (bearer-protected) revokes every session for the user. (backend · `routers/auth.py:logout`/`logout_all`)
+- **Whole-route auth guard** — every router except the allowlist (`/health`, `/auth/login`, `/auth/refresh`, `/auth/logout`) is `Depends(get_current_user)`; attachment image GETs also accept the session cookie. (backend · `main.py` registration, `deps.py:require_session_or_bearer` · inv #15)
+- **Login gate (webapp)** — `App.vue` bootstraps via a silent refresh; no session → `LoginView`, else the board. Access token in-memory only (never `localStorage`); 401 → single-flight refresh → retry, refresh-fail → `handleAuthLost`. (webapp · `stores/auth.ts`, `api/client.ts`, `LoginView.vue` · US-040)
+- **User listing** — `GET /users` lists operators for the assignee picker. (backend/webapp · `routers/auth.py:users_router`, `AssigneePicker.vue`)
+- **Ticket assignment + My Queue** — assign a ticket to an operator (`PATCH /tickets/{id}/assign`) or in bulk (`PATCH /tickets/bulk/assign`); `assigned_to ⇔ assigned_at` XOR-paired; the board surfaces a My-Queue lane filtered to the signed-in user. (backend/webapp · `services/tickets.py:assign`, `services/bulk.py:bulk_assign`, `tickets.ts:myTickets`, `AssigneePicker.vue`/`BulkActionBar.vue` · US-041/FR-064..066, inv #17)
+- **Attribution** — manual resolve stamps `resolved_by`, category override stamps `overrides.acted_by`; composed via a `users` join as `UserRef {id, name}`, board-state only, never on `HydratedTicket`. AI/system paths leave attribution null. (backend/webapp · `services/resolution.py`, `services/tickets.py:set_override`, `schemas.py:TicketSchema` · US-042/FR-067..069, inv #17)
+- **Shared team settings** — the `settings` singleton is team-wide; per-user follow-ups/notes are deferred (Phase 4 — `note_entries.user_id` absent). (backend · inv #18)
+
 ## L. Platform & ops
 
 - **Naive-UTC-in-DB / Z-on-wire** — Pydantic `UTCDatetime`/`NaiveUTCDatetime` enforce the timestamp contract JS clients depend on. (backend · `schemas.py` · inv #5)
 - **Singleton settings** — one `Settings` row, `CHECK (id = 1)`, inserted on first boot. (backend · `models.py` · inv #12)
-- **Forward-only migrations** — Alembic chain `0001…0020`. (backend · `alembic/versions/`)
+- **Forward-only migrations** — Alembic chain `0001…0025` (auth tables 0021–0022, attribution/assignment 0023–0025). (backend · `alembic/versions/`)
 - **Secret-scan guard** — pre-commit file-name + content scan (gitleaks or regex fallback); allowlists `docs/_archive/` + test/fixture paths. (ops · `.githooks/pre-commit`, `.gitleaks.toml`)
 - **One-command dev launcher** — `scripts/dev.ps1` boots backend + webapp in a Windows Terminal split-pane. (ops · `scripts/dev.ps1`)
-- **Invariant guard hook** — `scripts/check-invariants.ps1` greps for cross-package invariant violations on edits. (ops)
+- **Invariant checker (manual)** — `scripts/check-invariants.ps1` greps for cross-package invariant violations; **no longer wired as a hook** (PreToolUse hook dropped in commit `43792e6`) — run it by hand. (ops)
 
 ---
 
