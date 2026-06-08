@@ -1,11 +1,21 @@
 // TicketResolution flyout spec — Mark-non-actionable button visibility
 // per ticket state. Reference: spec §10.2.
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import TicketResolution from './TicketResolution.vue';
 import type { Ticket } from '@/types/api';
+
+vi.mock('@/api/client', () => ({
+  api: {
+    listUsers: vi.fn().mockResolvedValue([]),
+    assignTicket: vi.fn(),
+    listTickets: vi.fn().mockResolvedValue([]),
+  },
+  setAccessToken: vi.fn(),
+  onAuthLost: vi.fn(),
+}));
 
 const NOW = '2026-05-25T00:00:00.000Z';
 
@@ -55,6 +65,10 @@ function base(overrides: Partial<Ticket> = {}): Ticket {
     parked_reason: null,
     parked_note: null,
     non_actionable_kind: null,
+    resolved_by: null,
+    acted_by: null,
+    assigned_to: null,
+    assigned_at: null,
     ...overrides,
   };
 }
@@ -89,5 +103,18 @@ describe('TicketResolution', () => {
       },
     });
     expect(w.text()).toContain('Non-actionable');
+  });
+
+  it('shows "by <name>" when resolved_by is set', () => {
+    const w = mount(TicketResolution, {
+      props: {
+        ticket: base({
+          resolved_at: NOW,
+          resolved_source: 'manual',
+          resolved_by: { id: 1, name: 'Alice' },
+        }),
+      },
+    });
+    expect(w.text()).toContain('by Alice');
   });
 });

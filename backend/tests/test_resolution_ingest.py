@@ -75,6 +75,9 @@ async def test_intercom_closed_transition_auto_resolves(
     assert row.resolved_at is not None
     assert row.resolved_source == "intercom_closed"
     assert row.state == "closed"
+    # System closure carries no actor — attribution is for operator actions only
+    # (invariant #17); resolved_by must stay null on the intercom_closed path.
+    assert row.resolved_by is None
 
 
 @pytest.mark.asyncio

@@ -13,18 +13,21 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.clients.intercom import IntercomClient
+from app.clients.onlysales import OnlySalesClient
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig, get_config
 from app.db import make_engine, make_session_factory
+from app.deps import get_current_user
 from app.metrics import metrics
 from app.models import init_db
 from app.observability import configure_logging, log_event
 from app.routers import attachments as attachments_router
+from app.routers import auth as auth_router
 from app.routers import categories as categories_router
 from app.routers import clusters as clusters_router
 from app.routers import followups as followups_router
@@ -176,6 +179,11 @@ async def _intercom_poll_loop(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Boot: logging → DB (create_all + seed) → external clients. Reverse on shutdown."""
     config = get_config()
+    if not config.session_secret_configured:
+        raise RuntimeError(
+            "SESSION_JWT_SECRET is required — refusing to boot without it. "
+            "Set it in backend/.env."
+        )
     configure_logging(config.log_level)
 
     engine = make_engine(config.database_url)
@@ -203,11 +211,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             contact_cache_ttl_seconds=config.intercom_contact_cache_ttl_seconds,
         )
 
+    onlysales = OnlySalesClient(base=config.onlysales_auth_base)
+
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.config = config
     app.state.openrouter = openrouter
     app.state.intercom = intercom
+    app.state.onlysales = onlysales
 
     if config.missing_secrets:
         log_event(
@@ -273,6 +284,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await openrouter.aclose()
         if intercom is not None:
             await intercom.aclose()
+        await onlysales.aclose()
         await engine.dispose()
 
 
@@ -284,29 +296,34 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS — webapp on 5173.
+    # CORS — webapp on 5173; credentials enabled for the session cookie.
+    config = get_config()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-        allow_credentials=False,
+        allow_origins=config.cors_allowed_origins,
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    app.include_router(health_router.router)
-    app.include_router(categories_router.router)
-    app.include_router(proposals_router.router)
-    app.include_router(tickets_router.router)
-    app.include_router(settings_router.router)
-    app.include_router(followups_router.router)
-    app.include_router(notes_router.router)
-    app.include_router(note_entries_router.router)
-    app.include_router(playbooks_router.router)
-    app.include_router(snippets_router.router)
+    protected = [Depends(get_current_user)]
+
+    app.include_router(health_router.router)  # public
+    app.include_router(auth_router.router)  # public login/refresh; /me + logout-all self-guard
+    app.include_router(auth_router.users_router, dependencies=protected)
+    app.include_router(categories_router.router, dependencies=protected)
+    app.include_router(proposals_router.router, dependencies=protected)
+    app.include_router(tickets_router.router, dependencies=protected)
+    app.include_router(settings_router.router, dependencies=protected)
+    app.include_router(followups_router.router, dependencies=protected)
+    app.include_router(notes_router.router, dependencies=protected)
+    app.include_router(note_entries_router.router, dependencies=protected)
+    app.include_router(playbooks_router.router, dependencies=protected)
+    app.include_router(snippets_router.router, dependencies=protected)
     app.include_router(attachments_router.router)
-    app.include_router(clusters_router.router)
-    app.include_router(metrics_router.router)
-    app.include_router(stats_router.router)
+    app.include_router(clusters_router.router, dependencies=protected)
+    app.include_router(metrics_router.router, dependencies=protected)
+    app.include_router(stats_router.router, dependencies=protected)
 
     return app
 

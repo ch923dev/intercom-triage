@@ -58,7 +58,7 @@ async def test_unpark_when_not_parked_is_409(session: AsyncSession) -> None:
 
 async def test_cannot_park_resolved_ticket(session: AsyncSession) -> None:
     row = await _open(session, "p4")
-    svc.apply_resolve(row)
+    svc.apply_resolve(row, resolved_by=None)
     with pytest.raises(HTTPException) as exc:
         svc.apply_park(row, naive_utcnow() + timedelta(hours=1), "other")
     assert exc.value.status_code == 409
@@ -67,7 +67,7 @@ async def test_cannot_park_resolved_ticket(session: AsyncSession) -> None:
 async def test_resolving_a_parked_ticket_clears_park(session: AsyncSession) -> None:
     row = await _open(session, "p5")
     svc.apply_park(row, naive_utcnow() + timedelta(hours=1), "waiting_internal")
-    svc.apply_resolve(row)
+    svc.apply_resolve(row, resolved_by=None)
     await session.commit()  # would raise if parked + resolved both set
     assert row.parked_at is None
     assert row.resolved_source == "manual"

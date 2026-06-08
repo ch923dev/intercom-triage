@@ -37,7 +37,7 @@ async def test_resolve_marks_manual_and_returns_datetime(session):
     session.add(_make_open_ticket("t1"))
     await session.commit()
 
-    out = await svc.resolve(session, "t1")
+    out = await svc.resolve(session, "t1", resolved_by=None)
     assert out.resolved_source == "manual"
     row = await session.get(Ticket, "t1")
     assert row.resolved_at is not None
@@ -52,7 +52,7 @@ async def test_resolve_409_if_already_resolved(session):
     session.add(t)
     await session.commit()
     with pytest.raises(HTTPException) as exc:
-        await svc.resolve(session, "t2")
+        await svc.resolve(session, "t2", resolved_by=None)
     assert exc.value.status_code == 409
 
 
@@ -78,12 +78,16 @@ def test_clear_resolution_nulls_the_full_quartet() -> None:
     t.resolved_at = naive_utcnow()
     t.resolved_source = "non_actionable"
     t.non_actionable_kind = "spam"
+    t.resolved_by = 7
 
     svc.clear_resolution(t)
 
     assert t.resolved_at is None
     assert t.resolved_source is None
     assert t.non_actionable_kind is None
+    # Attribution is part of the resolution quartet — a reopen must null it too,
+    # or a reopened ticket keeps a stale "resolved by" actor (invariant #17).
+    assert t.resolved_by is None
     assert t.resolution_cleared_at is not None
 
 
@@ -122,7 +126,10 @@ async def test_dismiss_chip_sets_dismissed_at_to_updated_at(session):
 
 @pytest.mark.asyncio
 async def test_404_on_unknown_ticket(session):
-    for fn in (svc.resolve, svc.reopen, svc.dismiss_chip):
+    with pytest.raises(HTTPException) as exc:
+        await svc.resolve(session, "ghost", resolved_by=None)
+    assert exc.value.status_code == 404
+    for fn in (svc.reopen, svc.dismiss_chip):
         with pytest.raises(HTTPException) as exc:
             await fn(session, "ghost")
         assert exc.value.status_code == 404
@@ -155,7 +162,7 @@ async def test_mark_non_actionable_stamps_source(session: AsyncSession) -> None:
     )
     await session.commit()
 
-    out = await mark_non_actionable(session, "t-na-svc-1")
+    out = await mark_non_actionable(session, "t-na-svc-1", resolved_by=None)
     assert out.resolved_source == "non_actionable"
     assert out.resolved_at is not None
 
@@ -193,7 +200,7 @@ async def test_mark_non_actionable_409_when_already_resolved(session: AsyncSessi
     await session.commit()
 
     with pytest.raises(HTTPException) as exc:
-        await mark_non_actionable(session, "t-na-svc-2")
+        await mark_non_actionable(session, "t-na-svc-2", resolved_by=None)
     assert exc.value.status_code == 409
 
 
@@ -204,5 +211,5 @@ async def test_mark_non_actionable_404_unknown(session: AsyncSession) -> None:
     from app.services.resolution import mark_non_actionable
 
     with pytest.raises(HTTPException) as exc:
-        await mark_non_actionable(session, "ghost")
+        await mark_non_actionable(session, "ghost", resolved_by=None)
     assert exc.value.status_code == 404

@@ -1,0 +1,218 @@
+"""Phase 1 — /auth/login + /auth/refresh + /auth/logout end-to-end."""
+
+from __future__ import annotations
+
+import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+
+from app.clients.onlysales import OnlySalesIdentity
+from app.deps import get_current_user, get_onlysales
+
+
+class FakeOnlySales:
+    async def login(self, *, email: str, password: str) -> OnlySalesIdentity:
+        if password != "good":
+            from app.clients.onlysales import OnlySalesAuthError
+
+            raise OnlySalesAuthError("Invalid credentials")
+        return OnlySalesIdentity(
+            access_token="os-access",
+            refresh_token="os-refresh",
+            onlysales_id="oid-1",
+            email=email,
+            name="Op E",
+            scope="admin",
+        )
+
+    async def aclose(self) -> None:  # pragma: no cover
+        pass
+
+
+@pytest.fixture
+def login_app(app: FastAPI) -> FastAPI:
+    app.dependency_overrides.pop(get_current_user, None)
+    app.state.onlysales = FakeOnlySales()
+    app.dependency_overrides[get_onlysales] = lambda: app.state.onlysales
+    return app
+
+
+@pytest.mark.asyncio
+async def test_login_sets_cookie_and_returns_access_token(login_app: FastAPI) -> None:
+    transport = ASGITransport(app=login_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/auth/login", json={"email": "op@example.com", "password": "good"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["access_token"]
+        assert body["user"]["email"] == "op@example.com"
+        assert "triage_refresh" in resp.cookies
+
+        token = body["access_token"]
+        me = await ac.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert me.status_code == 200
+        assert me.json()["user"]["onlysales_id"] == "oid-1"
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_bad_password(login_app: FastAPI) -> None:
+    transport = ASGITransport(app=login_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/auth/login", json={"email": "op@example.com", "password": "bad"})
+        assert resp.status_code == 401
+        # Generic message — the upstream OnlySales detail (which can distinguish
+        # "no such user" from "bad password" → user enumeration) must NOT leak.
+        assert resp.json()["detail"] == "invalid email or password"
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limited_per_ip_across_emails(login_app: FastAPI) -> None:
+    """Per-IP limiter trips even when the email changes each attempt.
+
+    The old combined-key limiter keyed on f"{ip}:{email}", so each distinct
+    email opened a fresh bucket and the per-IP cap was never enforced.  The new
+    dual-limiter records the IP separately, so after login_rate_max_attempts
+    (default 10) attempts from the same IP — regardless of which email —
+    the 11th attempt must return 429.
+    """
+    import app.routers.auth as auth_router
+
+    # Reset module-level limiter globals so this test starts from a clean slate
+    # even if other tests already initialised them.
+    auth_router._ip_limiter = None
+    auth_router._email_limiter = None
+    try:
+        transport = ASGITransport(app=login_app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            # Fire 10 attempts — each with a DIFFERENT email so the old combined key
+            # would never trip.  Bad password so OnlySales always returns 401.
+            for i in range(10):
+                r = await ac.post(
+                    "/auth/login",
+                    json={"email": f"user{i}@example.com", "password": "bad"},
+                )
+                assert r.status_code == 401, f"attempt {i}: expected 401, got {r.status_code}"
+
+            # 11th attempt — per-IP window is now exhausted regardless of email.
+            r = await ac.post(
+                "/auth/login",
+                json={"email": "new_email@example.com", "password": "bad"},
+            )
+            assert r.status_code == 429, f"expected 429 (per-IP rate limit), got {r.status_code}"
+    finally:
+        # Tear down so the exhausted buckets don't bleed into subsequent tests.
+        auth_router._ip_limiter = None
+        auth_router._email_limiter = None
+
+
+@pytest.mark.asyncio
+async def test_users_list_excludes_onlysales_id_and_scope(client: AsyncClient) -> None:
+    resp = await client.get("/users")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert rows and "onlysales_id" not in rows[0] and "scope" not in rows[0]
+    assert set(rows[0].keys()) == {"id", "name"}
+
+
+# The cookie-authenticated endpoints (/auth/refresh, /auth/logout) require a
+# same-origin request; cors_allowed_origins defaults to the two :5173 origins.
+ALLOWED_ORIGIN = {"origin": "http://localhost:5173"}
+
+
+@pytest.mark.asyncio
+async def test_refresh_rotates_and_logout_revokes(login_app: FastAPI) -> None:
+    transport = ASGITransport(app=login_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        login = await ac.post("/auth/login", json={"email": "op@example.com", "password": "good"})
+        assert login.status_code == 200
+
+        refreshed = await ac.post("/auth/refresh", headers=ALLOWED_ORIGIN)
+        assert refreshed.status_code == 200
+        assert refreshed.json()["access_token"]
+
+        out = await ac.post("/auth/logout", headers=ALLOWED_ORIGIN)
+        assert out.status_code == 204
+
+        again = await ac.post("/auth/refresh", headers=ALLOWED_ORIGIN)
+        assert again.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_missing_or_cross_origin(login_app: FastAPI) -> None:
+    """CSRF defense: the cookie-authenticated refresh must reject a request with a
+    missing Origin (fail-closed) or a cross-site Origin — not just rotate the token
+    for anyone holding the cookie."""
+    transport = ASGITransport(app=login_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        login = await ac.post("/auth/login", json={"email": "op@example.com", "password": "good"})
+        assert login.status_code == 200
+
+        # No Origin header → 403 (the prior fail-open let this through).
+        assert (await ac.post("/auth/refresh")).status_code == 403
+        # Cross-site Origin → 403.
+        bad = await ac.post("/auth/refresh", headers={"origin": "https://evil.example"})
+        assert bad.status_code == 403
+        # Same-origin → 200.
+        ok = await ac.post("/auth/refresh", headers=ALLOWED_ORIGIN)
+        assert ok.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_login_cookie_has_security_flags(login_app: FastAPI) -> None:
+    """The refresh cookie must carry HttpOnly + SameSite + Path=/ on the actual
+    Set-Cookie header — asserting config defaults alone wouldn't prove the
+    response emits them. Secure is absent only because test_config sets
+    session_cookie_secure=False for the http:// test base URL."""
+    transport = ASGITransport(app=login_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/auth/login", json={"email": "op@example.com", "password": "good"})
+        assert resp.status_code == 200
+        set_cookie = resp.headers["set-cookie"].lower()
+        assert "triage_refresh=" in set_cookie
+        assert "httponly" in set_cookie
+        assert "samesite=lax" in set_cookie
+        assert "path=/" in set_cookie
+        assert "secure" not in set_cookie  # session_cookie_secure=False in test_config
+
+
+@pytest.mark.asyncio
+async def test_logout_all_revokes_session(login_app: FastAPI) -> None:
+    """POST /auth/logout-all (Bearer-guarded) revokes the caller's session so a
+    subsequent cookie refresh fails."""
+    transport = ASGITransport(app=login_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        login = await ac.post("/auth/login", json={"email": "op@example.com", "password": "good"})
+        assert login.status_code == 200
+        token = login.json()["access_token"]
+
+        out = await ac.post("/auth/logout-all", headers={"Authorization": f"Bearer {token}"})
+        assert out.status_code == 204
+
+        again = await ac.post("/auth/refresh", headers=ALLOWED_ORIGIN)
+        assert again.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limited_per_email_independent_of_ip(login_app: FastAPI) -> None:
+    """The per-EMAIL limiter trips on repeated attempts at ONE email even when the
+    per-IP limiter would not — here the IP limiter is neutralised with a huge cap,
+    so only the email half can return 429. The per-IP test can't exercise this."""
+    import app.routers.auth as auth_router
+    from app.security.ratelimit import FixedWindowLimiter
+
+    auth_router._ip_limiter = FixedWindowLimiter(max_attempts=10_000, window_seconds=60)
+    auth_router._email_limiter = FixedWindowLimiter(max_attempts=10, window_seconds=60)
+    try:
+        transport = ASGITransport(app=login_app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            for i in range(10):
+                r = await ac.post(
+                    "/auth/login", json={"email": "same@example.com", "password": "bad"}
+                )
+                assert r.status_code == 401, f"attempt {i}: {r.status_code}"
+            # 11th attempt at the SAME email — per-email window exhausted.
+            r = await ac.post("/auth/login", json={"email": "same@example.com", "password": "bad"})
+            assert r.status_code == 429
+    finally:
+        auth_router._ip_limiter = None
+        auth_router._email_limiter = None

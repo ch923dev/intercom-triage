@@ -17,8 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai import embeddings
 from app.config import AppConfig, get_config
 from app.db import make_engine, make_session_factory
+from app.deps import CurrentUser, get_current_user, require_session_or_bearer
 from app.main import create_app
-from app.models import init_db
+from app.models import User, init_db
 
 
 class FakeEncoder:
@@ -76,6 +77,8 @@ def test_config(tmp_path_factory: pytest.TempPathFactory) -> AppConfig:
         cache_ttl_seconds=300,
         ai_concurrency=4,
         attachments_dir=attachments_root,
+        session_jwt_secret="test-session-secret",
+        session_cookie_secure=False,  # http://test base URL — no Secure flag
     )
 
 
@@ -90,11 +93,30 @@ async def app(test_config: AppConfig) -> AsyncIterator[FastAPI]:
     session_factory = make_session_factory(engine)
     await init_db(engine, session_factory)
 
+    # The get_current_user override returns id=1; seed the matching mirror user
+    # so attribution / assignment FKs (resolved_by, assigned_to) resolve.
+    async with session_factory() as seed_session:
+        seed_session.add(
+            User(
+                id=1,
+                onlysales_id="seed-oid",
+                email="op@test",
+                name="Seed Operator",
+                scope="admin",
+            )
+        )
+        await seed_session.commit()
+
     application.state.engine = engine
     application.state.session_factory = session_factory
     application.state.config = test_config
     application.state.openrouter = None
+    application.state.onlysales = None
     application.dependency_overrides[get_config] = lambda: test_config
+    application.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=1, onlysales_id="seed-oid", email="op@test", scope="admin"
+    )
+    application.dependency_overrides[require_session_or_bearer] = lambda: None
 
     yield application
 
@@ -104,6 +126,15 @@ async def app(test_config: AppConfig) -> AsyncIterator[FastAPI]:
 
 @pytest_asyncio.fixture
 async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def unauth_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    """Client with NO get_current_user override — for testing the 401 gate."""
+    app.dependency_overrides.pop(get_current_user, None)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

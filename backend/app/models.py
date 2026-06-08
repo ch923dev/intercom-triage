@@ -218,6 +218,9 @@ class Override(Base):
         ForeignKey("categories.id", ondelete="CASCADE"),
         nullable=False,
     )
+    acted_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     set_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=text("CURRENT_TIMESTAMP"),
@@ -285,6 +288,52 @@ class Settings(Base):
             "ai_resolve_confidence_threshold BETWEEN 0.0 AND 1.0",
             name="settings_ai_resolve_threshold_check",
         ),
+    )
+
+
+class User(Base):
+    """Mirror of an OnlySales identity. NOT a credential store — no password."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    onlysales_id: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str | None] = mapped_column(Text)
+    scope: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("1"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=text("CURRENT_TIMESTAMP"), nullable=False
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        Index("ix_users_onlysales_id", "onlysales_id", unique=True),
+        Index("ix_users_email", "email", unique=True),
+    )
+
+
+class Session(Base):
+    """Refresh-token store + revocation ledger. PK is an opaque session id."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    refresh_token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    prev_refresh_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    onlysales_refresh_encrypted: Mapped[str | None] = mapped_column(Text)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        Index("ix_sessions_refresh_hash", "refresh_token_hash"),
+        Index("ix_sessions_prev_refresh_hash", "prev_refresh_token_hash"),
+        Index("ix_sessions_user_id", "user_id"),
     )
 
 
@@ -656,6 +705,15 @@ class Ticket(Base):
     # Roadmap 4.2 (T107) — structured kind for non-actionable tickets. Only set
     # when resolved_source = 'non_actionable'; nullable; AI-derived.
     non_actionable_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Phase 2 (T169) — attribution. Board-state only; AI/system resolve → NULL.
+    resolved_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # Phase 3 (T170) — assignment. assigned_to NULL = unassigned.
+    assigned_to: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
         Index("ix_tickets_updated_at", "updated_at"),
@@ -709,6 +767,11 @@ class Ticket(Base):
             "IN ('auto_reply','thanks','spam','out_of_office','other'))",
             name="tickets_non_actionable_kind_check",
         ),
+        CheckConstraint(
+            "(assigned_to IS NULL) = (assigned_at IS NULL)",
+            name="tickets_assigned_pair_check",
+        ),
+        Index("ix_tickets_assigned_to", "assigned_to"),
     )
 
 

@@ -19,7 +19,7 @@ from app.ai.pipeline import CategorizationResult, categorize_many
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig
 from app.metrics import metrics
-from app.models import AICacheEntry, Category, Followup, Override, Ticket, TicketNote
+from app.models import AICacheEntry, Category, Followup, Override, Ticket, TicketNote, User
 from app.schemas import (
     FilterSettings,
     FollowupRead,
@@ -27,6 +27,7 @@ from app.schemas import (
     IngestResponse,
     TicketNoteRead,
     TicketSchema,
+    UserRef,
 )
 from app.services.cache import get_cached, set_cached
 from app.services.categories import get_fallback
@@ -96,6 +97,8 @@ async def set_override(
     session: AsyncSession,
     ticket_id: str,
     category_id: int,
+    *,
+    acted_by: int | None,
 ) -> int:
     """Upsert an override row with `set_at = now`. Returns the category id.
 
@@ -121,11 +124,13 @@ async def set_override(
                 ticket_id=ticket_id,
                 category_id=category_id,
                 set_at=naive_utcnow(),
+                acted_by=acted_by,
             ),
         )
     else:
         override.category_id = category_id
         override.set_at = naive_utcnow()
+        override.acted_by = acted_by
     await session.commit()
     metrics.incr("overrides_set_total")
     return category_id
@@ -460,6 +465,35 @@ async def edit_ticket(
     metrics.incr("tickets_edited_total")
 
 
+def apply_assign(row: Ticket, *, user: User | None) -> None:
+    """Set (or, with user=None, clear) a ticket's assignment fields. Does NOT
+    commit; caller validates the user and owns the transaction."""
+    row.assigned_to = user.id if user is not None else None
+    row.assigned_at = naive_utcnow() if user is not None else None
+
+
+async def assign(
+    session: AsyncSession, ticket_id: str, *, user_id: int | None
+) -> tuple[UserRef | None, datetime | None]:
+    """Assign (or, with user_id=None, unassign) a ticket. 404 unknown ticket,
+    422 unknown/inactive user."""
+    from app.services import resolution as resolution_svc
+
+    row = await resolution_svc.get_or_404(session, ticket_id)
+    if user_id is None:
+        apply_assign(row, user=None)
+        await session.commit()
+        metrics.incr("tickets_assigned_total")
+        return None, None
+    user = await session.get(User, user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=422, detail=f"user {user_id} not found")
+    apply_assign(row, user=user)
+    await session.commit()
+    metrics.incr("tickets_assigned_total")
+    return UserRef(id=user.id, name=user.name), row.assigned_at
+
+
 async def get_sync_state(session: AsyncSession) -> dict[str, datetime]:
     """Return `{ticket_id: updated_at}` for every stored ticket.
 
@@ -535,11 +569,23 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
                 )
             ).all()
         }
+        actor_ids: set[int] = {row.resolved_by for row in rows if row.resolved_by is not None}
+        actor_ids |= {row.assigned_to for row in rows if row.assigned_to is not None}
+        actor_ids |= {o.acted_by for o in overrides.values() if o.acted_by is not None}
+        users = (
+            {
+                u.id: UserRef(id=u.id, name=u.name)
+                for u in (await session.scalars(select(User).where(User.id.in_(actor_ids)))).all()
+            }
+            if actor_ids
+            else {}
+        )
     else:
         overrides = {}
         followups = {}
         notes = {}
         ai_cache = {}
+        users = {}
 
     composed: list[TicketSchema] = []
     for row in rows:
@@ -595,6 +641,16 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
                 note=TicketNoteRead.model_validate(note) if note is not None else None,
                 resolved_at=row.resolved_at,
                 resolved_source=row.resolved_source,  # type: ignore[arg-type]
+                resolved_by=users.get(row.resolved_by) if row.resolved_by is not None else None,
+                acted_by=(
+                    users.get(_ov.acted_by)
+                    if user_override
+                    and (_ov := overrides.get(row.id)) is not None
+                    and _ov.acted_by is not None
+                    else None
+                ),
+                assigned_to=(users.get(row.assigned_to) if row.assigned_to is not None else None),
+                assigned_at=row.assigned_at,
                 non_actionable_kind=row.non_actionable_kind,  # type: ignore[arg-type]
                 ai_resolve_enabled=effective_ai_resolve,
                 ai_resolve_override=row.ai_resolve_enabled,

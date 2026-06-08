@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 1.9 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 2.0 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v1.9 (charter pivot — auth, multi-user, hosted):** this is a charter pivot. Auth, multi-user collaboration, and hosted deployment are now **in scope**. Multi-tenancy (per-tenant data isolation) remains out of scope — the board is shared. Added US-040 (login), US-041 (assignment + My Queue), US-042 (attribution), US-043 (security hardening — rate limits + token rotation). Added FR-063..FR-073 and NFR-011..NFR-014. Updated §2 (scope), §3 (personas), §7 (decisions). Per-user follow-ups/notes and pgvector remain deferred.
 
 **Changes from v1.8:** extension retired — the Chrome extension package is removed. The webapp is the sole client surface; the backend (already the only Intercom ingestion path since v1.7) is unchanged. Deleted US-006 (Chrome-extension mini-board); removed extension/popup mentions from §2 scope, §3 personas, the alarm/non-actionable requirements, and NFR-010. No backend or board behavior removed.
 
@@ -28,13 +30,13 @@ Reduce the time spent triaging Intercom conversations. The native Intercom UI re
 
 ## 2. Scope
 
-In scope: a local tool with a backend and a webapp surface. Intercom integration server-side via a workspace Access Token (the backend polls `api.intercom.io`). AI categorization and summarization against a curated taxonomy. AI proposal flow for new categories. Manual category override that persists. Dynamic category curation.
+In scope: a hosted backend and a webapp surface shared by a team. Intercom integration server-side via a workspace Access Token (the backend polls `api.intercom.io`). AI categorization and summarization against a curated taxonomy. AI proposal flow for new categories. Manual category override that persists. Dynamic category curation. **Authentication via delegated OnlySales identity** (the backend proxies login, mirrors the user, and issues its own session). **Multi-user shared board** — one Intercom workspace, one ticket pool, many operators. **Ticket assignment + My Queue**. **Attribution** — manual resolve and recategorize stamp the acting operator.
 
-Out of scope: multi-user collaboration, multi-tenant SaaS, authentication, hosted deployment, replying to tickets from the tool, long-term analytics, helpdesks other than Intercom, mobile-native surfaces, webhook-driven live updates (backlog).
+Out of scope: **multi-tenancy** (no per-tenant data isolation; every authenticated user sees the same tickets; no `tenant_id`), per-user Intercom tokens, replying to tickets from the tool, long-term analytics, helpdesks other than Intercom, mobile-native surfaces, webhook-driven live updates (backlog). **Per-user follow-ups/notes** (deferred to Phase 4 — `note_entries.user_id` not yet active). **pgvector/semantic layer on Postgres** (deferred — hosted v1 runs embeddings/clustering off).
 
 ## 3. Personas
 
-A single **operator** — the person running the tool on their own machine. They configure the Intercom Access Token once, triage tickets daily from the webapp board, and curate categories as the taxonomy evolves.
+**Operators** — team members who sign in with their OnlySales credentials, triage tickets from the shared webapp board, and curate categories. All operators see the same ticket pool; tickets/categories/settings are team-wide. Identity (account management, passwords) is owned by OnlySales — our tool never stores or handles passwords.
 
 ## 4. User stories with acceptance criteria
 
@@ -459,6 +461,49 @@ Acceptance:
   AI); an uncategorized ticket or one with no in-category playbooks shows none.
 - Computing suggestions never busts the AI cache.
 
+### US-040 — Operator login
+I sign in with my OnlySales email and password; the app gates every view behind authentication and logs me out when my session expires.
+
+Acceptance:
+- A login screen is shown when I have no valid session; on success I reach the board.
+- Every API route except `/health`, `/auth/login`, and `/auth/refresh` returns `401` without a valid access token.
+- The access token is verified **offline** per request (no DB hit, no OnlySales call) and expires in ~30 minutes.
+- The refresh token is stored in an `httpOnly + Secure + SameSite` cookie; the access token lives only in memory; no token is readable by page JS at rest.
+- The webapp refreshes my access token silently on expiry; a failed refresh returns me to the login screen.
+- Logout revokes my session; "log out everywhere" revokes all my sessions across devices.
+
+### US-041 — Ticket assignment + My Queue
+I can assign any ticket to myself or a teammate; a "My Queue" filter narrows the board to tickets assigned to me.
+
+Acceptance:
+- An assignee picker is available on every ticket card and in the flyout.
+- Assigning `null` clears the assignment.
+- Unknown `user_id` values are rejected with a validation error.
+- A "My Queue" toggle on the topbar shows only tickets where `assigned_to == me`.
+- Bulk assign honors `MAX_BULK_IDS = 200`.
+- `GET /users` returns only `{id, name}` — no `onlysales_id`, email, or scope is exposed.
+
+### US-042 — Attribution — who resolved / recategorized
+When a ticket is manually resolved or its category is manually overridden, I can see which operator performed the action, so the team has an audit trail.
+
+Acceptance:
+- Manually resolving a ticket (single or bulk) stamps `resolved_by` with the acting operator.
+- Marking a ticket non-actionable (single or bulk) stamps `resolved_by` with the acting operator.
+- A category override stamps `acted_by` on the `overrides` row with the acting operator.
+- AI-driven and system paths leave attribution null.
+- The board flyout displays "resolved by \<name\>" when `resolved_by` is set.
+- Attribution fields are **board-state only** — on `TicketSchema`/`Override`, never on `HydratedTicket` (invariant #2 unchanged).
+
+### US-043 — Security hardening
+The authentication system resists credential-stuffing, session theft, and token replay.
+
+Acceptance:
+- Login is rate-limited both per source IP and per target email address to bound brute-force attempts.
+- Rate-limiter buckets are evicted after their window to bound server memory.
+- Refresh tokens rotate on every use; replaying a rotated-away token revokes the entire session chain (reuse-detection).
+- The upstream OnlySales refresh token is stored Fernet-encrypted at rest, never in plaintext.
+- `GET /users` returns only `{id, name}` (see US-041) — no credential or identity fields are exposed.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -525,6 +570,17 @@ Acceptance:
 | FR-060 | `GET /clusters/gaps` ranks recurring-issue clusters whose dominant effective category (override beats AI, invariant #13) has no active playbook, most-recurring-first, naming the category to write a playbook for. Read-only local logic over the cluster snapshot + playbooks. | US-038 |
 | FR-061 | `GET /playbooks/suggested?ticket_id=` ranks the ticket's effective-category playbooks by embedding similarity to its customer-visible text, most-relevant-first. Ephemeral; empty when uncategorized or no in-category playbooks; never busts the cache. | US-039 |
 | FR-062 | A non-actionable ticket may carry a structured `non_actionable_kind` (`auto_reply`\|`thanks`\|`spam`\|`out_of_office`\|`other`, nullable) on `tickets` + `ai_cache`. The categorization call returns it (only for the `non_actionable` verdict; null otherwise; missing/invalid → `other`); ingest stamps it on AI auto-mark, manual marks leave it null; every reopen path clears it (XOR with `resolved_source='non_actionable'`). Surfaced on `TicketSchema` (not `HydratedTicket`); the webapp filters the non-actionable view by it and labels the chip. | US-019 |
+| FR-063 | The system exposes `POST /auth/login {email, password}` which proxies credentials to OnlySales, mirrors the returned identity into the local `users` table (upsert by `onlysales_id`), creates a `sessions` row, sets an `httpOnly + Secure + SameSite` refresh cookie (~30 d), and returns `{access_jwt, user}`. No password is ever stored or logged. | US-040 |
+| FR-064 | The access JWT is a stateless HS256 token (~30 min TTL) carrying `{sub: user_id, email, scope}`; it is verified offline on every authenticated request without a DB hit. `SESSION_JWT_SECRET` missing → hard-fail boot. | US-040, US-043 |
+| FR-065 | `POST /auth/refresh` (cookie) validates the session row, rotates the refresh token (new raw token issued, old hash stored as `prev_refresh_token_hash`), re-mints the access JWT, and returns it. CSRF-guarded. Replaying a rotated-away refresh token is detected via `prev_refresh_token_hash` lookup and triggers immediate revocation of the entire session chain. | US-040, US-043 |
+| FR-066 | `POST /auth/logout` (cookie) revokes the current session by setting `sessions.revoked_at`. `POST /auth/logout-all` (access token) revokes all of the user's active sessions. | US-040 |
+| FR-067 | A `get_current_user` dependency is applied to every router except the explicit allowlist (`/health`, `/auth/login`, `/auth/refresh`). Attachment image `GET` endpoints also accept the session cookie in lieu of a Bearer token; mutation endpoints accept Bearer only. | US-040 |
+| FR-068 | `POST /auth/login` is rate-limited per source IP and per target email address. Rate-limiter buckets are evicted after their window to bound server memory. | US-040, US-043 |
+| FR-069 | The upstream OnlySales refresh token is stored Fernet-encrypted (`SESSION_REFRESH_ENCRYPTION_KEY`) in `sessions.onlysales_refresh_encrypted`. It is never stored or logged in plaintext. | US-040, US-043 |
+| FR-070 | `GET /users` returns a list of `{id, name}` only — no `onlysales_id`, email, `scope`, or credential fields. The endpoint requires authentication. | US-041 |
+| FR-071 | `tickets` carries `assigned_to` (FK → users, nullable) + `assigned_at`. `PATCH /tickets/{id}/assign {user_id\|null}` assigns or clears; unknown `user_id` → 422. `PATCH /tickets/bulk/assign` applies the same to a batch (bounded by `MAX_BULK_IDS`). | US-041 |
+| FR-072 | Manual resolve (single + bulk) and mark-non-actionable (single + bulk) stamp `tickets.resolved_by = current_user`. A category override stamps `overrides.acted_by = current_user`. AI-driven and system paths leave these fields null. Both fields are surfaced on `TicketSchema` as `UserRef {id, name}` via a user-join; they are never on `HydratedTicket` (invariant #2 unchanged). | US-042 |
+| FR-073 | The webapp `auth` Pinia store holds the in-memory access token and current user. On app load it attempts a silent `/auth/refresh` (cookie) to bootstrap the session; failure shows the login screen. The API client attaches `Authorization: Bearer` and sends credentials (for the cookie); on `401` it attempts one `/auth/refresh` then retries; a second failure clears state and shows login. | US-040 |
 
 ## 6. Non-functional requirements
 
@@ -540,18 +596,25 @@ Acceptance:
 | NFR-008 | The backend runs from a single command (`uvicorn` or equivalent) with no external services required beyond the local database file. |
 | NFR-009 | External-call latency is sampled into in-process histograms; `GET /metrics` exposes per-key p50 / p95 / max over a bounded sample window. Single-operator scope — not a metrics exporter. |
 | NFR-010 | The Intercom Access Token is a server-side secret loaded from the local config file (alongside the AI key); it never reaches the webapp bundle, logs, or error responses. A missing token is reported by `/health`, not fatal at startup. |
+| NFR-011 | No password is ever stored, logged, or returned by the backend; login proxies straight to OnlySales and only the Fernet-encrypted upstream refresh token is persisted. |
+| NFR-012 | The refresh token is stored as a sha256 hash only (`sessions.refresh_token_hash`); the raw token is never written to the database or logs. |
+| NFR-013 | `/auth/login` is rate-limited per source IP and per target email; rate-limiter buckets are evicted after their window to prevent unbounded memory growth. |
+| NFR-014 | Refresh token reuse-detection: replaying a rotated-away token revokes the entire session chain immediately. Two browser tabs or a double-fired refresh sharing one cookie may trigger this and force a re-login; this is an accepted tradeoff for small-team scope. |
 
 ## 7. Decisions
 
 All open questions are resolved.
 
-- **Deployment scope:** single user, local-only. No cloud services. Runs from one command.
-- **Multi-tenancy:** none.
-- **Authentication:** none. The backend listens on `localhost` only; absence of auth is acceptable given the threat model (single-user machine).
-- **Storage backend:** SQLite by default. Swappable to PostgreSQL by changing one config string; schema is portable.
+- **Deployment scope:** hosted, networked, TLS-terminated. Backend binds to a networked interface (not `localhost`-only). Multiple operators share one instance.
+- **Multi-tenancy:** none. One workspace, one shared ticket pool, no `tenant_id`. Every authenticated user sees the same board.
+- **Authentication:** delegated to OnlySales. Backend proxies login, mirrors the returned identity, and issues its own stateless access JWT + DB-backed rotating refresh token. No password is stored by our backend.
+- **Multi-user model:** shared board. Tickets, categories, settings, and playbooks are team-wide. Attribution and assignment are per-operator fields on board-state (never on `HydratedTicket`).
+- **Storage backend:** SQLite (local/dev) or PostgreSQL (hosted). Swappable by changing `DATABASE_URL`; schema is portable. The embedded semantic layer (sqlite-vec) is disabled when running on Postgres in hosted v1; pgvector is a deferred fast-follow.
+- **Per-user follow-ups/notes:** deferred (Phase 4). `note_entries.user_id` does not yet exist as an active column. Settings stays a shared team-wide singleton.
+- **Refresh token reuse-detection:** replaying a rotated token revokes the chain. Two tabs sharing one cookie can trigger this; accepted for small-team scope (NFR-014).
 - **Update mechanism:** poll-on-open for v1. Webhook deferred to backlog.
 - **Taxonomy mutability:** dynamic. AI may propose, operator curates. "Other" is permanent and non-archivable.
-- **Low-confidence handling:** confidence is displayed on every card; no separate review column.
+- **Low-confidence handling:** confidence is displayed on every card; needs-review lane for below-threshold tickets.
 
 ## 8. Success metrics
 

@@ -52,6 +52,11 @@ export interface ProposalsResponse {
   proposals: CategoryProposal[];
 }
 
+export interface UserRef {
+  id: number;
+  name: string | null;
+}
+
 // ── Tickets ──────────────────────────────────────────────────────────────────
 
 export type TicketState = 'open' | 'snoozed' | 'closed';
@@ -221,6 +226,10 @@ export interface Ticket {
   parked_until: string | null;
   parked_reason: ParkedReason | null;
   parked_note: string | null;
+  resolved_by: UserRef | null;
+  acted_by: UserRef | null;
+  assigned_to: UserRef | null;
+  assigned_at: string | null;
 }
 
 // ── Bulk actions (plan §8d) ──────────────────────────────────────────────────

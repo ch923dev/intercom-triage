@@ -22,10 +22,11 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.metrics import metrics
-from app.models import Category, Override, Ticket
+from app.models import Category, Override, Ticket, User
 from app.schemas import BulkFailure, BulkResult, ParkedReason
 from app.services import followups as followups_svc
 from app.services import resolution as resolution_svc
+from app.services import tickets as tickets_svc
 from app.util import naive_utcnow
 
 T = TypeVar("T")
@@ -79,12 +80,14 @@ def _record_outcome(op: str, result: BulkResult) -> None:
 # ── Resolution ────────────────────────────────────────────────────────────────
 
 
-async def bulk_resolve(session: AsyncSession, ticket_ids: list[str]) -> BulkResult:
+async def bulk_resolve(
+    session: AsyncSession, ticket_ids: list[str], *, resolved_by: int | None
+) -> BulkResult:
     """Resolve N tickets as `manual`. Already-resolved rows fail with 409."""
 
     async def per_id(tid: str) -> None:
         row = await resolution_svc.get_or_404(session, tid)
-        resolution_svc.apply_resolve(row)
+        resolution_svc.apply_resolve(row, resolved_by=resolved_by)
         metrics.incr("tickets_resolved_total.manual")
 
     result = await _run_per_id(session, ticket_ids, per_id)
@@ -105,12 +108,14 @@ async def bulk_reopen(session: AsyncSession, ticket_ids: list[str]) -> BulkResul
     return result
 
 
-async def bulk_mark_non_actionable(session: AsyncSession, ticket_ids: list[str]) -> BulkResult:
+async def bulk_mark_non_actionable(
+    session: AsyncSession, ticket_ids: list[str], *, resolved_by: int | None
+) -> BulkResult:
     """Mark N tickets non-actionable. Already-resolved rows fail with 409."""
 
     async def per_id(tid: str) -> None:
         row = await resolution_svc.get_or_404(session, tid)
-        resolution_svc.apply_mark_non_actionable(row)
+        resolution_svc.apply_mark_non_actionable(row, resolved_by=resolved_by)
         metrics.incr("tickets_resolved_total.non_actionable")
 
     result = await _run_per_id(session, ticket_ids, per_id)
@@ -125,6 +130,8 @@ async def bulk_recategorize(
     session: AsyncSession,
     ticket_ids: list[str],
     category_id: int,
+    *,
+    acted_by: int | None,
 ) -> BulkResult:
     """Assign one category to N tickets via overrides. Unknown category → 422
     raised up to the endpoint; unknown ticket id → per-id 404 in `failed[]`.
@@ -145,10 +152,13 @@ async def bulk_recategorize(
         override = await session.get(Override, tid)
         now = naive_utcnow()
         if override is None:
-            session.add(Override(ticket_id=tid, category_id=category_id, set_at=now))
+            session.add(
+                Override(ticket_id=tid, category_id=category_id, set_at=now, acted_by=acted_by)
+            )
         else:
             override.category_id = category_id
             override.set_at = now
+            override.acted_by = acted_by
         metrics.incr("overrides_set_total")
 
     result = await _run_per_id(session, ticket_ids, per_id)
@@ -233,4 +243,30 @@ async def bulk_clear_followup(session: AsyncSession, ticket_ids: list[str]) -> B
 
     result = await _run_per_id(session, ticket_ids, per_id)
     _record_outcome("followup_clear", result)
+    return result
+
+
+# ── Assignment ────────────────────────────────────────────────────────────────
+
+
+async def bulk_assign(
+    session: AsyncSession, ticket_ids: list[str], *, user_id: int | None
+) -> BulkResult:
+    """Assign (or unassign, user_id=None) N tickets. 422 up-front for an unknown
+    user; per-id 404 for an unknown ticket."""
+    user: User | None = None
+    if user_id is not None:
+        user = await session.get(User, user_id)
+        if user is None or not user.is_active:
+            raise HTTPException(status_code=422, detail=f"user {user_id} not found")
+
+    async def per_id(tid: str) -> None:
+        ticket = await session.get(Ticket, tid)
+        if ticket is None:
+            raise HTTPException(status_code=404, detail=f"ticket {tid!r} not found")
+        tickets_svc.apply_assign(ticket, user=user)
+        metrics.incr("tickets_assigned_total")
+
+    result = await _run_per_id(session, ticket_ids, per_id)
+    _record_outcome("assign", result)
     return result

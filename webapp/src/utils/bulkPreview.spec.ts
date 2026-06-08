@@ -56,6 +56,10 @@ function fake(id: string, overrides: Partial<Ticket> = {}): Ticket {
     parked_reason: null,
     parked_note: null,
     non_actionable_kind: null,
+    resolved_by: null,
+    acted_by: null,
+    assigned_to: null,
+    assigned_at: null,
     ...overrides,
   };
 }

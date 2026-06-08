@@ -8,7 +8,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    field_validator,
+    model_validator,
+)
 
 from app.config import MAX_BULK_IDS
 from app.util import naive_utcnow
@@ -488,6 +496,11 @@ class TicketSchema(HydratedTicket):
     parked_until: UTCDatetime | None = None
     parked_reason: ParkedReason | None = None
     parked_note: str | None = None
+    # Phase 2/3 (T169/T170) — attribution + assignment. Board-state only.
+    resolved_by: UserRef | None = None
+    acted_by: UserRef | None = None
+    assigned_to: UserRef | None = None
+    assigned_at: UTCDatetime | None = None
 
 
 class CategoryUpdate(BaseModel):
@@ -756,3 +769,56 @@ class StatsResponse(BaseModel):
     resolution_mix: ResolutionMix
     resolve_time_buckets: list[ResolveTimeBucket]
     median_resolve_hours: float | None
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=1)
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class UserOut(BaseModel):
+    id: int
+    onlysales_id: str
+    email: str
+    name: str | None
+    scope: str | None
+
+
+class UserRef(BaseModel):
+    """Lightweight actor reference embedded on the board ticket — id + name only.
+    Board-state only; never on HydratedTicket (invariant #2)."""
+
+    id: int
+    name: str | None
+
+
+class AssignRequest(BaseModel):
+    user_id: int | None  # required; pass null to unassign (omission is rejected)
+
+
+class AssignResponse(BaseModel):
+    assigned_to: UserRef | None
+    assigned_at: UTCDatetime | None
+
+
+class BulkAssign(BulkTicketIds):
+    """`PATCH /tickets/bulk/assign` body — assign N tickets to one operator (or null)."""
+
+    user_id: int | None
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    user: UserOut
+
+
+class MeResponse(BaseModel):
+    user: UserOut

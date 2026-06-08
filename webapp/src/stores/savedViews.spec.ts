@@ -11,7 +11,7 @@ import { useSavedViewsStore } from './savedViews';
 import { useTicketsStore } from './tickets';
 import { EMPTY_FILTER } from '@/utils/savedViews';
 
-vi.mock('@/api/client', () => ({ api: {} }));
+vi.mock('@/api/client', () => ({ api: {}, setAccessToken: vi.fn(), onAuthLost: vi.fn() }));
 
 const STORAGE_KEY = 'triage-saved-views-v1';
 

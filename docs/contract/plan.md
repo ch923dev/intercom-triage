@@ -1,8 +1,10 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 1.7 · **Implements:** `spec.md` v1.7 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 2.0 · **Implements:** `spec.md` v2.0 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
+
+**Changes from v1.7:** charter pivot — auth + multi-user. Adds §19 (Auth & multi-user): delegated-identity token model, refresh reuse-detection, attribution columns, assignment columns, board user-join, and the double-refresh / two-tab revoke tradeoff. Spec v2.0 implemented by T168–T171.
 
 **Changes from v1.5:** reconciliation backfill matching `spec.md` v1.7. Adds §15 (AI reliability — structured outputs, model cascade, needs-review lane), §16 (local embedding layer + few-shot + RAG draft replies), §17 (recurring-issue insights — clustering, playbook-gap, auto-match), §18 (operator throughput & analytics — triage facets, aging, keyboard, saved views, priority sort, stats, cost meter, snippets, bulk pre-flight). Also folds in the §13 (Playbooks) and §14 (Parked) sections that had been appended without a version bump, and **corrects three now-false facts** in §1/§5/§12: the project uses **Alembic** (forward-only migrations), not `metadata.create_all`, and the data model has grown well past six tables. The §11 observability note is updated to match the shipped stdlib-logging + latency-histogram + cost-meter reality.
 
@@ -723,3 +725,110 @@ UX + visibility. Mostly pure-stack; the one cross-package change is 0.2.
   scoped), no AI draft — lighter than playbooks; durable (#13).
 - **Bulk pre-flight diff (FR-052).** Client-side preview of affected vs skipped
   counts from loaded ticket state before a bulk apply; mirrors `MAX_BULK_IDS` (#9).
+
+## §19 — Auth & multi-user (MHU charter pivot)
+
+Design spec: `docs/superpowers/specs/2026-06-05-multi-hosted-user-design.md`.
+Implemented by T168–T171. Spec v2.0 (US-040–US-043, FR-063–FR-073, NFR-011–NFR-014).
+
+This section documents the **charter pivot** from a single-operator local tool to a
+hosted, authenticated, shared-team board. Identity is **delegated** to OnlySales —
+our backend never stores or logs a password; it proxies login, mirrors the returned
+identity, and issues its own session. Tickets, categories, follow-ups, AI, and all
+triage state stay in our database.
+
+### Token model
+
+Two-token session: a **stateless HS256 access JWT** (~30 min TTL) carrying
+`{sub: user_id, email, scope}`, verified **offline** on every authenticated request
+(no DB hit, no OnlySales call); and a **DB-backed, revocable, rotating refresh
+token** (~30 d TTL) stored as a `sha256` hash only (`sessions.refresh_token_hash`).
+The raw refresh token is delivered in an `httpOnly + Secure + SameSite=Strict`
+cookie; the access token lives only in memory; neither is readable by page JS at
+rest.
+
+The upstream OnlySales refresh token is stored **Fernet-encrypted at rest**
+(`sessions.onlysales_refresh_encrypted`, key = `SESSION_REFRESH_ENCRYPTION_KEY`).
+It is never written to the DB or logs in plaintext. `SESSION_JWT_SECRET` missing →
+hard-fail at boot.
+
+### Migration chain
+
+Four forward-only Alembic revisions, chained sequentially:
+
+- **0021** — `users` table (`onlysales_id`, `email`, `name`, `scope`, `is_active`,
+  `last_login_at`) + `sessions` table (`id` uuid PK, `user_id` FK, `refresh_token_hash`,
+  `onlysales_refresh_encrypted`, `issued_at`, `expires_at`, `last_used_at`, `revoked_at`).
+- **0022** — adds `sessions.prev_refresh_token_hash` (the rotated-away hash, enabling
+  reuse-detection).
+- **0023** — adds `tickets.resolved_by` (FK → users, SET NULL) and
+  `overrides.acted_by` (FK → users, SET NULL) for attribution.
+- **0024** — adds `tickets.assigned_to` (FK → users, nullable, SET NULL, indexed) and
+  `tickets.assigned_at` for assignment + My Queue.
+
+### Refresh reuse-detection
+
+On every `POST /auth/refresh` the session row is rotated: the new raw token is
+issued, and the old hash is stored as `prev_refresh_token_hash`. `_lookup_session`
+checks the incoming hash against `refresh_token_hash` first (normal path), then
+`prev_refresh_token_hash` (reuse-detection path). A hit on the previous hash means a
+superseded token was replayed — a theft signal. The session row is **immediately
+revoked** (entire chain) and `AuthSessionError("refresh token reuse detected")` is
+raised (→ 401). See the double-refresh tradeoff below.
+
+### Double-refresh / two-tab revoke tradeoff
+
+> **Accepted design tradeoff — small-team scope.**
+
+Token rotation + reuse-detection means that a **replayed rotated-away token revokes
+the entire session chain**. In practice this can be triggered innocuously: two browser
+tabs open simultaneously that both hold the same (now-rotated) cookie and both fire a
+silent `/auth/refresh` — the second tab's request arrives with the superseded token
+and trips reuse-detection, forcing a re-login for that tab. Similarly, a
+double-fired refresh (e.g. two concurrent 401-retry paths racing before the first
+refresh completes) can produce the same outcome.
+
+This tradeoff is **accepted** for the following reasons:
+- The team is small (≤ ~10 operators); the incidence rate is low.
+- The security guarantee (replayed stolen tokens revoke the chain) is worth the
+  occasional forced re-login.
+- Mitigations if the friction becomes unacceptable: serialize refresh requests in the
+  webapp with a per-tab mutex (in-flight Promise deduplication); or introduce a short
+  `prev_token_grace_window` (e.g. 30 s) during which the prev hash is accepted but
+  triggers a silent re-rotation. Neither is implemented in v1.
+
+### Auth gate
+
+`get_current_user` (FastAPI dependency, `app/deps.py`) is applied to **every router**
+except the explicit allowlist: `/health`, `/auth/login`, `/auth/refresh`. Attachment
+image `GET` endpoints also accept the session cookie in lieu of a Bearer token; all
+mutation endpoints accept Bearer only. Rate-limiting on `/auth/login` is per source IP
+and per target email; buckets are evicted after their window to bound server memory
+(FR-068, NFR-013).
+
+### Attribution columns (`resolved_by` / `acted_by`)
+
+`tickets.resolved_by` and `overrides.acted_by` are **board-state only** — they live on
+`TicketSchema` and the `Override` schema; they are never on `HydratedTicket` (invariant
+#2 untouched). The board composes `UserRef {id, name}` by joining the `users` table at
+read time. AI-driven and system paths leave these fields null. The flyout surfaces
+"resolved by \<name\>" when `resolved_by` is set.
+
+### Assignment columns (`assigned_to` / `assigned_at`)
+
+`tickets.assigned_to` (FK → users, nullable, SET NULL on user delete, indexed) and
+`assigned_at` are **board-state only** — same pattern as attribution above, never on
+`HydratedTicket`. `PATCH /tickets/{id}/assign {user_id|null}` assigns or clears;
+unknown `user_id` → 422. `PATCH /tickets/bulk/assign` applies to a batch bounded by
+`MAX_BULK_IDS`. The webapp `myQueueOnly` filter narrows to `assigned_to == me`.
+
+### `GET /users`
+
+Returns a trimmed list of `{id, name}` only — no `onlysales_id`, `email`, `scope`, or
+credential fields are exposed. Requires authentication (FR-070).
+
+### Rate-limit hardening
+
+`POST /auth/login` is rate-limited per source IP and per target email with separate
+in-process token-bucket counters. Buckets are evicted after their window to prevent
+unbounded server-memory growth (NFR-013). Both limits are independently configurable.

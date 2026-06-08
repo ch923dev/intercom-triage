@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { ParkedReason, Ticket } from '@/types/api';
+import AssigneePicker from './AssigneePicker.vue';
 import CollapsibleSection from './CollapsibleSection.vue';
 import ParkMenu from '@/components/ParkMenu.vue';
 import { useTicketsStore } from '@/stores/tickets';
@@ -90,7 +91,11 @@ async function onUnpark() {
         {{ parkedLabel }}
       </span>
       <span v-else class="status-pill mono">Open</span>
+      <span v-if="ticket.resolved_at && ticket.resolved_by" class="status-by">
+        by {{ ticket.resolved_by.name ?? 'unknown' }}
+      </span>
     </div>
+    <AssigneePicker :ticket-id="ticket.id" :assigned-to="ticket.assigned_to" />
     <div class="presets">
       <button v-if="ticket.resolved_at" class="chip" @click="onReopen">Reopen</button>
       <button v-else-if="ticket.parked_at" class="chip" @click="onUnpark">Unpark</button>
@@ -150,6 +155,11 @@ async function onUnpark() {
 .status-row {
   display: flex;
   align-items: center;
+  gap: 6px;
+}
+.status-by {
+  font-size: 0.85em;
+  color: var(--ink-3);
 }
 .status-pill.ready {
   color: var(--accent);

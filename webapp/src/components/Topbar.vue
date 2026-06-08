@@ -6,6 +6,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import Mono from './Mono.vue';
+import { useAuthStore } from '@/stores/auth';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
 import { useSavedViewsStore } from '@/stores/savedViews';
@@ -14,6 +15,7 @@ import { useTweaksStore } from '@/stores/tweaks';
 import { useViewStore } from '@/stores/view';
 import type { View } from '@/stores/view';
 
+const auth = useAuthStore();
 const tickets = useTicketsStore();
 const tweaks = useTweaksStore();
 const categories = useCategoriesStore();
@@ -83,6 +85,12 @@ function onViewPick(e: Event) {
     return;
   }
   if (value) savedViews.applyView(value);
+}
+
+/** Sign out — revokes the session server-side + clears the in-memory token;
+ *  the App.vue auth gate then swaps the board for the login screen. */
+async function onLogout() {
+  await auth.logout();
 }
 </script>
 
@@ -180,6 +188,20 @@ function onViewPick(e: Event) {
       <span v-if="readyCount > 0" class="ready-badge mono">★ {{ readyCount }}</span>
     </button>
 
+    <button
+      v-if="tickets.myTickets.length > 0 || tickets.myQueueOnly"
+      class="pill my-queue"
+      :class="{ active: tickets.myQueueOnly }"
+      :title="
+        tickets.myQueueOnly
+          ? 'Showing My Queue — click to clear'
+          : 'Show only your assigned tickets'
+      "
+      @click="tickets.toggleMyQueueOnly()"
+    >
+      <span class="mono">{{ tickets.myTickets.length }} My Queue</span>
+    </button>
+
     <!-- Follow-up status pill (T051) — accent-pulse while an alarm is firing. -->
     <button
       v-if="followups.pendingCount > 0"
@@ -207,6 +229,16 @@ function onViewPick(e: Event) {
     <!-- Settings drawer (T035) — display tweaks now live inside it. -->
     <button class="ghost" title="Filter & display settings" @click="view.openDrawer()">
       <span class="mono">Settings</span>
+    </button>
+
+    <div class="sep" />
+
+    <!-- Account — current operator + sign out (auth delegated to OnlySales). -->
+    <span v-if="auth.user" class="who mono" :title="auth.user.email">{{
+      auth.user.name || auth.user.email
+    }}</span>
+    <button class="ghost" title="Sign out" @click="onLogout">
+      <span class="mono">Sign out</span>
     </button>
   </header>
 </template>
@@ -333,6 +365,18 @@ function onViewPick(e: Event) {
   margin-left: 6px;
   color: var(--accent);
 }
+.pill.my-queue {
+  cursor: pointer;
+}
+.pill.my-queue:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.pill.my-queue.active {
+  background: var(--chip-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 /* Search — the label is the visual chip; the input inside is borderless. */
 .search {
   display: inline-flex;
@@ -389,6 +433,15 @@ function onViewPick(e: Event) {
 .auto-label {
   opacity: 0.55;
   margin-left: 2px;
+}
+/* Account label — current operator, truncated to keep the topbar scannable. */
+.who {
+  color: var(--ink-2);
+  font-size: 11px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* Saved-views quick-apply select — styled as a chip to match the topbar. */
 .views-pick {

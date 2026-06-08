@@ -15,6 +15,8 @@ vi.mock('@/api/client', () => ({
     overrideCategory: vi.fn(),
     listTickets: vi.fn(),
   },
+  setAccessToken: vi.fn(),
+  onAuthLost: vi.fn(),
 }));
 
 const NOW = '2026-05-25T00:00:00.000Z';
@@ -66,6 +68,10 @@ function fakeTicket(id: string, overrides: Partial<Ticket> = {}): Ticket {
     parked_reason: null,
     parked_note: null,
     non_actionable_kind: null,
+    resolved_by: null,
+    acted_by: null,
+    assigned_to: null,
+    assigned_at: null,
     ...overrides,
   };
 }

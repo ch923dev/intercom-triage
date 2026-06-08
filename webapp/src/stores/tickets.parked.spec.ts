@@ -51,6 +51,10 @@ function ticket(id: string, over: Partial<Ticket> = {}): Ticket {
     parked_reason: null,
     parked_note: null,
     non_actionable_kind: null,
+    resolved_by: null,
+    acted_by: null,
+    assigned_to: null,
+    assigned_at: null,
     ...over,
   } as Ticket;
 }
