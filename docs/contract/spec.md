@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 2.0 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 2.1 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v2.0:** manual resync surfaced in the UI. Added FR-074 — a webapp Sync control (Topbar, lookback-bounded; empty board, unbounded) drives the existing `POST /tickets/sync`, with process-wide cycle serialization (409 on concurrent manual trigger, treated as benign by the client). No other behavior changed.
 
 **Changes from v1.9 (charter pivot — auth, multi-user, hosted):** this is a charter pivot. Auth, multi-user collaboration, and hosted deployment are now **in scope**. Multi-tenancy (per-tenant data isolation) remains out of scope — the board is shared. Added US-040 (login), US-041 (assignment + My Queue), US-042 (attribution), US-043 (security hardening — rate limits + token rotation). Added FR-063..FR-073 and NFR-011..NFR-014. Updated §2 (scope), §3 (personas), §7 (decisions). Per-user follow-ups/notes and pgvector remain deferred.
 
@@ -581,6 +583,7 @@ Acceptance:
 | FR-071 | `tickets` carries `assigned_to` (FK → users, nullable) + `assigned_at`. `PATCH /tickets/{id}/assign {user_id\|null}` assigns or clears; unknown `user_id` → 422. `PATCH /tickets/bulk/assign` applies the same to a batch (bounded by `MAX_BULK_IDS`). | US-041 |
 | FR-072 | Manual resolve (single + bulk) and mark-non-actionable (single + bulk) stamp `tickets.resolved_by = current_user`. A category override stamps `overrides.acted_by = current_user`. AI-driven and system paths leave these fields null. Both fields are surfaced on `TicketSchema` as `UserRef {id, name}` via a user-join; they are never on `HydratedTicket` (invariant #2 unchanged). | US-042 |
 | FR-073 | The webapp `auth` Pinia store holds the in-memory access token and current user. On app load it attempts a silent `/auth/refresh` (cookie) to bootstrap the session; failure shows the login screen. The API client attaches `Authorization: Bearer` and sends credentials (for the cookie); on `401` it attempts one `/auth/refresh` then retries; a second failure clears state and shows login. | US-040 |
+| FR-074 | The webapp exposes a manual Sync control that triggers `POST /tickets/sync` and then reloads the board: the Topbar button bounds the fetch to the board's lookback window (`?lookback_hours`); the empty-board button runs the unbounded historical fetch. Sync cycles are serialized process-wide — a manual request arriving while a cycle is already running receives 409, which the client treats as benign (the running cycle's rows arrive on the follow-up board reload). A 503 (no Access Token) surfaces inline. | US-001 |
 
 ## 6. Non-functional requirements
 

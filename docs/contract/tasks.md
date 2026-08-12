@@ -214,6 +214,10 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 - T170 ✓ — Attribution: migration 0023 adds `tickets.resolved_by` + `overrides.acted_by` (FK → users, SET NULL); manual resolve / mark-non-actionable / category override (single + bulk) stamp the acting operator; AI/system paths leave null; board composes `UserRef {id, name}` via user-join; flyout shows "resolved by \<name\>". FR-072, US-042, plan §19.
 - T171 ✓ — Assignment + My Queue: migration 0024 adds `tickets.assigned_to` + `assigned_at` (FK → users, nullable, SET NULL, indexed); `PATCH /tickets/{id}/assign` + `/tickets/bulk/assign` (null clears; unknown user → 422; bounded by MAX_BULK_IDS); `GET /users` trimmed to `{id, name}`; webapp `myQueueOnly` filter chip + `AssigneePicker` + card tag + Topbar chip. FR-070/FR-071, US-041, plan §19.
 
+### Phase 21 — Manual sync button
+
+- T172 ✓ — Manual resync button: process-wide `sync.SYNC_LOCK` serializing `run_sync_cycle` (poller waits; `POST /tickets/sync` fast-fails 409 when held); webapp `api.syncNow(lookbackHours?)` + `tickets.syncNow()` store action (409 benign → still refreshes; 503 detail surfaced inline, refresh skipped; re-entrancy guard; never throws); Topbar **Sync** button (bounded to the board lookback window, result label "N new · M unchanged" beside last-refresh) + EmptyBoard **Sync from Intercom** button (unbounded first fetch, replaces the curl instruction); closure pass bounded to the lookback window on bounded syncs (live-verified: unbounded closure pass re-fetched all 417 older open tickets per button press). FR-074 (FR-001 trigger surfaced in UI), US-001, plan §6.
+
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
@@ -342,6 +346,7 @@ Every requirement maps to at least one task.
 | FR-071 | T171 |
 | FR-072 | T170 |
 | FR-073 | T168 |
+| FR-074 | T172 |
 | NFR-011 | T168 |
 | NFR-012 | T168 |
 | NFR-013 | T169 |

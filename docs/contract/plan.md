@@ -316,9 +316,16 @@ part, customer panel fields from a TTL-cached `GET /contacts/{id}`.
 (internal) for server-side skip-known → `POST /conversations/search` for active
 states → detail+contact fetch for changed/new → a closure pass (tracked-open
 ids absent from the search are re-fetched so `_upsert_ticket` stamps
-`intercom_closed`) → the existing `ingest_tickets`. It is driven by a background
+`intercom_closed`; when the search is lookback-bounded, only tickets whose
+stored `updated_at` falls inside the window are candidates — older closes are
+caught by the next unbounded poller cycle) → the existing `ingest_tickets`. It is driven by a background
 poller (`main._intercom_poll_loop`, gated on a token + `INTERCOM_POLL_INTERVAL_SECONDS
-> 0`, default off) and a manual `POST /tickets/sync` (503 without a token).
+> 0`, default off) and a manual `POST /tickets/sync` (503 without a token),
+surfaced in the webapp as a Sync button (Topbar — bounded to the board's
+lookback window via `?lookback_hours`; EmptyBoard — unbounded first fetch).
+Cycles are serialized process-wide on `sync.SYNC_LOCK`: the poller waits its
+turn, while the manual endpoint fast-fails 409 when a cycle is already running
+(the client treats 409 as benign and just refreshes the board).
 Deep-link URLs use `INTERCOM_WORKSPACE_APP_ID` (the public workspace slug, not a
 secret). Ingestion is entirely backend-side.
 
