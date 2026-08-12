@@ -41,13 +41,22 @@ def _limiters(config: AppConfig) -> tuple[FixedWindowLimiter, FixedWindowLimiter
 
 def _client_ip(request: Request, config: AppConfig) -> str:
     """The client IP the login limiter keys on. Behind a trusted proxy
-    (`trust_proxy_headers`), use the left-most `X-Forwarded-For` hop — the real
-    client — so a shared proxy IP can't collapse every login into one bucket and
-    lock out the whole team. Direct deploys fall back to `request.client.host`."""
+    (`trust_proxy_headers`), use the RIGHT-most `X-Forwarded-For` entry — the hop
+    the proxy itself appended (the peer it actually saw) — so a shared proxy IP
+    can't collapse every login into one bucket and lock out the whole team.
+
+    The right-most entry is used, not the left-most: a client can forge the
+    left-most values (`XFF: <spoof>` → proxy appends the real peer →
+    `<spoof>, <real>`), so keying on the left-most would let an attacker rotate a
+    fake IP per request and defeat the rate limiter entirely. Only the right-most
+    entry is written by our trusted proxy. Assumes exactly one trusted proxy in
+    front. Direct deploys fall back to `request.client.host`."""
     if config.trust_proxy_headers:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+            if hops:
+                return hops[-1]
     return request.client.host if request.client else "unknown"
 
 

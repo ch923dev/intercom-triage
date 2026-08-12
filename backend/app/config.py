@@ -178,9 +178,11 @@ class AppConfig(BaseSettings):
     # When the app is deployed behind a trusted reverse proxy / load balancer,
     # `request.client.host` is the proxy's IP — collapsing every client into one
     # login rate-limit bucket, so 10 failed logins can lock out the whole team.
-    # Set True ONLY when a trusted proxy sets X-Forwarded-For, so the limiter
-    # keys on the real client IP (the left-most XFF hop). Default off — direct
-    # uvicorn uses request.client.host unchanged.
+    # Set True ONLY behind a trusted proxy that appends X-Forwarded-For, so the
+    # limiter keys on the right-most XFF entry (the hop the proxy itself wrote —
+    # a client can forge the left-most entries, so the right-most is used to
+    # prevent a spoofed-IP rate-limit bypass). Assumes a single trusted proxy.
+    # Default off — direct uvicorn uses request.client.host unchanged.
     trust_proxy_headers: bool = False
     cors_allowed_origins: list[str] = Field(
         default_factory=lambda: [

@@ -114,18 +114,21 @@ class _FakeRequest:
 
 
 def test_client_ip_honors_trusted_proxy(test_config) -> None:
-    """Behind a trusted proxy, the login limiter keys on the real client
-    (left-most X-Forwarded-For hop) instead of the shared proxy IP — which would
-    otherwise collapse the whole team into one bucket (review finding #8)."""
+    """Behind a trusted proxy, the login limiter keys on the right-most
+    X-Forwarded-For hop (the entry the proxy appends) instead of the shared proxy
+    IP — which would otherwise collapse the whole team into one bucket (review
+    finding #8)."""
     from app.routers.auth import _client_ip
 
     off = test_config  # trust_proxy_headers defaults False
     on = test_config.model_copy(update={"trust_proxy_headers": True})
-    req = _FakeRequest({"x-forwarded-for": "203.0.113.7, 10.0.0.1"}, "10.0.0.1")
+    # Attacker forges the left-most value; the trusted proxy appends the real
+    # peer on the right. peer (what uvicorn sees) is the proxy itself.
+    req = _FakeRequest({"x-forwarded-for": "1.2.3.4, 203.0.113.7"}, "10.0.0.1")
 
     # Default: uses the direct peer (the proxy IP) — every client shares it.
     assert _client_ip(req, off) == "10.0.0.1"
-    # Trusted: uses the real client from XFF.
+    # Trusted: uses the proxy-appended right-most hop, ignoring the spoofed left.
     assert _client_ip(req, on) == "203.0.113.7"
     # Trusted but no XFF → falls back to the peer, never crashes.
     assert _client_ip(_FakeRequest({}, "198.51.100.5"), on) == "198.51.100.5"
