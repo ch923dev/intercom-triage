@@ -39,6 +39,18 @@ def _limiters(config: AppConfig) -> tuple[FixedWindowLimiter, FixedWindowLimiter
     return _ip_limiter, _email_limiter
 
 
+def _client_ip(request: Request, config: AppConfig) -> str:
+    """The client IP the login limiter keys on. Behind a trusted proxy
+    (`trust_proxy_headers`), use the left-most `X-Forwarded-For` hop — the real
+    client — so a shared proxy IP can't collapse every login into one bucket and
+    lock out the whole team. Direct deploys fall back to `request.client.host`."""
+    if config.trust_proxy_headers:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 def _set_refresh_cookie(response: Response, config: AppConfig, value: str) -> None:
     response.set_cookie(
         key=config.session_cookie_name,
@@ -80,7 +92,7 @@ async def login(
     onlysales: OnlySalesClient = Depends(get_onlysales),
     config: AppConfig = Depends(get_app_config),
 ) -> LoginResponse:
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _client_ip(request, config)
     ip_limiter, email_limiter = _limiters(config)
     ip_ok = ip_limiter.allow(client_ip)
     email_ok = email_limiter.allow(body.email)

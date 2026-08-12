@@ -175,6 +175,13 @@ class AppConfig(BaseSettings):
     session_cookie_samesite: str = "lax"
     login_rate_max_attempts: int = Field(default=10, ge=1)
     login_rate_window_seconds: int = Field(default=300, ge=1)
+    # When the app is deployed behind a trusted reverse proxy / load balancer,
+    # `request.client.host` is the proxy's IP — collapsing every client into one
+    # login rate-limit bucket, so 10 failed logins can lock out the whole team.
+    # Set True ONLY when a trusted proxy sets X-Forwarded-For, so the limiter
+    # keys on the real client IP (the left-most XFF hop). Default off — direct
+    # uvicorn uses request.client.host unchanged.
+    trust_proxy_headers: bool = False
     cors_allowed_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",
