@@ -23,6 +23,8 @@ vi.mock('@/api/client', () => ({
     overrideCategory: vi.fn(),
     editTicket: vi.fn(),
     listTickets: vi.fn(),
+    syncNow: vi.fn(),
+    listCategories: vi.fn(),
     assignTicket: vi.fn(),
     bulkAssign: vi.fn(),
   },
@@ -732,5 +734,92 @@ describe('ticketsStore.bulkAssign race guard + self-assign fill (Fix 1 + Fix 3)'
     await s.bulkAssign(['a'], 7);
 
     expect(s.tickets.find((x) => x.id === 'a')!.assigned_to).toStrictEqual(existing);
+  });
+});
+
+describe('ticketsStore.syncNow', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  const COUNTS = { received: 3, categorized: 3, skipped_known: 12, closed_detected: 0 };
+
+  it('calls the sync endpoint with the lookback then reloads board + categories', async () => {
+    const { api } = await import('@/api/client');
+    (api.syncNow as ReturnType<typeof vi.fn>).mockResolvedValue(COUNTS);
+    (api.listTickets as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (api.listCategories as ReturnType<typeof vi.fn>).mockResolvedValue({
+      categories: [],
+      pending_proposals: [],
+    });
+    const s = useTicketsStore();
+
+    await s.syncNow(24);
+
+    expect(api.syncNow).toHaveBeenCalledWith(24);
+    expect(api.listTickets).toHaveBeenCalled();
+    // Categories reload too — a sync can create a new proposal/category the
+    // board must render (review finding #5).
+    expect(api.listCategories).toHaveBeenCalled();
+    expect(s.lastSyncResult).toStrictEqual(COUNTS);
+    expect(s.syncing).toBe(false);
+    expect(s.error).toBeNull();
+    expect(s.syncError).toBeNull();
+  });
+
+  it('treats a 409 (cycle already running) as benign and still refreshes', async () => {
+    const { api } = await import('@/api/client');
+    (api.syncNow as ReturnType<typeof vi.fn>).mockRejectedValue(
+      Object.assign(new Error('POST /tickets/sync → 409'), { status: 409 }),
+    );
+    (api.listTickets as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const s = useTicketsStore();
+
+    await s.syncNow(24);
+
+    expect(api.listTickets).toHaveBeenCalled();
+    expect(s.error).toBeNull();
+    expect(s.lastSyncResult).toBeNull();
+  });
+
+  it('surfaces the 503 detail via syncError (NOT the board-load error) and skips refresh', async () => {
+    const { api } = await import('@/api/client');
+    (api.syncNow as ReturnType<typeof vi.fn>).mockRejectedValue(
+      Object.assign(new Error('POST /tickets/sync → 503'), {
+        status: 503,
+        body: { detail: 'Intercom not configured (set INTERCOM_ACCESS_TOKEN)' },
+      }),
+    );
+    const s = useTicketsStore();
+
+    await s.syncNow(24);
+
+    expect(api.listTickets).not.toHaveBeenCalled();
+    // Kept off the board-load `error` field so App.vue's error gate doesn't
+    // unmount EmptyBoard on a fresh install (review finding #6).
+    expect(s.syncError).toBe('Intercom not configured (set INTERCOM_ACCESS_TOKEN)');
+    expect(s.error).toBeNull();
+    expect(s.syncing).toBe(false);
+  });
+
+  it('ignores a second click while a sync is in flight', async () => {
+    const { api } = await import('@/api/client');
+    let release!: (v: typeof COUNTS) => void;
+    (api.syncNow as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise((r) => {
+        release = r;
+      }),
+    );
+    (api.listTickets as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const s = useTicketsStore();
+
+    const first = s.syncNow(24);
+    const second = s.syncNow(24);
+    expect(api.syncNow).toHaveBeenCalledTimes(1);
+
+    release(COUNTS);
+    await Promise.all([first, second]);
+    expect(s.lastSyncResult).toStrictEqual(COUNTS);
   });
 });

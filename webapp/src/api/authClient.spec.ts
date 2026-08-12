@@ -60,3 +60,21 @@ describe('auth request layer', () => {
     expect(lost).toHaveBeenCalledOnce();
   });
 });
+
+describe('api.syncNow URL construction (review finding #12)', () => {
+  const SYNC_COUNTS = { received: 0, categorized: 0, skipped_known: 0, closed_detected: 0 };
+
+  it('posts to bare /tickets/sync when unbounded (EmptyBoard first run)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, SYNC_COUNTS));
+    await api.syncNow();
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/tickets/sync');
+    expect(init.method).toBe('POST');
+  });
+
+  it('appends ?lookback_hours=N when bounded (Topbar)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, SYNC_COUNTS));
+    await api.syncNow(24);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/tickets/sync?lookback_hours=24');
+  });
+});

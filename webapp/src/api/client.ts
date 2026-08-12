@@ -22,6 +22,7 @@ import type {
   Snippet,
   StatsResponse,
   SuggestedPlaybook,
+  SyncResponse,
   Ticket,
   TicketNote,
   UserRef,
@@ -151,6 +152,16 @@ export const api = {
     const qs = opts.resolved === undefined ? '' : `?resolved=${opts.resolved}`;
     return request(`/tickets${qs}`);
   },
+
+  /** Run one backend Intercom fetch+ingest cycle now (the poller's cycle).
+   *  `lookbackHours` bounds the fetch window; omit for the unbounded
+   *  historical fetch. 409 while a cycle is already running; 503 when no
+   *  Access Token is configured. */
+  syncNow: (lookbackHours?: number): Promise<SyncResponse> =>
+    request(
+      `/tickets/sync${lookbackHours === undefined ? '' : `?lookback_hours=${lookbackHours}`}`,
+      { method: 'POST' },
+    ),
 
   overrideCategory: (ticketId: string, categoryId: number) =>
     request<{ ok: true; category_id: number }>(`/tickets/${ticketId}/category`, {

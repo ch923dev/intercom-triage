@@ -10,12 +10,14 @@ import { useAuthStore } from '@/stores/auth';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
 import { useSavedViewsStore } from '@/stores/savedViews';
+import { useSettingsStore } from '@/stores/settings';
 import { useTicketsStore } from '@/stores/tickets';
 import { useTweaksStore } from '@/stores/tweaks';
 import { useViewStore } from '@/stores/view';
 import type { View } from '@/stores/view';
 
 const auth = useAuthStore();
+const settings = useSettingsStore();
 const tickets = useTicketsStore();
 const tweaks = useTweaksStore();
 const categories = useCategoriesStore();
@@ -70,6 +72,24 @@ const readyCount = computed(() => tickets.readyParkedCount);
 function refresh() {
   void tickets.refresh();
 }
+
+/** Board lookback window in hours — bounds the manual sync so a button press
+ *  returns in seconds instead of running the unbounded historical fetch. */
+const lookbackHours = computed(() =>
+  settings.lookbackUnit === 'days' ? settings.lookbackValue * 24 : settings.lookbackValue,
+);
+
+/** Pull from Intercom now (one poll cycle), then reload the board. */
+function syncNow() {
+  void tickets.syncNow(lookbackHours.value);
+}
+
+/** Counts from the last manual sync, appended to the last-sync timestamp. */
+const syncResultLabel = computed(() => {
+  const r = tickets.lastSyncResult;
+  if (!r) return '';
+  return `${r.received} new · ${r.skipped_known} unchanged`;
+});
 
 function onSearchInput(e: Event) {
   tickets.setQuery((e.target as HTMLInputElement).value);
@@ -216,12 +236,25 @@ async function onLogout() {
 
     <div class="spacer" />
 
-    <!-- Refresh (T036) -->
+    <!-- Sync — pull latest conversations from Intercom (one poll cycle),
+         then reload the board. Refresh (T036) only re-reads the stored DB. -->
+    <button
+      class="ghost"
+      :disabled="tickets.syncing"
+      title="Pull latest conversations from Intercom"
+      @click="syncNow"
+    >
+      <span class="mono">{{ tickets.syncing ? 'Syncing…' : 'Sync' }}</span>
+    </button>
     <button class="ghost" :disabled="tickets.loading" @click="refresh">
       <span class="mono">{{ tickets.loading ? 'Refreshing…' : 'Refresh' }}</span>
     </button>
     <Mono
-      >{{ lastSync }}<span v-if="autoSyncLabel" class="auto-label">{{ autoSyncLabel }}</span></Mono
+      >{{ lastSync }}<span v-if="autoSyncLabel" class="auto-label">{{ autoSyncLabel }}</span
+      ><span v-if="syncResultLabel" class="auto-label">· {{ syncResultLabel }}</span></Mono
+    >
+    <span v-if="tickets.syncError" class="sync-err mono" :title="tickets.syncError"
+      >Sync failed</span
     >
 
     <div class="sep" />
@@ -433,6 +466,13 @@ async function onLogout() {
 .auto-label {
   opacity: 0.55;
   margin-left: 2px;
+}
+/* Manual-sync failure (503 no token / network) — kept out of the board-load
+   error path so it surfaces here instead of the full-board error state. */
+.sync-err {
+  color: var(--accent);
+  font-size: 11px;
+  margin-left: 4px;
 }
 /* Account label — current operator, truncated to keep the topbar scannable. */
 .who {

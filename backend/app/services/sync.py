@@ -29,6 +29,13 @@ from app.services.intercom_normalizer import customer_contact_id, normalize_conv
 from app.services.settings import get_settings
 from app.services.tickets import get_sync_state, ingest_tickets
 
+# One cycle at a time, process-wide. The background poller and the manual
+# `POST /tickets/sync` (Topbar Sync button) share this lock: two concurrent
+# cycles would both miss the skip-known map and double-fetch + double-categorize
+# the same conversations. The router fast-fails 409 when the lock is held; the
+# poller just waits its turn.
+SYNC_LOCK = asyncio.Lock()
+
 
 async def _hydrate_one(
     intercom: IntercomClient,
@@ -86,10 +93,32 @@ async def run_sync_cycle(
 ) -> SyncResponse:
     """Run one Intercom fetch+ingest cycle and return its counts.
 
+    Serialized on `SYNC_LOCK` — a caller arriving mid-cycle waits for the
+    running one to finish (the router avoids the wait by checking
+    `SYNC_LOCK.locked()` → 409 instead).
+
     `lookback_hours` (when > 0) bounds the search to conversations whose
     `updated_at` is within the window — a server-side Intercom filter. None/0
     keeps the historical unbounded behavior (all active conversations).
     """
+    async with SYNC_LOCK:
+        return await _run_sync_cycle(
+            session=session,
+            openrouter=openrouter,
+            intercom=intercom,
+            config=config,
+            lookback_hours=lookback_hours,
+        )
+
+
+async def _run_sync_cycle(
+    *,
+    session: AsyncSession,
+    openrouter: OpenRouterClient | None,
+    intercom: IntercomClient,
+    config: AppConfig,
+    lookback_hours: int | None = None,
+) -> SyncResponse:
     settings = await get_settings(session)
     states = list(settings.states) or ["open"]
 
@@ -125,8 +154,28 @@ async def run_sync_cycle(
             continue
         to_fetch.append(sid)
 
-    # Closure pass — tracked-open ids absent from the active search.
-    to_fetch.extend(tid for tid in open_tracked if tid not in seen_ids)
+    # Closure pass — tracked-open ids absent from the active search. Under a
+    # bounded fetch, absence usually just means "not updated in the fetch
+    # window", so re-fetching every older open ticket would defeat the bound.
+    # But the fetch lookback (e.g. 24h from the Sync button) is too narrow for
+    # closure detection: a ticket closed out-of-band today whose stored
+    # updated_at predates the window would be missed forever with the poller
+    # off. So closure candidates use a DEDICATED, wider window
+    # (`intercom_closure_lookback_seconds`, default 7d) — decoupled from the
+    # fetch bound — catching aged-but-recent closures while still excluding the
+    # ancient backlog. Only truly stale tickets (older than the closure window)
+    # rely on an eventual unbounded poller cycle.
+    if updated_after is None:
+        to_fetch.extend(tid for tid in open_tracked if tid not in seen_ids)
+    else:
+        closure_after = (
+            datetime.now(UTC) - timedelta(seconds=config.intercom_closure_lookback_seconds)
+        ).timestamp()
+        to_fetch.extend(
+            tid
+            for tid in open_tracked
+            if tid not in seen_ids and known_epoch.get(tid, 0) >= closure_after
+        )
 
     sem = asyncio.Semaphore(config.intercom_poll_concurrency)
 

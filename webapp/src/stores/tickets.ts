@@ -9,7 +9,14 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
-import type { BulkResult, NonActionableKind, ParkedReason, Ticket } from '@/types/api';
+import { useCategoriesStore } from '@/stores/categories';
+import type {
+  BulkResult,
+  NonActionableKind,
+  ParkedReason,
+  SyncResponse,
+  Ticket,
+} from '@/types/api';
 import { NON_ACTIONABLE_KIND_LABELS } from '@/utils/nonActionable';
 import { needsReview } from '@/utils/review';
 import {
@@ -387,6 +394,58 @@ export const useTicketsStore = defineStore('tickets', () => {
       state.value.error = (e as Error).message;
     } finally {
       state.value.lastRefresh = new Date();
+    }
+  }
+
+  /** True while a manual Intercom sync (`POST /tickets/sync`) is in flight.
+   *  Drives the Topbar/EmptyBoard Sync button disabled state. */
+  const syncing = ref(false);
+
+  /** Counts from the last successful manual sync — feeds the Topbar result
+   *  label ("3 new · 12 unchanged"). Null until the first sync. */
+  const lastSyncResult = ref<SyncResponse | null>(null);
+
+  /** Error from the last manual sync, kept SEPARATE from the board-load `error`.
+   *  A failed sync must NOT trip App.vue's "Couldn't load the board" gate (which
+   *  keys on `error` + `isEmpty`) — that would unmount EmptyBoard and its Sync
+   *  button on a fresh install. The Sync UI surfaces this instead. */
+  const syncError = ref<string | null>(null);
+
+  /** Pull from Intercom now: trigger one backend fetch+ingest cycle, then
+   *  reload the board so the new rows appear. `lookbackHours` bounds the fetch
+   *  window (Topbar passes the board's lookback); omit for the unbounded
+   *  historical fetch (EmptyBoard first run). A 409 — a cycle is already
+   *  running (poller tick or another operator) — is benign: its rows land in
+   *  the refresh below. Other failures (503 no token, network) surface via
+   *  `syncError` and skip the refresh. Never throws. */
+  async function syncNow(lookbackHours?: number) {
+    if (syncing.value) return;
+    syncing.value = true;
+    syncError.value = null;
+    let refreshAfter = true;
+    try {
+      lastSyncResult.value = await api.syncNow(lookbackHours);
+    } catch (e) {
+      if ((e as { status?: number }).status !== 409) {
+        const detail = (e as { body?: { detail?: string } }).body?.detail;
+        syncError.value = detail ?? (e as Error).message;
+        refreshAfter = false;
+      }
+    } finally {
+      syncing.value = false;
+    }
+    if (refreshAfter) {
+      // Reload categories alongside tickets: a sync cycle can CREATE a new
+      // proposal/category and assign fresh tickets to it. Without refreshing the
+      // categories store there is no column to render those cards in, so they'd
+      // be invisible (grouped into a bucket no column reads) until a full app
+      // reload — while the count still reports "N new" (review finding #5).
+      await Promise.all([
+        refresh().catch(() => undefined),
+        useCategoriesStore()
+          .load()
+          .catch(() => undefined),
+      ]);
     }
   }
 
@@ -992,6 +1051,10 @@ export const useTicketsStore = defineStore('tickets', () => {
     byId,
     refresh,
     silentRefresh,
+    syncing,
+    lastSyncResult,
+    syncError,
+    syncNow,
     setQuery,
     // Saved views / smart filters (roadmap 1.1)
     activeFilter,

@@ -107,6 +107,75 @@ async def test_closure_pass_stamps_intercom_closed(
     assert row.resolved_at is not None
 
 
+async def test_bounded_sync_skips_stale_open_tickets_in_closure_pass(
+    session: AsyncSession, test_config: AppConfig
+) -> None:
+    # Stored ticket last updated 2026-06-01 — far outside a 24h lookback. A
+    # bounded sync whose search returns nothing must NOT re-fetch it (absence
+    # just means "not updated in the window"), or the Sync button's bound is
+    # defeated by re-fetching every older open ticket.
+    await _seed_ticket(session, test_config, _seed("OLD1", state="open"))
+    fake = FakeIntercom(summaries=[], details={})
+
+    resp = await run_sync_cycle(
+        session=session, openrouter=None, intercom=fake, config=test_config, lookback_hours=24
+    )
+
+    assert "OLD1" not in fake.detail_calls
+    assert resp.received == 0
+    assert resp.closed_detected == 0
+
+
+async def test_bounded_sync_still_catches_in_window_closure(
+    session: AsyncSession, test_config: AppConfig
+) -> None:
+    from app.util import naive_utcnow
+
+    recent = naive_utcnow()
+    seed = _seed("C2", state="open").model_copy(update={"updated_at": recent})
+    await _seed_ticket(session, test_config, seed)
+    # C2 was updated inside the 24h window but is absent from the bounded
+    # active search → still a closure candidate; re-fetch finds it closed.
+    fake = FakeIntercom(
+        summaries=[],
+        details={"C2": _detail("C2", state="closed", updated=_epoch(recent) + 10)},
+    )
+
+    resp = await run_sync_cycle(
+        session=session, openrouter=None, intercom=fake, config=test_config, lookback_hours=24
+    )
+
+    assert "C2" in fake.detail_calls
+    assert resp.closed_detected == 1
+
+
+async def test_bounded_sync_catches_closure_within_closure_window(
+    session: AsyncSession, test_config: AppConfig
+) -> None:
+    from datetime import timedelta
+
+    from app.util import naive_utcnow
+
+    # Aged 3 days — OUTSIDE the 24h fetch lookback but INSIDE the dedicated 7d
+    # closure window. Closed out-of-band in Intercom → must still be detected,
+    # or the bounded Sync button would strand it in its live column forever with
+    # the poller off (review finding #2).
+    aged = naive_utcnow() - timedelta(days=3)
+    seed = _seed("C3", state="open").model_copy(update={"created_at": aged, "updated_at": aged})
+    await _seed_ticket(session, test_config, seed)
+    fake = FakeIntercom(
+        summaries=[],
+        details={"C3": _detail("C3", state="closed", updated=_epoch(naive_utcnow()))},
+    )
+
+    resp = await run_sync_cycle(
+        session=session, openrouter=None, intercom=fake, config=test_config, lookback_hours=24
+    )
+
+    assert "C3" in fake.detail_calls
+    assert resp.closed_detected == 1
+
+
 async def test_new_conversation_is_ingested(session: AsyncSession, test_config: AppConfig) -> None:
     fake = FakeIntercom(
         summaries=[{"id": "N1", "updated_at": _epoch(_DT)}],

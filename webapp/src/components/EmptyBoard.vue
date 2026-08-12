@@ -1,16 +1,27 @@
 <!-- Empty-board placeholder. Shown on the board view when zero tickets are
-     stored. Ingestion is backend-side (POST /tickets/sync or the poller), so
-     the copy points there — not at any client surface. -->
+     stored. Ingestion is backend-side (POST /tickets/sync or the poller); the
+     Sync button triggers one unbounded cycle (first run wants the full
+     historical fetch, unlike the Topbar's lookback-bounded sync). -->
 <script setup lang="ts">
 import Mono from './Mono.vue';
+import { useTicketsStore } from '@/stores/tickets';
+
+const tickets = useTicketsStore();
+
+function syncNow() {
+  void tickets.syncNow();
+}
 </script>
 
 <template>
   <div class="empty">
     <Mono :size="11">No tickets yet</Mono>
     <p class="lead">The board fills once the backend ingests conversations from Intercom.</p>
+    <button class="sync-btn" :disabled="tickets.syncing" @click="syncNow">
+      <span class="mono">{{ tickets.syncing ? 'Syncing…' : 'Sync from Intercom' }}</span>
+    </button>
+    <p v-if="tickets.syncError" class="sync-error">{{ tickets.syncError }}</p>
     <ol class="steps">
-      <li>Trigger one cycle now: <code>POST /tickets/sync</code> (503 if no token is set).</li>
       <li>
         Or set <code>INTERCOM_POLL_INTERVAL_SECONDS</code> in <code>backend/.env</code> to run the
         background poller.
@@ -52,6 +63,31 @@ import Mono from './Mono.vue';
 }
 .empty .steps li {
   margin-bottom: 4px;
+}
+.sync-btn {
+  align-self: flex-start;
+  padding: 5px 12px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--bg);
+  color: var(--ink);
+  cursor: pointer;
+}
+.sync-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.sync-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sync-btn .mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.sync-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--accent);
 }
 code {
   font-family: var(--font-mono);

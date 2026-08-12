@@ -88,10 +88,14 @@ class FakeIntercom:
         self._details = details or {}
         self._contacts = contacts or {}
         self.detail_calls: list[str] = []
+        # Records the `updated_after` bound each search was called with (None =
+        # unbounded), so a test can assert the lookback bound was threaded through.
+        self.search_updated_after: list[int | None] = []
 
     async def search_conversations(
         self, *, states: Any, updated_after: int | None = None, per_page: int = 150
     ) -> Any:
+        self.search_updated_after.append(updated_after)
         for summary in self._summaries:
             yield summary
 

@@ -71,9 +71,11 @@ async def sync_now(
     ),
 ) -> SyncResponse:
     """Run one Intercom fetch+ingest cycle now (the same cycle the background
-    poller runs). 503 when no Access Token is configured — there's nothing to
-    poll. Exists for scripts/curl; there is no UI button (the poller is the
-    primary trigger).
+    poller runs). Driven by the Topbar/EmptyBoard Sync button and scripts/curl.
+    503 when no Access Token is configured — there's nothing to poll. 409 when
+    a cycle is already running (poller tick or another operator's click) — the
+    in-flight cycle's rows land on the next board refresh, so the caller treats
+    it as benign.
 
     `lookback_hours` optionally bounds the fetch to a recent window (server-side
     Intercom `updated_at >` filter); omitted = unbounded (all active)."""
@@ -81,6 +83,8 @@ async def sync_now(
         raise HTTPException(
             status_code=503, detail="Intercom not configured (set INTERCOM_ACCESS_TOKEN)"
         )
+    if sync_svc.SYNC_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Sync already in progress")
     return await sync_svc.run_sync_cycle(
         session=session,
         openrouter=openrouter,

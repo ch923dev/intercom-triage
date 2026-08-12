@@ -235,6 +235,16 @@ export interface Ticket {
   assigned_at: string | null;
 }
 
+// ── Sync (backend-driven Intercom poll cycle) ────────────────────────────────
+
+/** `POST /tickets/sync` result — counts for one backend fetch+ingest cycle. */
+export interface SyncResponse {
+  received: number;
+  categorized: number;
+  skipped_known: number;
+  closed_detected: number;
+}
+
 // ── Bulk actions (plan §8d) ──────────────────────────────────────────────────
 
 export interface BulkFailure {
