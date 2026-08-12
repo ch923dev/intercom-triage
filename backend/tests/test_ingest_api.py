@@ -8,8 +8,9 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Category, Ticket
+from app.models import AICacheEntry, Category, Settings, Ticket
 from tests.helpers import FakeOpenRouter, existing_assignment
 
 
@@ -285,3 +286,69 @@ async def test_internal_note_does_not_bust_content_signature_cache(
 
     again = await client.post("/tickets/ingest", json=[payload_with_note])
     assert again.json()["categorized"] == 0  # cache hit — internal note did not bust it
+
+
+@pytest.mark.asyncio
+async def test_closed_ticket_skips_ai_categorization(
+    client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ticket arriving closed is headed for Resolved — ingest must NOT spend an
+    AI call on it. It degrades to the fallback category with its title taken from
+    the Intercom subject, and it is not cached, so a later reopen re-categorizes.
+    The open ticket in the same batch still goes through categorization."""
+    from app.ai.pipeline import CategorizationResult
+
+    s = (await session.scalars(select(Settings))).one()
+    s.use_ai = True
+    await session.commit()
+
+    fb = (await session.scalars(select(Category).where(Category.is_fallback.is_(True)))).one()
+    ai_cat = (
+        await session.scalars(select(Category).where(Category.is_fallback.is_(False)))
+    ).first()
+    assert ai_cat is not None and ai_cat.id != fb.id
+
+    seen: list[str] = []
+
+    async def fake_categorize_many(tickets, **kwargs):  # type: ignore[no-untyped-def]
+        seen.extend(t.id for t in tickets)
+        return {
+            t.id: CategorizationResult(
+                category_id=ai_cat.id,
+                proposal_id=None,
+                summary="ai summary",
+                confidence=0.9,
+                subject="ai subject",
+            )
+            for t in tickets
+        }
+
+    monkeypatch.setattr("app.services.tickets.categorize_many", fake_categorize_many)
+
+    resp = await client.post(
+        "/tickets/ingest",
+        json=[
+            _hydrated("OPEN-1", state="open", title="Open subject"),
+            _hydrated("CLOSED-1", state="closed", title="Closed subject"),
+        ],
+    )
+    assert resp.status_code == 200
+    # Only the open ticket reached the AI step — the closed one was skipped.
+    assert resp.json()["categorized"] == 1
+    assert seen == ["OPEN-1"]
+
+    closed = await session.get(Ticket, "CLOSED-1")
+    assert closed is not None
+    assert closed.resolved_source == "intercom_closed"
+    assert closed.category_id == fb.id  # fallback, NOT the AI's category
+    assert closed.ai_confidence == 0.0
+    assert closed.title == "Closed subject"  # derived from the Intercom subject
+
+    # Closed ticket is not cached — a reopen with new content must re-categorize.
+    assert await session.get(AICacheEntry, "CLOSED-1") is None
+    # The open ticket got the AI category and a cache row.
+    open_row = await session.get(Ticket, "OPEN-1")
+    assert open_row is not None and open_row.category_id == ai_cat.id
+    assert await session.get(AICacheEntry, "OPEN-1") is not None

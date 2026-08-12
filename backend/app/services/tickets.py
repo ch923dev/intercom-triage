@@ -15,7 +15,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import embeddings
-from app.ai.pipeline import CategorizationResult, categorize_many
+from app.ai.pipeline import CategorizationResult, _fallback, categorize_many
 from app.clients.openrouter import OpenRouterClient
 from app.config import AppConfig
 from app.metrics import metrics
@@ -330,10 +330,12 @@ async def ingest_tickets(
 ) -> IngestResponse:
     """Categorize a batch of pre-normalized conversations and store them.
 
-    Cache-aware (FR-008) — an unchanged conversation skips the AI call. Without
-    an OpenRouter client, or with the `use_ai` setting off, every ticket
-    degrades to the fallback category and the operator fills in the subject /
-    summary by hand.
+    Cache-aware (FR-008) — an unchanged conversation skips the AI call. A ticket
+    arriving `closed` also skips the AI call: it's headed for Resolved, so it
+    degrades to the fallback category (title from the Intercom subject) unless it
+    was already categorized while open (cache hit). Without an OpenRouter client,
+    or with the `use_ai` setting off, every ticket degrades to the fallback
+    category and the operator fills in the subject / summary by hand.
     """
     fallback = await get_fallback(session)
     settings = await get_settings(session)
@@ -363,6 +365,7 @@ async def ingest_tickets(
     # so they get a cache hit (no AI call, no token spend).
     results: dict[str, CategorizationResult] = {}
     uncached: list[HydratedTicket] = []
+    closed_ai_skipped = 0
     for ticket in hydrated:
         signature = _content_signature(ticket)
         cached = await get_cached(
@@ -374,8 +377,21 @@ async def ingest_tickets(
         if cached is not None:
             results[ticket.id] = cached
             metrics.incr("cache_hits_total")
+        elif ticket.state == "closed":
+            # A ticket arriving closed is leaving the board for Resolved — don't
+            # spend an AI call categorizing it (this is where the closure pass
+            # lands out-of-band closes). Degrade to the fallback category; its
+            # stored title falls back to the Intercom subject (`_resolve_title`),
+            # and a fallback result is never cached below, so a later reopen with
+            # new customer content re-categorizes normally. A closed ticket that
+            # WAS categorized while open keeps its category via the cache-hit
+            # branch above.
+            results[ticket.id] = _fallback(ticket, fallback.id)
+            closed_ai_skipped += 1
         else:
             uncached.append(ticket)
+    if closed_ai_skipped:
+        metrics.incr("closed_ai_skipped_total", closed_ai_skipped)
 
     # Roadmap 2.5 — few-shot examples are retrieved from the embedding store, so
     # only when embeddings are enabled. Passing operator notes keeps the query
