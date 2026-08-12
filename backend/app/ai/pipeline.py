@@ -155,13 +155,19 @@ def _parse_triage(obj: dict[str, Any]) -> tuple[Priority, Sentiment, list[str]]:
     discriminator + summary are what gate the fallback path). `labels` is
     coerced to a clean list of <=3 short, non-empty strings.
     """
+    # Guard the frozenset membership with isinstance: an unhashable non-string
+    # (`[]` / `{}`) from the model would raise TypeError on `in` and sink the
+    # whole categorization to an uncached fallback. Degrade to the neutral
+    # default instead, as the docstring promises.
     priority_raw = obj.get("priority")
-    priority: Priority = priority_raw if priority_raw in _PRIORITY_VALUES else _DEFAULT_PRIORITY
+    priority: Priority = _DEFAULT_PRIORITY
+    if isinstance(priority_raw, str) and priority_raw in _PRIORITY_VALUES:
+        priority = priority_raw  # type: ignore[assignment]
 
     sentiment_raw = obj.get("sentiment")
-    sentiment: Sentiment = (
-        sentiment_raw if sentiment_raw in _SENTIMENT_VALUES else _DEFAULT_SENTIMENT
-    )
+    sentiment: Sentiment = _DEFAULT_SENTIMENT
+    if isinstance(sentiment_raw, str) and sentiment_raw in _SENTIMENT_VALUES:
+        sentiment = sentiment_raw  # type: ignore[assignment]
 
     labels_raw = obj.get("labels")
     labels: list[str] = []

@@ -320,6 +320,20 @@ def test_parse_triage_clamps_invalid_enums() -> None:
     assert p.sentiment == "neutral"
 
 
+def test_parse_triage_tolerates_unhashable_priority() -> None:
+    """A non-string (unhashable) priority/sentiment must degrade to the neutral
+    default, not raise TypeError on the frozenset `in` and sink the whole
+    categorization to an uncached fallback (review finding #9)."""
+    raw = (
+        '{"assignment":"existing","category_id":1,"subject":"x","summary":"y",'
+        '"confidence":0.5,"priority":[],"sentiment":{}}'
+    )
+    p = parse_response(raw)
+    assert p.category_id == 1  # the valid categorization survived
+    assert p.priority == "normal"
+    assert p.sentiment == "neutral"
+
+
 def test_parse_triage_labels_dedupe_and_cap() -> None:
     """Labels are trimmed, '#'-stripped, deduped (case-insensitive), capped at 3."""
     raw = (
