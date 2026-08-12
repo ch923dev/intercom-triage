@@ -81,3 +81,8 @@ desktop.ini
 # FleetView canvas layout (local UI state)
 canvas.json
 canvas.json.bak
+.canvas/
+
+# ── Local agent tooling (machine-specific; carry Bearer tokens — never commit) ──
+.mcp.json
+opencode.json
