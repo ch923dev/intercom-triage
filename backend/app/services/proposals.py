@@ -13,6 +13,7 @@ from app.models import (
     Category,
     CategoryProposal,
     RejectedProposalSignature,
+    Ticket,
 )
 from app.services.categories import get_fallback
 from app.util import naive_utcnow
@@ -115,6 +116,13 @@ async def approve_proposal(
         .where(AICacheEntry.proposal_id == proposal_id)
         .values(category_id=category.id, proposal_id=None),
     )
+    # The board reads the denormalized ticket row (effective_category), not the
+    # cache — repoint tickets in lockstep or they strand under the resolved proposal.
+    await session.execute(
+        update(Ticket)
+        .where(Ticket.proposal_id == proposal_id)
+        .values(category_id=category.id, proposal_id=None),
+    )
     proposal.status = "approved"
     proposal.resolved_category_id = category.id
     proposal.resolved_at = naive_utcnow()
@@ -149,6 +157,11 @@ async def merge_proposal(
         .where(AICacheEntry.proposal_id == proposal_id)
         .values(category_id=category_id, proposal_id=None),
     )
+    await session.execute(
+        update(Ticket)
+        .where(Ticket.proposal_id == proposal_id)
+        .values(category_id=category_id, proposal_id=None),
+    )
     proposal.status = "merged"
     proposal.resolved_category_id = category_id
     proposal.resolved_at = naive_utcnow()
@@ -170,6 +183,11 @@ async def reject_proposal(session: AsyncSession, proposal_id: int) -> None:
     await session.execute(
         update(AICacheEntry)
         .where(AICacheEntry.proposal_id == proposal_id)
+        .values(category_id=fallback.id, proposal_id=None),
+    )
+    await session.execute(
+        update(Ticket)
+        .where(Ticket.proposal_id == proposal_id)
         .values(category_id=fallback.id, proposal_id=None),
     )
     proposal.status = "rejected"

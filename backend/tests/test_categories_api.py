@@ -7,13 +7,34 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AICacheEntry, Category
+from app.models import AICacheEntry, Category, Ticket
+from app.util import naive_utcnow
 
 
 async def _fallback_id(session: AsyncSession) -> int:
     cid = await session.scalar(select(Category.id).where(Category.is_fallback.is_(True)))
     assert cid is not None
     return cid
+
+
+def _seed_ticket(session: AsyncSession, ticket_id: str, category_id: int) -> None:
+    """The denormalized ticket row the board reads — must be swept in lockstep
+    with the cache when its category is archived/merged (review finding #4)."""
+    session.add(
+        Ticket(
+            id=ticket_id,
+            title="x",
+            state="open",
+            author={},
+            parts=[],
+            internal_notes=[],
+            created_at=naive_utcnow(),
+            updated_at=naive_utcnow(),
+            category_id=category_id,
+            summary="",
+            ai_confidence=0.0,
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -69,6 +90,7 @@ async def test_archive_sweeps_cache_to_fallback(
             ticket_updated_at=datetime(2026, 1, 1),
         ),
     )
+    _seed_ticket(session, "T-arch", category_id=2)
     await session.commit()
 
     resp = await client.post("/categories/2/archive")
@@ -82,6 +104,10 @@ async def test_archive_sweeps_cache_to_fallback(
     assert remaining == 0
     swept = await session.get(AICacheEntry, "T-arch")
     assert swept is not None and swept.category_id == fb
+    # The board reads the ticket row — it must land on the fallback, not the
+    # archived category.
+    ticket = await session.get(Ticket, "T-arch")
+    assert ticket is not None and ticket.category_id == fb
 
 
 @pytest.mark.asyncio
@@ -101,6 +127,7 @@ async def test_merge_moves_tickets_and_archives_src(
             ticket_updated_at=datetime(2026, 1, 1),
         ),
     )
+    _seed_ticket(session, "T-merge", category_id=3)
     await session.commit()
 
     resp = await client.post("/categories/3/merge-into/4")
@@ -112,3 +139,5 @@ async def test_merge_moves_tickets_and_archives_src(
     assert moved is not None and moved.category_id == 4
     src = await session.get(Category, 3)
     assert src is not None and src.is_active is False
+    ticket = await session.get(Ticket, "T-merge")
+    assert ticket is not None and ticket.category_id == 4

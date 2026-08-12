@@ -9,22 +9,48 @@ from httpx import AsyncClient
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AICacheEntry, Category, CategoryProposal, RejectedProposalSignature
+from app.models import (
+    AICacheEntry,
+    Category,
+    CategoryProposal,
+    RejectedProposalSignature,
+    Ticket,
+)
 from app.services.proposals import list_pending
+from app.util import naive_utcnow
 
 
 async def _make_proposal(session: AsyncSession, name: str = "Refund Delay") -> int:
     proposal = CategoryProposal(name=name, description="desc", status="pending")
     session.add(proposal)
     await session.flush()
+    ticket_id = f"T-{name}"
     session.add(
         AICacheEntry(
-            ticket_id=f"T-{name}",
+            ticket_id=ticket_id,
             category_id=None,
             proposal_id=proposal.id,
             summary="s",
             confidence=0.6,
             ticket_updated_at=datetime(2026, 1, 1),
+        ),
+    )
+    # The denormalized ticket row the board actually reads — proposal-assigned,
+    # so curation must repoint it in lockstep with the cache.
+    session.add(
+        Ticket(
+            id=ticket_id,
+            title="x",
+            state="open",
+            author={},
+            parts=[],
+            internal_notes=[],
+            created_at=naive_utcnow(),
+            updated_at=naive_utcnow(),
+            category_id=None,
+            proposal_id=proposal.id,
+            summary="",
+            ai_confidence=0.0,
         ),
     )
     await session.commit()
@@ -64,6 +90,11 @@ async def test_approve_creates_category_and_repoints_cache(
     cache = await session.get(AICacheEntry, "T-Refund Delay")
     assert cache is not None
     assert cache.category_id == new_cat["id"] and cache.proposal_id is None
+    # The ticket row the board reads must move too, else the card strands under
+    # the now-resolved proposal (review finding #1).
+    ticket = await session.get(Ticket, "T-Refund Delay")
+    assert ticket is not None
+    assert ticket.category_id == new_cat["id"] and ticket.proposal_id is None
 
 
 @pytest.mark.asyncio
@@ -78,6 +109,8 @@ async def test_merge_proposal_repoints_to_target(
     session.expire_all()
     cache = await session.get(AICacheEntry, "T-Refund Delay")
     assert cache is not None and cache.category_id == 2
+    ticket = await session.get(Ticket, "T-Refund Delay")
+    assert ticket is not None and ticket.category_id == 2 and ticket.proposal_id is None
 
 
 @pytest.mark.asyncio
@@ -93,6 +126,8 @@ async def test_reject_records_signature_and_falls_back(
     fb = await session.scalar(select(Category.id).where(Category.is_fallback.is_(True)))
     cache = await session.get(AICacheEntry, "T-Refund Delay")
     assert cache is not None and cache.category_id == fb
+    ticket = await session.get(Ticket, "T-Refund Delay")
+    assert ticket is not None and ticket.category_id == fb and ticket.proposal_id is None
 
     sig = await session.get(RejectedProposalSignature, "refund delay")
     assert sig is not None and sig.rejected_name == "Refund Delay"

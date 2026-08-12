@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AICacheEntry, Category, Override
+from app.models import AICacheEntry, Category, Override, Ticket
 from app.schemas import CategoryCreate, CategoryPatch
 from app.util import naive_utcnow
 
@@ -96,6 +96,12 @@ async def archive_category(session: AsyncSession, category_id: int) -> None:
     await session.execute(
         update(Override).where(Override.category_id == category_id).values(category_id=fallback.id),
     )
+    # The board reads tickets.category_id (effective_category), not the cache, and
+    # the category is soft-deleted so the FK SET NULL never fires — sweep the
+    # denormalized ticket rows too or they strand under the archived column.
+    await session.execute(
+        update(Ticket).where(Ticket.category_id == category_id).values(category_id=fallback.id),
+    )
     await session.commit()
 
 
@@ -120,6 +126,9 @@ async def merge_categories(session: AsyncSession, src_id: int, dst_id: int) -> i
     )
     await session.execute(
         update(Override).where(Override.category_id == src_id).values(category_id=dst_id),
+    )
+    await session.execute(
+        update(Ticket).where(Ticket.category_id == src_id).values(category_id=dst_id),
     )
     src.is_active = False
     src.archived_at = naive_utcnow()
