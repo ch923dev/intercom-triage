@@ -133,16 +133,21 @@ async def rank_gaps(session: AsyncSession) -> list[ClusterGap]:
 
     category_names = {c.id: c.name for c in (await session.scalars(select(Category))).all()}
 
+    # Resolve effective categories for ALL cluster members in one batched pass
+    # (two queries total), then index per cluster — not two queries per cluster.
+    all_member_ids = list({tid for ids in members_by_cluster.values() for tid in ids})
+    effective_all = await _effective_category_ids(session, all_member_ids)
+
     gaps: list[ClusterGap] = []
     for cluster in clusters:
         ticket_ids = members_by_cluster.get(cluster.id, [])
-        effective = await _effective_category_ids(session, ticket_ids)
-        dominant = _dominant_category(list(effective.values()))
+        cat_ids = [effective_all[tid] for tid in ticket_ids if tid in effective_all]
+        dominant = _dominant_category(cat_ids)
         if dominant is None:
             continue  # no category to scope a playbook to
         if dominant in covered_category_ids:
             continue  # already has a playbook — not a gap
-        member_count = sum(1 for cid in effective.values() if cid == dominant)
+        member_count = cat_ids.count(dominant)
         gaps.append(
             ClusterGap(
                 cluster_id=cluster.id,

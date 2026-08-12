@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import AppConfig
@@ -189,6 +189,37 @@ async def test_dominant_category_is_most_common(session: AsyncSession) -> None:
     assert len(gaps) == 1
     assert gaps[0].category_id == 2
     assert gaps[0].member_count == 2  # the two Bug tickets
+
+
+@pytest.mark.asyncio
+async def test_rank_gaps_is_not_n_plus_one(session: AsyncSession) -> None:
+    """Effective categories for all cluster members resolve in ONE batched pass,
+    so the query count is constant in the number of clusters, not 2-per-cluster
+    (review finding #10)."""
+    now = naive_utcnow()
+    for c in range(5):
+        ids = [f"g{c}-{i}" for i in range(3)]
+        for tid in ids:
+            session.add(_make_ticket(tid, category_id=2, updated_at=now))
+        await session.commit()
+        await _add_cluster(session, 200 + c, label=f"cluster {c}", size=3, ticket_ids=ids)
+
+    sync_engine = session.bind.sync_engine
+    counter = {"n": 0}
+
+    def _before(*_args, **_kwargs):
+        counter["n"] += 1
+
+    event.listen(sync_engine, "before_cursor_execute", _before)
+    try:
+        gaps = await svc.rank_gaps(session)
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", _before)
+
+    assert len(gaps) == 5
+    # Batched: clusters + members + playbooks + categories + (tickets + overrides).
+    # The 2-per-cluster regression over 5 clusters would push this to ~14.
+    assert counter["n"] <= 8, f"expected constant query count, got {counter['n']} (N+1 regression)"
 
 
 @pytest.mark.asyncio
