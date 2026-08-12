@@ -17,5 +17,14 @@ export default defineConfig({
     environment: 'happy-dom',
     globals: false,
     include: ['src/**/*.spec.ts'],
+    // Node ≥22 ships an experimental global `localStorage` that is
+    // non-functional without `--localstorage-file`; happy-dom's GlobalWindow
+    // adopts it (observed on Node 25.9), so every spec touching localStorage
+    // fails with "localStorage.clear is not a function". Strip it from the
+    // worker processes so happy-dom installs its own working storage.
+    poolOptions: {
+      threads: { execArgv: ['--no-experimental-webstorage'] },
+      forks: { execArgv: ['--no-experimental-webstorage'] },
+    },
   },
 });
