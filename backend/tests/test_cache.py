@@ -136,6 +136,47 @@ async def test_cache_round_trip_triage_facets(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cache_round_trip_subject(session: AsyncSession) -> None:
+    """Cache write + read preserves the AI subject so a cache-hit re-sync
+    re-derives the ticket title instead of wiping it to NULL (review finding #3)."""
+    sig = datetime(2026, 7, 1, 12, 0)
+    result = CategorizationResult(
+        category_id=1,
+        proposal_id=None,
+        summary="s",
+        confidence=0.9,
+        subject="Refund request for invoice #44812",
+    )
+    await set_cached(session, "t-subject", result, sig)
+    await session.commit()
+
+    cached = await get_cached(session, "t-subject", sig, ttl_seconds=300)
+    assert cached is not None
+    assert cached.subject == "Refund request for invoice #44812"
+
+
+@pytest.mark.asyncio
+async def test_cache_legacy_row_has_empty_subject(session: AsyncSession) -> None:
+    """A pre-0026 row (null subject) reads back as "" — never None, so the
+    title-derive path stays well-typed."""
+    session.add(
+        AICacheEntry(
+            ticket_id="legacy-subject",
+            category_id=1,
+            proposal_id=None,
+            summary="s",
+            confidence=0.5,
+            ticket_updated_at=datetime(2026, 7, 1),
+        )
+    )
+    await session.commit()
+
+    cached = await get_cached(session, "legacy-subject", datetime(2026, 7, 1), 300)
+    assert cached is not None
+    assert cached.subject == ""
+
+
+@pytest.mark.asyncio
 async def test_cache_legacy_row_has_neutral_triage(session: AsyncSession) -> None:
     """A pre-0.2 cache row (null priority/sentiment) reads back as neutral
     defaults rather than None — keeps the ticket-row write well-typed."""

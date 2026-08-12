@@ -44,6 +44,7 @@ async def get_cached(
         proposal_id=row.proposal_id,
         summary=row.summary,
         confidence=row.confidence,
+        subject=row.subject or "",
         ai_resolution_verdict=row.ai_resolution_verdict,  # type: ignore[arg-type]
         ai_resolution_confidence=row.ai_resolution_confidence,
         ai_resolution_reason=row.ai_resolution_reason,
@@ -71,6 +72,7 @@ async def set_cached(
                 category_id=result.category_id,
                 proposal_id=result.proposal_id,
                 summary=result.summary,
+                subject=result.subject,
                 confidence=result.confidence,
                 ticket_updated_at=signature,
                 cached_at=now,
@@ -87,6 +89,7 @@ async def set_cached(
     row.category_id = result.category_id
     row.proposal_id = result.proposal_id
     row.summary = result.summary
+    row.subject = result.subject
     row.confidence = result.confidence
     row.ticket_updated_at = signature
     row.cached_at = now

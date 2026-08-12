@@ -138,6 +138,10 @@ class AICacheEntry(Base):
         ForeignKey("category_proposals.id", ondelete="CASCADE"),
     )
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+    # AI-generated title (<=80 chars). Cached so a cache-hit re-sync re-derives
+    # the ticket title from the same value instead of blanking it to NULL on a
+    # title-less Intercom conversation. Nullable for legacy rows / omitted titles.
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     ticket_updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     cached_at: Mapped[datetime] = mapped_column(
