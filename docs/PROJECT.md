@@ -142,6 +142,7 @@ attribution/assignment 0023–0025).
 | `snippets` | Global canned replies; `{{var}}` substitution client-side. |
 | `ticket_embeddings` | 384-dim vectors (sqlite-vec). Separate store — never touches `ai_cache`. |
 | `ticket_clusters` / `ticket_cluster_members` | Offline recurring-issue clustering snapshot. |
+| `bug_alerts` | One AI-detected product-bug report per ticket. `ticket_id` is the PK and that IS the Slack dedup guarantee; `posted_at IS NULL` is the outbox; `posted_severity` (delivery truth) is kept separate from `severity` (model truth) so escalation is comparable. No FK — the id is Intercom-owned (cf. `followups`). |
 | `settings` | Singleton (`CHECK id = 1`). Filter + AI flags; `init_db` inserts it. Team-wide — no per-user settings (inv #18). |
 | `users` | Local mirror of an OnlySales identity (`onlysales_id`/`email`/`name`/`scope`/`is_active`/`last_login_at`). No password column (inv #19). FK target for attribution/assignment. |
 | `sessions` | Refresh-token ledger: `refresh_token_hash` + `prev_refresh_token_hash` (reuse-detection), Fernet-encrypted `onlysales_refresh_encrypted`, `issued_at`/`expires_at`/`revoked_at`/`last_used_at`. Raw tokens never stored (inv #16/#19). |
@@ -199,6 +200,7 @@ Router footprint: `backend/app/routers/`.
 | stats | `GET /stats?window_days=…` |
 | playbooks | `GET /playbooks` · `GET /playbooks/suggested?ticket_id=…` · `POST /playbooks` · `POST /playbooks/draft` · `/draft-reply` · `PATCH /{id}` · `POST /{id}/archive` · `/restore` |
 | clusters | `GET /clusters` · `GET /clusters/gaps` · `POST /clusters/recompute` |
+| bug alerts | `GET /bug-alerts?severity=&delivered=` · `POST /bug-alerts/{ticket_id}/dismiss` |
 
 ---
 
@@ -288,7 +290,7 @@ Where knowledge lives now, and the boundary this handbook respects:
 |---|---|---|
 | **`docs/PROJECT.md`** (this) | System orientation: architecture, data-flow, stack, data model, API surface, feature status, glossary. | Canonical living handbook. |
 | **`docs/FEATURES.md`** | Exhaustive feature catalog by capability area, with code anchors + surfaces. | Canonical feature reference. |
-| `CLAUDE.md` (+ `backend/`, `webapp/`) | Per-change rules + the 19 invariants. Auto-loaded every session. | Canonical, authoritative. **Not folded here.** |
+| `CLAUDE.md` (+ `backend/`, `webapp/`) | Per-change rules + the 20 invariants. Auto-loaded every session. | Canonical, authoritative. **Not folded here.** |
 | `contract/spec.md` / `contract/plan.md` / `contract/tasks.md` | Requirements (US/FR/NFR, US-001..043) · architecture decisions (§1–§19) · traceability matrix (T001–T171). | Contract source of truth. **Not folded here** (charter-protected). |
 | `docs/principles.md` | The four engineering principles. | Live; referenced by every sub-package CLAUDE.md. |
 | `webapp/DESIGN.md` | Design-system source of truth (tokens/palette/components). | Live. |

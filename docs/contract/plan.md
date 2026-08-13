@@ -1,8 +1,10 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 2.0 · **Implements:** `spec.md` v2.0 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 2.1 · **Implements:** `spec.md` v2.2 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
+
+**Changes from v2.0:** early bug detection → Slack alerts. Adds §20: the bug verdict as a fifth categorization facet, the `bug_alerts` primary-key dedup guarantee + `posted_at IS NULL` outbox, the record/deliver split, the post-only Slack client, and the read/dismiss endpoints. Spec v2.2 implemented by T173–T178 (migration 0027).
 
 **Changes from v1.7:** charter pivot — auth + multi-user. Adds §19 (Auth & multi-user): delegated-identity token model, refresh reuse-detection, attribution columns, assignment columns, board user-join, and the double-refresh / two-tab revoke tradeoff. Spec v2.0 implemented by T168–T171.
 
@@ -839,3 +841,121 @@ credential fields are exposed. Requires authentication (FR-070).
 `POST /auth/login` is rate-limited per source IP and per target email with separate
 in-process token-bucket counters. Buckets are evicted after their window to prevent
 unbounded server-memory growth (NFR-013). Both limits are independently configurable.
+
+---
+
+## §20 — Early bug detection → Slack alerts (spec v2.2 · US-044 · FR-075..FR-079 · NFR-015/016)
+
+Implemented by T173–T178. Migration **0027**.
+
+### Detection is a fifth facet, not a second call
+
+The bug verdict rides the existing categorization request. `SYSTEM_PROMPT` gains three
+fields on all three response options (`bug_severity` / `bug_confidence` /
+`bug_evidence`) plus a BUG rules block, and `parse_response` reads them into
+`ParsedAssignment` → `CategorizationResult`. Consequences that follow from that choice
+and are the reason for it:
+
+- **No extra AI cost or latency.** A separate bug-detection call would double the
+  per-ticket spend for a facet the model is already reading the conversation for.
+- **The cache key is untouched** (invariant #6). The content signature still decides
+  when categorization re-runs; a bug verdict cannot bust or extend cache.
+- **A fallback carries no verdict, by construction** (invariant #7). All three fields
+  default to `None`, so a degraded categorization cannot fabricate a bug report — and
+  since fallbacks are never cached, no verdict is ever persisted from one.
+- **The AI sees `parts[]` only** (invariant #4). The prompt is unchanged in what it is
+  fed; internal notes stay out.
+
+The parser is deliberately tolerant: an out-of-vocabulary severity drops the whole
+verdict (all three fields move as a unit) rather than raising, because a malformed bug
+facet must cost the ticket its bug flag, never its category.
+
+`OpenRouterClient.complete` gains a `max_tokens` **parameter** (default 400) and
+`pipeline._complete` passes 550. A raised module constant would silently lengthen and
+re-price playbook drafting, which shares the same client method.
+
+### The primary key *is* the dedup guarantee
+
+`bug_alerts.ticket_id` is the primary key. That is the whole dedup mechanism:
+
+- Slack exposes no idempotency key, so "have I already posted this?" cannot be asked of
+  Slack.
+- An application-level check (`SELECT` then `INSERT`) races between two concurrent
+  ingests of the same ticket. The record pass therefore uses a single
+  `ON CONFLICT (ticket_id) DO UPDATE` upsert — never select-then-insert.
+- Re-keying the table (a surrogate id, a `(ticket_id, severity)` pair) removes the
+  guarantee and Slack reposts. The model docstring says so; keep it there.
+
+No FK to `tickets`: the ticket id is owned by Intercom (same reasoning as `followups`).
+
+`posted_at IS NULL` **is** the outbox — no queue table, no broker. It survives restart
+and self-heals after a Slack outage. `posted_severity` is delivery truth, deliberately
+separate from `severity` (model truth); escalation is exactly
+`severity > posted_severity`, which collapsing the two columns would make unaskable.
+
+Three nullable columns land on `ai_cache` alongside the other AI-derived fields so a
+**cache hit still yields a verdict** — the same class of bug that migration 0026 fixed
+for `subject`. Pre-existing rows carry NULL and are not backfilled.
+
+### Record and deliver are split
+
+**Record** (`services/bug_alerts.py:record_bug_alerts`) runs post-commit in its own
+transaction at both `ingest_tickets` call sites, mirroring `_embed_ingested_tickets`:
+broad `except` → `rollback()` + warn. An auxiliary pass must never take an ingest down
+with it; the worst case is a missing row the next sync refills. Every severity is
+recorded, including `low`, so the delivery floor stays calibratable from real traffic.
+
+**Deliver** (`deliver_pending_bug_alerts`, driven by a fifth background loop in
+`main.py`, interval-gated, default 0 = off) is never called from `run_sync_cycle` or
+`ingest_tickets`. A hanging Slack request inside `SYNC_LOCK` would stall the entire sync
+cycle, and Slack's ~1 msg/sec/channel budget makes a burst slow by nature; each pass is
+bounded by `bug_alert_max_per_cycle`.
+
+Ordering within delivery is deliberate: **post → store `ts` → mark delivered.** A crash
+mid-way risks one duplicate post; the reverse order risks losing an alert permanently.
+Duplicate is the cheaper failure. Per-row `try` keeps one bad channel from stalling the
+rest; a `SlackAuthError` stops the pass instead, since a revoked token fails every
+remaining row identically.
+
+### Slack transport: bot token, not webhook
+
+`clients/slack.py` is post-only: `chat.postMessage` with a bot token
+(`chat:write`, plus `chat:write.public` for an unjoined public channel). An incoming
+webhook returns the literal string `ok` with no message `ts`, which makes `thread_ts`
+escalation replies structurally impossible.
+
+Slack reports application errors as **HTTP 200 with `{"ok": false, "error": ...}`**, so
+the client checks the body, not the status. A status-code check would read
+`channel_not_found` as success and mark the alert delivered — losing it. `invalid_auth`
+and friends raise `SlackAuthError` and skip retry; `ratelimited` / 429 / 5xx retry with
+jittered backoff honoring `Retry-After`, matching the Intercom/OpenRouter clients.
+
+`logged_call("slack.post_message", ticket_id=…)` receives identifiers only. The evidence
+quote is customer conversation text and never enters a log record (NFR-016).
+
+### Read + dismiss
+
+`GET /bug-alerts?severity=&delivered=` and `POST /bug-alerts/{ticket_id}/dismiss`, both
+under `get_current_user` (invariant #15) and added to the `test_auth_required`
+parametrize list. `BugAlertSchema` lives on `schemas.py` and is **not** part of
+`HydratedTicket` — alerts are alert-state, not conversation shape (invariant #2
+untouched), and v1 ships no webapp change.
+
+The list endpoint deliberately includes `low` and dismissed rows: it is the calibration
+surface for `bug_alert_min_confidence`, which is an admitted guess (unlike
+`review_confidence_threshold`, calibrated by `tests/test_review_calibration.py`).
+
+### Config
+
+`SLACK_BOT_TOKEN` is a `SecretStr` — the older `openrouter_api_key` /
+`intercom_access_token` are plain `str` and that is not copied. Slack is deliberately
+**absent from `missing_secrets`**: an unconfigured Slack is a disabled optional feature,
+not a degraded service, and must not flip `/health` to degraded for an operator who
+never wanted alerts. `slack_configured` is surfaced on `/health` instead.
+
+### Deliberately deferred
+
+Per-severity channels (config is a plain string, not a dict), cross-ticket bug grouping
+(that is clustering, roadmap 3.1), any webapp surface, interactive Slack actions
+(dismiss-from-Slack needs a public request URL and signature verification), and
+backfilling historical conversations.

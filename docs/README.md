@@ -29,7 +29,7 @@ it never duplicates* — the linked doc is always the source of truth.
 | **Read the requirements** (the *what*: `US-*` / `FR-*` / `NFR-*`) | [`contract/spec.md`](./contract/spec.md) |
 | **Read the architecture decisions** (the *how*: §1..) | [`contract/plan.md`](./contract/plan.md) |
 | **Find a task / traceability** (`T001..`) | [`contract/tasks.md`](./contract/tasks.md) |
-| **Know the per-change rules + the 19 invariants** | [root `CLAUDE.md`](../CLAUDE.md) |
+| **Know the per-change rules + the 20 invariants** | [root `CLAUDE.md`](../CLAUDE.md) |
 | **Follow the engineering principles** | [`principles.md`](./principles.md) |
 | **Run the stack / quickstart** | [root `README.md`](../README.md) |
 | **Work inside one package** | [`backend/CLAUDE.md`](../backend/CLAUDE.md) · [`webapp/CLAUDE.md`](../webapp/CLAUDE.md) |
@@ -72,7 +72,8 @@ SQLite by default (Postgres-swappable via `DATABASE_URL`). Naive-UTC in the DB,
 `Z`-suffixed on the wire. Core tables: `tickets`, `ai_cache`, `categories`,
 `category_proposals`, `overrides`, `followups`, `ticket_notes`, `note_entries`,
 `note_attachments`, `playbooks`, `snippets`, `ticket_embeddings`,
-`ticket_clusters`, `settings` (singleton `CHECK id = 1`), `users`, `sessions`
+`ticket_clusters`, `bug_alerts` (Slack bug alerts — the PK is the dedup
+guarantee), `settings` (singleton `CHECK id = 1`), `users`, `sessions`
 (auth — MHU).
 
 Full table-by-table breakdown: [`PROJECT.md` §6 Data model](./PROJECT.md#6-data-model).
@@ -115,7 +116,7 @@ Index form: [`PROJECT.md` §7](./PROJECT.md#7-the-19-cross-package-invariants-in
 | [`PROJECT.md`](./PROJECT.md) | System orientation: architecture, data flow, stack, data model, API surface, feature status, glossary. **Canonical handbook.** |
 | [`FEATURES.md`](./FEATURES.md) | Exhaustive feature catalog by capability area, with code anchors. |
 | [`contract/spec.md`](./contract/spec.md) · [`contract/plan.md`](./contract/plan.md) · [`contract/tasks.md`](./contract/tasks.md) | Requirements (what) · architecture decisions (how) · traceability matrix. **Contract source of truth.** |
-| [root `CLAUDE.md`](../CLAUDE.md) (+ per-package) | Per-change rules + the 19 invariants. Auto-loaded every session. |
+| [root `CLAUDE.md`](../CLAUDE.md) (+ per-package) | Per-change rules + the 20 invariants. Auto-loaded every session. |
 | [`principles.md`](./principles.md) | The four engineering principles. |
 | [`superpowers/specs/`](./superpowers/specs/) + [`superpowers/plans/`](./superpowers/plans/) | Per-feature design records ("why we built it this way"). The design archive. |
 | [`_archive/`](./_archive/) | Retired point-in-time artifacts (the 2026-05 audit cycle, resolved reviews, verbatim `architecture.md`/`ROADMAP.md`, per-phase task breakdowns). History only. |

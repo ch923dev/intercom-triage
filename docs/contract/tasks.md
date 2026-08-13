@@ -1,6 +1,6 @@
 # Intercom Triage — Tasks
 
-**Status:** ready · **Version:** 2.0 · **Implements:** `spec.md` v2.0, `plan.md` v2.0
+**Status:** ready · **Version:** 2.1 · **Implements:** `spec.md` v2.2, `plan.md` v2.1
 
 Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](../_archive/tasks/).
 
@@ -218,6 +218,19 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 
 - T172 ✓ — Manual resync button: process-wide `sync.SYNC_LOCK` serializing `run_sync_cycle` (poller waits; `POST /tickets/sync` fast-fails 409 when held); webapp `api.syncNow(lookbackHours?)` + `tickets.syncNow()` store action (409 benign → still refreshes; 503 detail surfaced inline, refresh skipped; re-entrancy guard; never throws); Topbar **Sync** button (bounded to the board lookback window, result label "N new · M unchanged" beside last-refresh) + EmptyBoard **Sync from Intercom** button (unbounded first fetch, replaces the curl instruction); closure pass bounded to the lookback window on bounded syncs (live-verified: unbounded closure pass re-fetched all 417 older open tickets per button press). FR-074 (FR-001 trigger surfaced in UI), US-001, plan §6.
 
+### Phase 22 — Early bug detection → Slack alerts
+
+Two slices. Slice 1 (T173–T175) detects and records without any Slack credential and is
+independently shippable: it is what makes the confidence floor calibratable against real
+traffic before anything is allowed to post.
+
+- T173 ✓ — Bug verdict as a fifth categorization facet: `bug_severity` / `bug_confidence` / `bug_evidence` on all three `SYSTEM_PROMPT` response options + a BUG rules block (biased to null); `_parse_bug_verdict` never raises and drops all three fields together on an out-of-vocabulary severity, so a malformed facet costs the ticket its bug flag and never its category; fields threaded through `ParsedAssignment` → `CategorizationResult` at every build site, defaulting to `None` so a fallback carries no verdict (invariant #7 by construction); `OpenRouterClient.complete` gains a `max_tokens` **parameter** (default 400) with only `pipeline._complete` passing 550, so playbook drafting is neither lengthened nor re-priced; corrected the two stale comments claiming categorization sends strict `json_schema` (reverted in T151). No extra AI call; cache key untouched (invariant #6). FR-075, US-044, plan §20.
+- T174 ✓ — Migration 0027: three nullable bug-verdict columns on `ai_cache` (so a cache HIT still yields a verdict — the class of bug 0026 fixed for `subject`) wired at all three `services/cache.py` sites, including the update branch clearing a verdict that went away; new `bug_alerts` table with `ticket_id` as PK (the dedup guarantee), severity/posted-severity/evidence-length/occurrences CHECKs, and the `ix_bug_alerts_outbox` index. Verified on a real DB that the SQLite batch recreate preserved every pre-existing `ai_cache` CHECK, pinned by a test. FR-076, US-044, plan §20, migration 0027.
+- T175 ✓ — `services/bug_alerts.py:record_bug_alerts`: post-commit best-effort pass at BOTH `ingest_tickets` call sites, own transaction, broad `except` → rollback + warn (mirrors `_embed_ingested_tickets`) so a bug-alert failure can never break an ingest; insert-or-bump as a single `ON CONFLICT (ticket_id) DO UPDATE` upsert — never select-then-insert, which would reintroduce the race the PK prevents; only a worse verdict overwrites, and `posted_*` / `dismissed_at` are never revised by the model; every severity recorded including `low` (the floor is applied at delivery); counts via `metrics`, never `SyncResponse` (whose exact key set is asserted). FR-076/FR-078, US-044, plan §20.
+- T176 ✓ — `clients/slack.py` post-only client: bot token + `chat.postMessage` (never an incoming webhook — a webhook returns no `ts`, making threaded escalation impossible); success decided by the BODY not the status, because Slack reports `channel_not_found` / `invalid_auth` as HTTP 200 `{"ok": false}` and a status check would mark the alert delivered and lose it; auth + bad-channel errors are permanent and skip retry, `ratelimited`/429/5xx retry with jittered backoff honoring `Retry-After`; `SLACK_BOT_TOKEN` is a `SecretStr` and is deliberately absent from `missing_secrets`; `slack_configured` on `/health`; `xoxb-` gitleaks rule; evidence never reaches a log record (caplog-asserted). FR-077, NFR-015/NFR-016, US-044, plan §20.
+- T177 ✓ — Delivery: `deliver_pending_bug_alerts` selects the outbox (`posted_at IS NULL`) plus escalation rows (`severity > posted_severity`) above the floor, worst-first, bounded by `bug_alert_max_per_cycle`; post → store `ts` → mark delivered (a crash mid-way risks one duplicate post; the reverse risks losing an alert permanently); per-row `try` so one bad channel cannot stall the rest, while a revoked token stops the pass; Block Kit card with the verbatim quote, category, confidence, occurrence count and an Intercom deep link, escalation posting a short threaded reply rather than a second card; fifth background loop in `main.py`, interval-gated, default 0 = off, never invoked from `run_sync_cycle` (a hanging Slack call inside `SYNC_LOCK` would stall the whole sync). FR-077/FR-078, US-044, plan §20.
+- T178 ✓ — `GET /bug-alerts?severity=&delivered=` + `POST /bug-alerts/{ticket_id}/dismiss` (idempotent; 404 unknown), thin router → service, registered under `protected` with `"/bug-alerts"` added to the `test_auth_required` parametrize list (the enforcement mechanism for invariant #15); `BugAlertRead` on `schemas.py`, NOT on `HydratedTicket` (invariant #2 untouched, no webapp change in v1); the list deliberately includes `low` and dismissed rows because it is the calibration surface for the admittedly-guessed `bug_alert_min_confidence`. FR-079, US-044, plan §20.
+
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
@@ -351,3 +364,11 @@ Every requirement maps to at least one task.
 | NFR-012 | T168 |
 | NFR-013 | T169 |
 | NFR-014 | T169 |
+| US-044 | T173, T174, T175, T176, T177, T178 |
+| FR-075 | T173 |
+| FR-076 | T174, T175 |
+| FR-077 | T176, T177 |
+| FR-078 | T175, T177 |
+| FR-079 | T178 |
+| NFR-015 | T176 |
+| NFR-016 | T176 |

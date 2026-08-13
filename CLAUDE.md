@@ -107,6 +107,18 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     token (`sessions.onlysales_refresh_encrypted`). No password field exists on
     any model. Never log `request.body()` on the login endpoint or any auth
     path.
+20. **`bug_alerts.ticket_id` is the PK, and that IS the Slack dedup
+    guarantee.** Slack exposes no idempotency key, so "have I already posted
+    this?" is answered by the row existing — not by an application-level check,
+    which races between two concurrent ingests. Re-keying the table (surrogate
+    id, `(ticket_id, severity)`) silently reposts. Insert-or-bump is one
+    `ON CONFLICT DO UPDATE`, never SELECT-then-INSERT. `posted_at IS NULL` is
+    the outbox; `posted_severity` (delivery truth) stays separate from
+    `severity` (model truth) so escalation is comparable. The bug verdict is a
+    fifth facet on the EXISTING categorization call — no second AI call, cache
+    key untouched (#6), and a fallback carries no verdict (#7). Delivery runs in
+    its own background loop and is **never** called inside `SYNC_LOCK`. Evidence
+    quotes are customer text: never logged (NFR-016).
 
 ## Subagent doctrine
 

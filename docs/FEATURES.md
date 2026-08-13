@@ -6,7 +6,7 @@
 > without re-deriving it from code.
 >
 > Orientation + architecture: [`PROJECT.md`](./PROJECT.md). Requirements/IDs:
-> `contract/spec.md` (US-*/FR-*/NFR-*). Per-change rules + the 19 invariants: root
+> `contract/spec.md` (US-*/FR-*/NFR-*). Per-change rules + the 20 invariants: root
 > [`CLAUDE.md`](../CLAUDE.md). When this catalog and code disagree, code wins —
 > fix this file.
 
@@ -108,7 +108,7 @@ All enforce inv #4 (never feed/embed `internal_notes`) and inv #6 (embeddings li
 - **Token / cost meter** — per-model token usage + estimated USD spend (today + per lookback window). (backend/webapp · `GET /metrics` usage buckets, `pricing.py`, `DrawerCostSection.vue` · roadmap 1.4/T102/T148)
 - **Metrics + latency histograms** — in-process counters + p95 latency over the ingest/categorize path. (backend · `metrics.py`, `GET /metrics` · T043/T160/R.4)
 - **Clusters list** — recurring-issue snapshot (label, top terms, size, members), largest first. (backend/webapp · `GET /clusters`)
-- **Health / degraded boot** — version, model, `openrouter_configured`, `missing_secrets`, review threshold; degraded (no key) still boots. (backend · `GET /health` · T005)
+- **Health / degraded boot** — version, model, `openrouter_configured`, `intercom_configured`, `slack_configured`, `missing_secrets`, review threshold; degraded (no key) still boots. (backend · `GET /health` · T005)
 
 ## I. Board & triage UX (webapp)
 
@@ -152,10 +152,21 @@ Shipped via PR #10 (charter pivot). Auth + multi-user are IN scope; multi-tenanc
 
 - **Naive-UTC-in-DB / Z-on-wire** — Pydantic `UTCDatetime`/`NaiveUTCDatetime` enforce the timestamp contract JS clients depend on. (backend · `schemas.py` · inv #5)
 - **Singleton settings** — one `Settings` row, `CHECK (id = 1)`, inserted on first boot. (backend · `models.py` · inv #12)
-- **Forward-only migrations** — Alembic chain `0001…0025` (auth tables 0021–0022, attribution/assignment 0023–0025). (backend · `alembic/versions/`)
+- **Forward-only migrations** — Alembic chain `0001…0027` (auth tables 0021–0022, attribution/assignment 0023–0025, ai_cache subject 0026, bug alerts 0027). (backend · `alembic/versions/`)
 - **Secret-scan guard** — pre-commit file-name + content scan (gitleaks or regex fallback); allowlists `docs/_archive/` + test/fixture paths. (ops · `.githooks/pre-commit`, `.gitleaks.toml`)
 - **One-command dev launcher** — `scripts/dev.ps1` boots backend + webapp in a Windows Terminal split-pane. (ops · `scripts/dev.ps1`)
 - **Invariant checker (manual)** — `scripts/check-invariants.ps1` greps for cross-package invariant violations; **no longer wired as a hook** (PreToolUse hook dropped in commit `43792e6`) — run it by hand. (ops)
+
+## M. Early bug detection → Slack alerts
+
+- **Bug verdict as a fifth categorization facet** — every categorized conversation is judged for a product defect (`bug_severity` `low`/`medium`/`high`/null + confidence + one verbatim <=200-char customer quote) on the SAME AI call: no extra cost, no change to the content-signature cache key (inv #6). A malformed verdict degrades to "not a bug" rather than failing the parse, and a fallback carries no verdict at all (inv #7). (ai · `ai/prompt.py` BUG rules, `ai/pipeline.py:_parse_bug_verdict` · US-044/FR-075)
+- **One alert per ticket, dedup by primary key** — `bug_alerts.ticket_id` is the PK, so a duplicate Slack post is impossible by construction rather than by an application-level "did I send this?" check that would race between two ingests. Slack has no idempotency key, so this row is the only place dedup can live. Re-detection raises severity and bumps an occurrence count; it never lowers severity and never touches delivery state or a dismissal. (backend · `models.py:BugAlert`, `services/bug_alerts.py:record_bug_alerts`, migration 0027 · US-044/FR-076)
+- **Post-commit record pass** — runs after ingest has committed, in its own transaction, broad-except → rollback + warn (mirrors the embedding pass), so a bug-alert failure can never break an ingest. Records every severity including `low`; the delivery floor is applied at delivery time so the full distribution stays readable for calibration. (backend · `services/tickets.py` both ingest call sites · US-044/FR-076)
+- **Severity-ranked Slack delivery, worst first** — Block Kit card carrying the verbatim quote, category, confidence, occurrence count, and an Intercom deep link; bounded per pass (Slack allows ~1 msg/sec/channel). Post → store `ts` → mark delivered: a crash mid-way risks one duplicate post, the reverse order risks losing an alert permanently. (backend · `services/bug_alerts.py:deliver_pending_bug_alerts` · US-044/FR-077)
+- **Escalation as a threaded reply** — a severity that later rises posts a short reply under the original message and updates `posted_severity`; an equal or lower severity posts nothing. This is why the transport is a bot token, not an incoming webhook: a webhook returns no message `ts`. (backend · `clients/slack.py`, `posted_severity` · US-044/FR-077)
+- **`posted_at IS NULL` is the outbox** — no queue table, no broker. A Slack outage leaves rows unposted rather than lost; they drain on a later pass, including after a restart. Delivery is its own interval-gated background loop (default 0 = off) and is never called inside `SYNC_LOCK`, so a hanging Slack request cannot stall a sync cycle. (backend · `main.py:_bug_alert_delivery_loop` · US-044/FR-078)
+- **Read + dismiss API** — `GET /bug-alerts?severity=&delivered=` (worst first, includes `low` and dismissed rows on purpose — it is the calibration surface) and `POST /bug-alerts/{ticket_id}/dismiss` (idempotent; survives re-detection). Alert-state only: `BugAlertRead` is its own schema, never fields on `HydratedTicket` (inv #2), and v1 ships no webapp surface. (backend · `routers/bug_alerts.py` · US-044/FR-079)
+- **Slack secret handling** — `SLACK_BOT_TOKEN` is a `SecretStr`, surfaced as `slack_configured` on `/health` but deliberately excluded from `missing_secrets`: an unconfigured Slack is a disabled optional feature, not a degraded service. Evidence quotes are never logged (NFR-016 extends NFR-006). (backend/ops · `config.py`, `.gitleaks.toml` `xoxb-` rule · US-044/NFR-015/NFR-016)
 
 ---
 
