@@ -5,6 +5,8 @@
 // the backend or behind a localhost reverse proxy.
 
 import type {
+  BugAlert,
+  BugSeverity,
   BulkResult,
   CategoriesResponse,
   Category,
@@ -451,6 +453,24 @@ export const api = {
   /** Recurring-issue clusters whose dominant effective category has no active
    *  playbook yet, ranked by cluster size (most-recurring first). */
   listClusterGaps: (): Promise<ClusterGap[]> => request('/clusters/gaps'),
+
+  // ── bug alerts (US-044 / US-045) ──────────────────────────────────────────
+  /** Recorded bug alerts, worst severity first. Server-ordered, and includes
+   *  `low` and dismissed rows on purpose — this is the calibration surface. */
+  listBugAlerts: (
+    opts: { severity?: BugSeverity; delivered?: boolean } = {},
+  ): Promise<BugAlert[]> => {
+    const qs = new URLSearchParams();
+    if (opts.severity !== undefined) qs.set('severity', opts.severity);
+    if (opts.delivered !== undefined) qs.set('delivered', String(opts.delivered));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/bug-alerts${suffix}`);
+  },
+
+  /** Mark an alert not-a-bug / handled. Idempotent, and sticky against
+   *  re-detection — the backend never clears `dismissed_at`. */
+  dismissBugAlert: (ticketId: string): Promise<BugAlert> =>
+    request(`/bug-alerts/${encodeURIComponent(ticketId)}/dismiss`, { method: 'POST' }),
 
   // ── metrics (roadmap 1.4 — token / cost meter) ────────────────────────────
   /** Process-lifetime counters + per-day OpenRouter spend. */

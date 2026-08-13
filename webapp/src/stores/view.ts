@@ -13,7 +13,8 @@ export type View =
   | 'followups'
   | 'playbooks'
   | 'snippets'
-  | 'stats';
+  | 'stats'
+  | 'bugs';
 
 export const useViewStore = defineStore('view', () => {
   const view = ref<View>('board');

@@ -17,6 +17,7 @@ import ProposalsPage from '@/components/ProposalsPage.vue';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
 import SnippetsPage from '@/components/SnippetsPage.vue';
 import StatsPage from '@/components/StatsPage.vue';
+import BugAlertsPage from '@/components/BugAlertsPage.vue';
 import TicketFlyout from '@/components/TicketFlyout.vue';
 import Topbar from '@/components/Topbar.vue';
 import { useKeyboardTriage } from '@/composables/useKeyboardTriage';
@@ -281,6 +282,7 @@ watch(
       <PlaybooksPage v-else-if="view.view === 'playbooks'" />
       <SnippetsPage v-else-if="view.view === 'snippets'" />
       <StatsPage v-else-if="view.view === 'stats'" />
+      <BugAlertsPage v-else-if="view.view === 'bugs'" />
       <ProposalsPage v-else />
     </template>
 

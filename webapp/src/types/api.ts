@@ -137,6 +137,35 @@ export interface ClusterGap {
   member_count: number;
 }
 
+export type BugSeverity = 'low' | 'medium' | 'high';
+
+// One AI-detected product-bug report (US-044/US-045). Mirrors the backend's
+// `BugAlertRead` field-for-field. Deliberately NOT part of `Ticket`: an alert is
+// board-state about a ticket, not conversation shape (cross-package invariant
+// #2), and it outlives the board — `title`/`url` are composed server-side and
+// are null once the ticket has aged out, which is why `ticket_id` is the identity.
+//
+// `severity` is the model's current verdict; `posted_severity` is what Slack was
+// actually told. They differ while an escalation is pending. `posted_at === null`
+// means the alert is still in the delivery outbox, not that it failed.
+export interface BugAlert {
+  ticket_id: string;
+  severity: BugSeverity;
+  confidence: number;
+  /** The customer's verbatim words. Read-only, and never logged (NFR-016). */
+  evidence: string | null;
+  occurrences: number;
+  first_detected_at: string;
+  last_detected_at: string;
+  posted_at: string | null;
+  posted_severity: BugSeverity | null;
+  slack_channel: string | null;
+  slack_ts: string | null;
+  dismissed_at: string | null;
+  title: string | null;
+  url: string | null;
+}
+
 // A semantically-ranked playbook suggestion for a ticket (roadmap 3.3). `score`
 // is the cosine similarity in [-1, 1] between the ticket's customer-visible text
 // and the playbook's (label + body); higher is closer. Ephemeral — computed on
