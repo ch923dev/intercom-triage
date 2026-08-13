@@ -20,6 +20,12 @@ wrong:
    message, not the blocks, not the attachments, not the evidence quote.
    `logged_call` receives identifiers only (NFR-006, extended to `bug_evidence`
    by NFR-016).
+
+Consequence of (1) that is easy to reintroduce: the verdict is read INSIDE the
+`logged_call` block. Read after it, a rejected message logs
+`external_call op=slack.post_message outcome=ok` — because the HTTP request did
+succeed — and an operator debugging "why did nothing post?" sees a log line
+saying Slack accepted it. Observed live during the broken-token test.
 """
 
 from __future__ import annotations
@@ -70,6 +76,19 @@ class SlackAuthError(SlackError):
     """The bot token is missing, invalid, or revoked."""
 
 
+class _Retry(Exception):
+    """Internal: this attempt failed but is worth repeating.
+
+    Raised from inside the `logged_call` block so a failed attempt is logged as
+    `outcome=error` rather than `outcome=ok`. Never escapes this module.
+    """
+
+    def __init__(self, reason: str, *, retry_after: float | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.retry_after = retry_after
+
+
 def _backoff_with_jitter(attempt: int) -> float:
     """Backoff seconds for a 0-based attempt: BASE * 2**attempt * jitter[0.8,1.2]."""
     base: float = _BASE_BACKOFF_SECONDS * (2**attempt)
@@ -85,6 +104,57 @@ def _parse_retry_after(header: str | None) -> float | None:
         return max(0.0, float(header.strip()))
     except ValueError:
         return None
+
+
+def _ts_or_raise(resp: httpx.Response, *, last_attempt: bool) -> str:
+    """The message `ts`, or an exception. There is no third outcome.
+
+    Called from inside `logged_call` so that every way of failing — including
+    Slack's HTTP-200-with-`ok:false` — is logged as `outcome=error`. `_Retry`
+    means "try again"; anything else is permanent.
+    """
+    if resp.status_code in _RETRY_STATUSES:
+        if last_attempt:
+            raise SlackError(f"POST /chat.postMessage → {resp.status_code}")
+        raise _Retry(
+            f"status={resp.status_code}",
+            retry_after=(
+                _parse_retry_after(resp.headers.get("Retry-After"))
+                if resp.status_code == 429
+                else None
+            ),
+        )
+
+    if resp.status_code != 200:
+        raise SlackError(f"POST /chat.postMessage → {resp.status_code}")
+
+    # HTTP 200 does NOT mean success. Slack reports application errors in the
+    # body, so the body is what decides.
+    data = resp.json()
+    if not isinstance(data, dict):
+        raise SlackError("unexpected response shape")
+
+    if data.get("ok") is True:
+        ts = data.get("ts")
+        if not isinstance(ts, str) or not ts:
+            # Without a ts we cannot thread an escalation later, and we cannot
+            # prove which message we posted.
+            raise SlackError("response was ok but carried no message ts")
+        return ts
+
+    slack_error = data.get("error")
+    code = slack_error if isinstance(slack_error, str) else "unknown_error"
+    if code in _AUTH_SLACK_ERRORS:
+        raise SlackAuthError(
+            f"chat.postMessage rejected: {code} (check SLACK_BOT_TOKEN)",
+            error=code,
+        )
+    if code in _RETRYABLE_SLACK_ERRORS and not last_attempt:
+        raise _Retry(
+            f"error={code}",
+            retry_after=_parse_retry_after(resp.headers.get("Retry-After")),
+        )
+    raise SlackError(f"chat.postMessage rejected: {code}", error=code)
 
 
 class SlackClient:
@@ -149,67 +219,24 @@ class SlackClient:
         for attempt in range(_MAX_ATTEMPTS):
             try:
                 # Identifiers only — never `text`, `blocks`, `attachments`, or
-                # the evidence quote.
+                # the evidence quote. The verdict is read inside the block so a
+                # rejection is timed and logged as the failure it is.
                 async with logged_call("slack.post_message", ticket_id=ticket_id):
                     resp = await self._http.post("/chat.postMessage", json=body)
+                    return _ts_or_raise(resp, last_attempt=attempt >= _MAX_ATTEMPTS - 1)
 
-                if resp.status_code in _RETRY_STATUSES:
-                    if attempt >= _MAX_ATTEMPTS - 1:
-                        raise SlackError(f"POST /chat.postMessage → {resp.status_code}")
-                    delay = _backoff_with_jitter(attempt)
-                    if resp.status_code == 429:
-                        retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
-                        if retry_after is not None:
-                            delay = max(delay, retry_after)
-                    logger.warning(
-                        "slack.post_message retrying attempt=%d/%d status=%d delay_s=%.2f",
-                        attempt + 1,
-                        _MAX_ATTEMPTS,
-                        resp.status_code,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-
-                if resp.status_code != 200:
-                    raise SlackError(f"POST /chat.postMessage → {resp.status_code}")
-
-                # HTTP 200 does NOT mean success. Slack reports application
-                # errors in the body, so the body is what decides.
-                data = resp.json()
-                if not isinstance(data, dict):
-                    raise SlackError("unexpected response shape")
-
-                if data.get("ok") is True:
-                    ts = data.get("ts")
-                    if not isinstance(ts, str) or not ts:
-                        # Without a ts we cannot thread an escalation later, and
-                        # we cannot prove which message we posted.
-                        raise SlackError("response was ok but carried no message ts")
-                    return ts
-
-                slack_error = data.get("error")
-                code = slack_error if isinstance(slack_error, str) else "unknown_error"
-                if code in _AUTH_SLACK_ERRORS:
-                    raise SlackAuthError(
-                        f"chat.postMessage rejected: {code} (check SLACK_BOT_TOKEN)",
-                        error=code,
-                    )
-                if code in _RETRYABLE_SLACK_ERRORS and attempt < _MAX_ATTEMPTS - 1:
-                    delay = _backoff_with_jitter(attempt)
-                    retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
-                    if retry_after is not None:
-                        delay = max(delay, retry_after)
-                    logger.warning(
-                        "slack.post_message retrying attempt=%d/%d error=%s delay_s=%.2f",
-                        attempt + 1,
-                        _MAX_ATTEMPTS,
-                        code,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                raise SlackError(f"chat.postMessage rejected: {code}", error=code)
+            except _Retry as retry:
+                delay = _backoff_with_jitter(attempt)
+                if retry.retry_after is not None:
+                    delay = max(delay, retry.retry_after)
+                logger.warning(
+                    "slack.post_message retrying attempt=%d/%d %s delay_s=%.2f",
+                    attempt + 1,
+                    _MAX_ATTEMPTS,
+                    retry.reason,
+                    delay,
+                )
+                await asyncio.sleep(delay)
 
             except _RETRYABLE_EXCEPTIONS as exc:
                 last_error = exc

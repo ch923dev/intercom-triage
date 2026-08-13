@@ -125,6 +125,44 @@ async def test_thread_ts_is_absent_when_not_given(httpx_mock: HTTPXMock) -> None
     assert "thread_ts" not in json.loads(httpx_mock.get_requests()[0].content)
 
 
+def _external_call_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records if "op=slack.post_message" in r.getMessage()]
+
+
+async def test_a_rejected_post_is_logged_as_an_error_not_ok(
+    httpx_mock: HTTPXMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Slack answers `invalid_auth` with HTTP 200, so the transport succeeded.
+    Read the verdict after the timed block and the log says `outcome=ok` for a
+    message that was never delivered — the exact line an operator greps when
+    alerts stop arriving. Observed live during the broken-token test."""
+    httpx_mock.add_response(url=_URL, method="POST", json={"ok": False, "error": "invalid_auth"})
+
+    with caplog.at_level(logging.INFO), pytest.raises(SlackAuthError):
+        await _post(SlackClient("xoxb-bad"))
+
+    lines = _external_call_lines(caplog)
+    assert lines, "expected an external_call line for the attempt"
+    assert all("outcome=error" in line for line in lines)
+
+
+async def test_a_retried_attempt_is_logged_as_an_error_then_ok(
+    httpx_mock: HTTPXMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A retryable rejection is still a failed attempt — one error line, then
+    one ok line for the attempt that actually delivered."""
+    httpx_mock.add_response(url=_URL, method="POST", json={"ok": False, "error": "ratelimited"})
+    httpx_mock.add_response(url=_URL, method="POST", json={"ok": True, "ts": "9.9"})
+
+    with caplog.at_level(logging.INFO):
+        assert await _post(SlackClient("xoxb-test")) == "9.9"
+
+    outcomes = [
+        "error" if "outcome=error" in line else "ok" for line in _external_call_lines(caplog)
+    ]
+    assert outcomes == ["error", "ok"]
+
+
 async def test_message_text_never_reaches_the_logs(
     httpx_mock: HTTPXMock, caplog: pytest.LogCaptureFixture
 ) -> None:
