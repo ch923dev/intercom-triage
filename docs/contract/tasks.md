@@ -1,6 +1,6 @@
 # Intercom Triage — Tasks
 
-**Status:** ready · **Version:** 2.2 · **Implements:** `spec.md` v2.3, `plan.md` v2.2
+**Status:** ready · **Version:** 2.3 · **Implements:** `spec.md` v2.4, `plan.md` v2.3
 
 Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](../_archive/tasks/).
 
@@ -239,6 +239,15 @@ suite structurally could not.
 - T179 ✓ — Evidence provenance enforced in code: a live card quoted our own support agent ("I noticed that your analytics aren't displaying properly") as though the customer had reported it — 1 in 14, and structural rather than a prompt bug, since `parts[]` legitimately carries admin replies (invariant #3) and the agent often states the defect more crisply than the customer. `pipeline.verify_bug_evidence` runs between `parse_response` and `resolve`: the quote must appear verbatim within ONE customer-authored part (per-part containment, so a quote stitched across two messages is rejected), comparison folding case / whitespace / quote-and-dash typography — not cosmetic, a genuine live quote differed only by `“…”` → `"…"` and would otherwise have been discarded. A failed check drops the quote and KEEPS the verdict (an evidence-less bug report is still a bug report) and increments `bug_evidence_rejected_total`, so drift is visible without logs that may not carry evidence text at all (NFR-016). Prompt tightened in parallel (quote only `[user:…]`/`[contact:…]`/`[lead:…]` lines, never `[admin:…]`/`[bot:…]`) but the code is the guarantee. Severity rubric widened at the same time: 13 of 14 live alerts compressed to `medium` because `high` read as "platform-wide outage" — it now says to judge from THIS customer's position and names money/credit consumption explicitly. Also pinned Slack OFF in the `test_config` fixture: `AppConfig` reads the developer's real `.env`, so a live bug channel configured for manual testing failed `/health`'s `slack_configured is False` on that machine only — and could have handed a test app a real channel to post into. FR-075a, US-044, plan §20.
 - T180 ✓ — Card enriched into a triage surface: wrapped in a Slack attachment purely for the severity-coloured left rail (unreachable via Block Kit, and the cue that reads as severity before any text); reporter name / email / Intercom user id / phone / location / company from `tickets.author`, ticket state + coarse age, owner via a `users` alias join, AI summary (clipped on a word boundary — a mid-word cut reads as a rendering bug), plus category, confidence, occurrences, `ai_priority`, `ai_sentiment`, `ai_labels`. Every field already denormalized on `tickets`, so this is one wider `SELECT` and no second AI call. `TicketContext` is a frozen value object rather than the ORM row because `bug_alerts` has no FK — an alert whose ticket was deleted must still announce, degrading to severity + evidence alone. Title is an inline mrkdwn link rather than an actions button (Slack badges link buttons from non-Marketplace apps with a warning glyph). Top-level `text` and the attachment `fallback` stay quote-free: both surface in push previews. FR-077a, US-044, plan §20.
 
+### Phase 23 — Bug-alert review surface
+
+Pure webapp over the endpoints Phase 22 already shipped. No backend task, because there is
+no backend change: `GET /bug-alerts` and `POST /bug-alerts/{ticket_id}/dismiss` (T178) are
+already authenticated and already return everything the surface needs.
+
+- T181 — Webapp data layer: `BugSeverity` + `BugAlert` in `types/api.ts` mirroring `BugAlertRead` field-for-field (hand-mirrored, as every type here is — no codegen step, invariant #2 untouched because an alert is board-state, not conversation shape); `listBugAlerts` / `dismissBugAlert` on `api/client.ts`; `stores/bugAlerts.ts` with `load()` and `dismiss()`. `dismiss` splices in the single row the endpoint returns rather than refetching the list — a refetch would flicker and would let a detection landing between the two calls clobber the view. `pendingCount` (recorded, not dismissed) for the nav badge. FR-081/FR-083, US-045, plan §21.
+- T182 — `components/BugAlertsPage.vue` + nav wiring: worst-first list with severity colour + label, title linked to the conversation, the evidence quote, confidence, occurrences, first/last detection, and delivery state (announced / waiting / dismissed); per-row Dismiss; severity + state filters applied client-side over the loaded list; Slack deep link built from `slack_channel` + `slack_ts` (`.` stripped), rendered only when both are present so a never-announced alert gets no broken link. `'bugs'` joins the `View` union, `App.vue` renders it, `Topbar.vue` gains the entry + pending badge. Loaded on first open, not in `loadAll()` — the board does not need it and bootstrap is already four round-trips. FR-080/FR-082/FR-083, US-045, plan §21.
+
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
@@ -382,3 +391,8 @@ Every requirement maps to at least one task.
 | FR-079 | T178 |
 | NFR-015 | T176 |
 | NFR-016 | T176, T180 |
+| US-045 | T181, T182 |
+| FR-080 | T182 |
+| FR-081 | T181, T182 |
+| FR-082 | T182 |
+| FR-083 | T181, T182 |
