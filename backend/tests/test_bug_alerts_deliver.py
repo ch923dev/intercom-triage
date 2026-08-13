@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -26,6 +27,7 @@ class FakeSlack:
         channel: str,
         text: str,
         blocks: list[dict[str, Any]] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
         thread_ts: str | None = None,
         ticket_id: str | None = None,
     ) -> str:
@@ -36,11 +38,21 @@ class FakeSlack:
                 "channel": channel,
                 "text": text,
                 "blocks": blocks,
+                "attachments": attachments,
                 "thread_ts": thread_ts,
                 "ticket_id": ticket_id,
             }
         )
         return f"ts-{len(self.posts)}"
+
+
+def rendered(post: dict[str, Any]) -> str:
+    """Flatten a recorded post's card into one searchable string.
+
+    The card lives inside a severity-coloured attachment, so a test asserting on
+    what an operator SEES should not have to know that nesting.
+    """
+    return json.dumps(post.get("attachments") or post.get("blocks") or [])
 
 
 def _config(**overrides: object) -> AppConfig:
@@ -181,7 +193,9 @@ async def test_escalation_replies_in_thread_without_a_new_top_level_post(
     assert sent == 1
     escalation = slack.posts[-1]
     assert escalation["thread_ts"] == original_ts
-    assert escalation["blocks"] is None  # a short reply, not the whole card again
+    # A short reply, not the whole card again.
+    assert escalation["blocks"] is None
+    assert escalation["attachments"] is None
     await session.refresh(alert)
     assert alert.posted_severity == "high"
     # Still one top-level message: the ts is unchanged.
@@ -277,11 +291,13 @@ async def test_the_message_carries_the_evidence_quote_and_a_link(session: AsyncS
     await deliver_pending_bug_alerts(session, slack, _config())  # type: ignore[arg-type]
 
     post = slack.posts[0]
-    rendered = str(post["blocks"])
-    assert "it never finishes loading" in rendered
-    assert "conversations/T1" in rendered
+    card = rendered(post)
+    assert "it never finishes loading" in card
+    assert "conversations/T1" in card
     # The notification line stays quote-free — it surfaces in push previews.
     assert "it never finishes loading" not in post["text"]
+    # …and so does the attachment fallback, for the same reason.
+    assert "it never finishes loading" not in post["attachments"][0]["fallback"]
 
 
 @pytest.mark.asyncio
@@ -304,3 +320,106 @@ async def test_an_alert_without_a_ticket_row_still_posts(session: AsyncSession) 
     slack = FakeSlack()
     assert await deliver_pending_bug_alerts(session, slack, _config()) == 1  # type: ignore[arg-type]
     assert "T-orphan" in slack.posts[0]["text"]
+
+
+# ── Card composition ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_card_carries_reporter_identity(session: AsyncSession) -> None:
+    """Who reported it, and how to reach them, without opening Intercom."""
+    now = naive_utcnow()
+    session.add(
+        Ticket(
+            id="T-rich",
+            title="Analytics not displaying",
+            url="https://app.intercom.com/a/apps/x/conversations/T-rich",
+            state="open",
+            created_at=now,
+            updated_at=now,
+            category_id=1,
+            summary="Customer reports analytics showing nothing.",
+            ai_sentiment="negative",
+            ai_priority="high",
+            ai_labels=["analytics", "workflows"],
+            author={
+                "id": "6431dc586c51b80f57c14b96",
+                "name": "Michael Fina",
+                "email": "michael@example.com",
+                "location": "Pompano Beach, Florida",
+                "type": "user",
+            },
+        )
+    )
+    session.add(
+        BugAlert(
+            ticket_id="T-rich",
+            severity="high",
+            confidence=0.88,
+            evidence="im not seeing any of those responding",
+            first_detected_at=now,
+            last_detected_at=now,
+        )
+    )
+    await session.commit()
+
+    slack = FakeSlack()
+    await deliver_pending_bug_alerts(session, slack, _config())  # type: ignore[arg-type]
+    card = rendered(slack.posts[0])
+
+    assert "Michael Fina" in card
+    assert "michael@example.com" in card
+    # The Intercom-facing user id — what the operator matches against the panel.
+    assert "6431dc586c51b80f57c14b96" in card
+    assert "Pompano Beach, Florida" in card
+    assert "Customer reports analytics showing nothing." in card
+    assert "negative" in card and "analytics" in card
+    assert "unassigned" in card
+
+
+@pytest.mark.asyncio
+async def test_the_card_is_colour_coded_by_severity(session: AsyncSession) -> None:
+    await _seed(session, "T-high", "high")
+    await _seed(session, "T-med", "medium")
+    slack = FakeSlack()
+    await deliver_pending_bug_alerts(session, slack, _config())  # type: ignore[arg-type]
+
+    colors = {p["attachments"][0]["color"] for p in slack.posts}
+    assert len(colors) == 2  # the rail distinguishes them at a glance
+
+
+@pytest.mark.asyncio
+async def test_the_card_links_inline_and_not_via_a_button(session: AsyncSession) -> None:
+    """Slack badges link buttons from non-Marketplace apps with a warning glyph;
+    the linked title carries the same affordance without it."""
+    await _seed(session, "T1", "high")
+    slack = FakeSlack()
+    await deliver_pending_bug_alerts(session, slack, _config())  # type: ignore[arg-type]
+
+    card = rendered(slack.posts[0])
+    assert "<https://app.intercom.com/a/apps/x/conversations/T1|Ticket T1>" in card
+    assert '"type": "actions"' not in card
+
+
+@pytest.mark.asyncio
+async def test_a_missing_ticket_row_degrades_the_card_rather_than_failing(
+    session: AsyncSession,
+) -> None:
+    now = naive_utcnow()
+    session.add(
+        BugAlert(
+            ticket_id="T-orphan-2",
+            severity="high",
+            confidence=0.9,
+            evidence="broken",
+            first_detected_at=now,
+            last_detected_at=now,
+        )
+    )
+    await session.commit()
+
+    slack = FakeSlack()
+    assert await deliver_pending_bug_alerts(session, slack, _config()) == 1  # type: ignore[arg-type]
+    card = rendered(slack.posts[0])
+    assert "T-orphan-2" in card
+    assert "Reported by" not in card  # no identity to show, so no empty field

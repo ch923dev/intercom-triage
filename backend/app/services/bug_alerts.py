@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, cast
 
 from fastapi import HTTPException
@@ -26,12 +28,13 @@ from sqlalchemy import ColumnElement, and_, case, or_, select
 from sqlalchemy.dialects.sqlite import Insert as OnConflictInsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.ai.pipeline import CategorizationResult
 from app.clients.slack import SlackAuthError, SlackClient
 from app.config import AppConfig
 from app.metrics import metrics
-from app.models import BugAlert, Category, Ticket
+from app.models import BugAlert, Category, Ticket, User
 from app.observability import log_event
 from app.schemas import BugAlertRead
 from app.util import naive_utcnow
@@ -142,6 +145,14 @@ async def record_bug_alerts(
 # ── Delivery ──────────────────────────────────────────────────────────────────
 
 _SEVERITY_EMOJI: dict[str, str] = {"high": "🔴", "medium": "🟠", "low": "🟡"}
+# Left-rail colour. Only reachable via an attachment `color` — Block Kit has no
+# equivalent — and it is the one cue that reads as severity before any text does.
+_SEVERITY_COLOR: dict[str, str] = {"high": "#E01E5A", "medium": "#ECB22E", "low": "#868F96"}
+
+# Slack renders `fields` two per row and hard-caps the list at 10.
+_MAX_FIELDS = 10
+# The card is a triage prompt, not the ticket. Anything longer belongs in Intercom.
+_SUMMARY_CHARS = 300
 
 
 def _at_or_above(floor: str) -> list[str]:
@@ -150,63 +161,160 @@ def _at_or_above(floor: str) -> list[str]:
     return [name for name, rank in SEVERITY_RANK.items() if rank >= threshold]
 
 
-def _fallback_text(alert: BugAlert, title: str | None) -> str:
+@dataclass(frozen=True)
+class TicketContext:
+    """Board-side detail composed onto the Slack card.
+
+    Everything here is already denormalized onto `tickets` (or one `users` join),
+    so enriching the card costs one wider SELECT and no extra AI call. It is
+    deliberately a value object rather than the ORM row: the delivery loop must
+    keep working for an alert whose ticket has since been deleted, and a missing
+    ticket then degrades to every field `None` instead of an attribute error.
+    """
+
+    title: str | None = None
+    url: str | None = None
+    category: str | None = None
+    state: str | None = None
+    summary: str | None = None
+    created_at: datetime | None = None
+    sentiment: str | None = None
+    priority: str | None = None
+    labels: list[str] = field(default_factory=list)
+    author: dict[str, Any] = field(default_factory=dict)
+    assignee: str | None = None
+
+
+def _humanize_age(created_at: datetime | None) -> str | None:
+    """ "2h ago" / "3d ago" — coarse on purpose; the exact stamp is in Intercom."""
+    if created_at is None:
+        return None
+    seconds = (naive_utcnow() - created_at).total_seconds()
+    if seconds < 90:
+        return "just now"
+    if seconds < 5400:
+        return f"{round(seconds / 60)}m ago"
+    if seconds < 172800:
+        return f"{round(seconds / 3600)}h ago"
+    return f"{round(seconds / 86400)}d ago"
+
+
+def _fallback_text(alert: BugAlert, ctx: TicketContext) -> str:
     """Notification line for clients that cannot render blocks.
 
     Carries no evidence quote: this string ends up in push notifications and
     channel previews, where a raw customer sentence is the least appropriate
     place for it to surface.
     """
-    return f"{alert.severity.upper()} bug — {title or alert.ticket_id}"
+    return f"{alert.severity.upper()} bug — {ctx.title or alert.ticket_id}"
 
 
-def _alert_blocks(
-    alert: BugAlert,
-    *,
-    title: str | None,
-    category: str | None,
-    url: str | None,
-) -> list[dict[str, Any]]:
-    """Block Kit body for a first-time alert."""
+def _clip(text: str, limit: int) -> str:
+    """Truncate on a word boundary with an ellipsis — a card cut mid-word reads
+    as a rendering bug rather than as a deliberate summary."""
+    if len(text) <= limit:
+        return text
+    head = text[: limit - 1]
+    cut = head.rsplit(" ", 1)[0] if " " in head else head
+    return f"{cut.rstrip(' ,;:.')}…"
+
+
+def _field(label: str, value: str | None) -> dict[str, str] | None:
+    """A Block Kit field, or None when there is nothing worth a slot."""
+    if not value:
+        return None
+    return {"type": "mrkdwn", "text": f"*{label}*\n{value}"}
+
+
+def _identity_fields(ctx: TicketContext) -> list[dict[str, str]]:
+    """Who reported it and how to reach them — the first thing anyone triaging asks."""
+    author = ctx.author or {}
+    name = author.get("name")
+    email = author.get("email")
+    user_id = author.get("id")
+    candidates = [
+        _field("Reported by", str(name) if name else None),
+        _field("Email", str(email) if email else None),
+        # Intercom's user-facing "User id" when the contact carries an
+        # external_id, else the contact record id — the normalizer already
+        # prefers the former so this matches what the Intercom panel shows.
+        _field("User id", f"`{user_id}`" if user_id else None),
+        _field("Phone", str(author["phone"]) if author.get("phone") else None),
+        _field("Location", str(author["location"]) if author.get("location") else None),
+        _field("Company", str(author["company"]) if author.get("company") else None),
+    ]
+    return [f for f in candidates if f is not None]
+
+
+def _alert_attachments(alert: BugAlert, ctx: TicketContext) -> list[dict[str, Any]]:
+    """The full alert card, wrapped in a severity-coloured attachment."""
     emoji = _SEVERITY_EMOJI.get(alert.severity, "⚪")
+    headline = ctx.title or alert.ticket_id
+    # Inline link rather than an actions button: Slack badges link buttons from
+    # non-Marketplace apps with a warning glyph, and the title is the natural
+    # click target anyway.
+    linked = f"<{ctx.url}|{headline}>" if ctx.url else headline
     blocks: list[dict[str, Any]] = [
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"{emoji} *{alert.severity.upper()} bug* — {title or alert.ticket_id}",
+                "text": f"{emoji} *{alert.severity.upper()} bug* — {linked}",
             },
         }
     ]
+
     if alert.evidence:
-        # A verbatim customer quote is the whole point: it lets an engineer
-        # judge the report without opening Intercom.
+        # A verbatim CUSTOMER quote is the whole point: it lets an engineer judge
+        # the report without opening Intercom. Provenance is enforced upstream
+        # (`pipeline.verify_bug_evidence`), so anything reaching here was said by
+        # the customer, not by our own agent.
+        blocks.append(
+            {"type": "section", "text": {"type": "mrkdwn", "text": f"> {alert.evidence}"}}
+        )
+
+    status = " · ".join(p for p in (ctx.state, _humanize_age(ctx.created_at)) if p)
+    fields = [
+        *_identity_fields(ctx),
+        _field("Status", status),
+        _field("Owner", ctx.assignee or "unassigned"),
+    ]
+    trimmed = [f for f in fields if f is not None][:_MAX_FIELDS]
+    if trimmed:
+        blocks.append({"type": "section", "fields": trimmed})
+
+    if ctx.summary:
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f"> {alert.evidence}"},
+                "text": {"type": "mrkdwn", "text": f"_{_clip(ctx.summary, _SUMMARY_CHARS)}_"},
             }
         )
+
     facts = [
-        f"*Category:* {category or 'uncategorized'}",
-        f"*Confidence:* {alert.confidence:.0%}",
-        f"*Seen:* {alert.occurrences}x",
+        f"*{ctx.category or 'uncategorized'}*",
+        f"{alert.confidence:.0%} confident",
+        f"seen {alert.occurrences}x",
     ]
+    if ctx.priority:
+        facts.append(f"priority {ctx.priority}")
+    if ctx.sentiment:
+        facts.append(f"sentiment {ctx.sentiment}")
+    if ctx.labels:
+        facts.append(" ".join(f"`{label}`" for label in ctx.labels[:5]))
+    facts.append(f"`{alert.ticket_id}`")
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": " · ".join(facts)}]})
-    if url:
-        blocks.append(
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Open in Intercom"},
-                        "url": url,
-                    }
-                ],
-            }
-        )
-    return blocks
+
+    return [
+        {
+            "color": _SEVERITY_COLOR.get(alert.severity, "#868F96"),
+            "blocks": blocks,
+            # Required when blocks live inside an attachment; Slack falls back to
+            # it for clients that cannot render them. No evidence quote, for the
+            # same reason as `_fallback_text`.
+            "fallback": _fallback_text(alert, ctx),
+        }
+    ]
 
 
 def _escalation_text(alert: BugAlert) -> str:
@@ -265,12 +373,39 @@ async def deliver_pending_bug_alerts(
         return 0
 
     ticket_ids = [row.ticket_id for row in rows]
+    assignee = aliased(User)
     context = {
-        tid: (title, url, category)
-        for tid, title, url, category in (
+        row.id: TicketContext(
+            title=row.title,
+            url=row.url,
+            category=row.category,
+            state=row.state,
+            summary=row.summary or None,
+            created_at=row.created_at,
+            sentiment=row.ai_sentiment,
+            priority=row.ai_priority,
+            labels=list(row.ai_labels or []),
+            author=dict(row.author or {}),
+            assignee=row.assignee,
+        )
+        for row in (
             await session.execute(
-                select(Ticket.id, Ticket.title, Ticket.url, Category.name)
+                select(
+                    Ticket.id,
+                    Ticket.title,
+                    Ticket.url,
+                    Ticket.state,
+                    Ticket.summary,
+                    Ticket.created_at,
+                    Ticket.ai_sentiment,
+                    Ticket.ai_priority,
+                    Ticket.ai_labels,
+                    Ticket.author,
+                    Category.name.label("category"),
+                    assignee.name.label("assignee"),
+                )
                 .outerjoin(Category, Ticket.category_id == Category.id)
+                .outerjoin(assignee, Ticket.assigned_to == assignee.id)
                 # A ticket row is normally present (the alert came from an
                 # ingest), but the alert table has no FK on purpose, so treat
                 # absence as "no context" rather than as an error.
@@ -281,7 +416,7 @@ async def deliver_pending_bug_alerts(
 
     sent = 0
     for alert in rows:
-        title, url, category = context.get(alert.ticket_id, (None, None, None))
+        ctx = context.get(alert.ticket_id, TicketContext())
         is_escalation = alert.posted_at is not None
         try:
             if is_escalation:
@@ -294,8 +429,8 @@ async def deliver_pending_bug_alerts(
             else:
                 ts = await client.post_message(
                     channel=config.slack_bug_channel,
-                    text=_fallback_text(alert, title),
-                    blocks=_alert_blocks(alert, title=title, category=category, url=url),
+                    text=_fallback_text(alert, ctx),
+                    attachments=_alert_attachments(alert, ctx),
                     ticket_id=alert.ticket_id,
                 )
         except SlackAuthError:

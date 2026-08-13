@@ -17,8 +17,9 @@ wrong:
    status-code check would read that as success and mark the alert delivered,
    losing it forever. The BODY is the source of truth.
 2. **Nothing that could contain conversation text is ever logged** — not the
-   message, not the blocks, not the evidence quote. `logged_call` receives
-   identifiers only (NFR-006, extended to `bug_evidence` by NFR-016).
+   message, not the blocks, not the attachments, not the evidence quote.
+   `logged_call` receives identifiers only (NFR-006, extended to `bug_evidence`
+   by NFR-016).
 """
 
 from __future__ import annotations
@@ -114,6 +115,7 @@ class SlackClient:
         channel: str,
         text: str,
         blocks: list[dict[str, Any]] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
         thread_ts: str | None = None,
         ticket_id: str | None = None,
     ) -> str:
@@ -124,6 +126,11 @@ class SlackClient:
         existing message — that is how an escalation avoids becoming a second
         top-level alert.
 
+        `attachments` exists for one reason: the coloured left rail that encodes
+        severity at a glance is only reachable through an attachment's `color`,
+        which Block Kit has no equivalent for. Blocks nested inside the
+        attachment render identically otherwise.
+
         Raises `SlackAuthError` on a token problem and `SlackError` on anything
         else. Both leave the caller's row in the outbox, which is the intended
         failure mode: an alert that posts twice is recoverable, one that is
@@ -132,6 +139,8 @@ class SlackClient:
         body: dict[str, Any] = {"channel": channel, "text": text}
         if blocks is not None:
             body["blocks"] = blocks
+        if attachments is not None:
+            body["attachments"] = attachments
         if thread_ts is not None:
             body["thread_ts"] = thread_ts
 
@@ -139,7 +148,8 @@ class SlackClient:
 
         for attempt in range(_MAX_ATTEMPTS):
             try:
-                # Identifiers only — never `text`, `blocks`, or the evidence quote.
+                # Identifiers only — never `text`, `blocks`, `attachments`, or
+                # the evidence quote.
                 async with logged_call("slack.post_message", ticket_id=ticket_id):
                     resp = await self._http.post("/chat.postMessage", json=body)
 
