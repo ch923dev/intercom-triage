@@ -175,10 +175,13 @@ class AppConfig(BaseSettings):
     # readable — it just never posts. `low` is deliberately not the default: a
     # false positive costs channel trust, a false negative costs one late ticket.
     bug_alert_min_severity: Literal["low", "medium", "high"] = "medium"
-    # NOTE: an admitted guess, unlike `review_confidence_threshold` (which
-    # `tests/test_review_calibration.py` calibrates). No labelled bug corpus
-    # exists yet — read the observed distribution off `GET /bug-alerts` on real
-    # traffic and re-pick this before enabling delivery.
+    # Started as an admitted guess, unlike `review_confidence_threshold` (which
+    # `tests/test_review_calibration.py` calibrates). Re-picked 2026-08-13
+    # against 16 alerts from real traffic: the observed range was 0.65–0.95
+    # (median 0.80), so this floor has rejected nothing. Raising it to 0.7 would
+    # drop one already-filtered `low` and one REAL `medium` bug — so it stays at
+    # 0.6 on purpose. Severity is the filter that works; this is a backstop for
+    # a future model that starts emitting low-confidence verdicts.
     bug_alert_min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
     # Delivery loop cadence. 0 = OFF, so an out-of-the-box boot posts nothing.
     bug_alert_poll_interval_seconds: int = Field(default=0, ge=0)

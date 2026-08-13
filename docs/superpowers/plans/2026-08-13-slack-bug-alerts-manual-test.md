@@ -204,12 +204,38 @@ Compare categories and summaries on the same tickets before and after. If
 categorization visibly degraded, the fifth facet is too much for one call and
 detection needs its own (paid) call — stop and say so rather than shipping it.
 
+**Checked 2026-08-13 — no sign of degradation.** Board-wide split stayed spread
+across the taxonomy (`99 Question · 64 Billing · 47 Bug · 10 Urgent · 9 Other ·
+4 Complaint · 2 Feature Request`), not collapsed into one bucket. Of the 16
+flagged tickets, 14 categorized as `Bug`, 1 as `Urgent`, and 1 as `Billing` — an
+account-refund request, correctly *not* a bug, and `low` so it never posted. The
+bug facet and the category facet agree with each other.
+
+> Caveat on method: a strict same-ticket before/after is **not** recoverable —
+> forcing re-categorization means deleting the `ai_cache` row, which overwrites
+> the previous values. This is an argument from coherence, not a diff. Take a
+> snapshot of `(id, category, summary)` BEFORE the next prompt change if you
+> want a real one.
+
 ### 2d. Re-pick the confidence floor
 
 `BUG_ALERT_MIN_CONFIDENCE=0.6` is an **admitted guess** — unlike the
 needs-review threshold, which is calibrated against a labelled corpus. Look at
 the confidences you actually got and set it where it separates the real reports
 from the noise. Only then continue.
+
+**Re-picked 2026-08-13 from 16 observed alerts: keep `0.6`.** The distribution
+was `0.95 ×2 · 0.92 · 0.90 · 0.88 ×2 · 0.80 ×3 · 0.75 ×5 · 0.65 ×2` — range
+0.65–0.95, median 0.80. Nothing has ever scored below the floor, so it has
+rejected nothing. Raising it to 0.7 would drop exactly two rows: a `low`
+"account deactivation and credit refund" (already blocked by the `medium`
+severity floor) and *"Workflow stopped sending messages"* — a **real** bug at
+`medium`. That trades a true positive for a duplicate of a filter that already
+works.
+
+The conclusion is not "tune it better", it is **severity is the filter and
+confidence is decoration**. Revisit only if a future model starts emitting
+verdicts below 0.65.
 
 ---
 
@@ -256,11 +282,13 @@ the checks that need controlled state.
 | 9 | Every stored `evidence` string probed against the full backend log in overlapping 6-word windows: **0 hits** |
 | 10 | Ingest latency unchanged while the token was broken — delivery failed in its own loop |
 
-> **Reading the log during check 7.** A rejected post still emits
-> `external_call op=slack.post_message outcome=ok`, because `logged_call` wraps
-> only the HTTP request and Slack reports `invalid_auth` as HTTP 200. The line
-> that tells the truth is the `bug_alert_delivery_auth_error` WARNING beside it.
-> Do not read `outcome=ok` as "Slack accepted it".
+> **Defect found by check 7, since fixed.** Each rejected post emitted
+> `external_call op=slack.post_message outcome=ok` — `logged_call` wrapped only
+> the HTTP request, and Slack reports `invalid_auth` as HTTP 200, so the timed
+> block saw a success. Three rejections, three `outcome=ok` lines, zero messages
+> delivered. The verdict is now read *inside* the block (`_ts_or_raise`), so a
+> rejected or retried attempt logs `outcome=error`. Re-running check 7 should
+> now show `outcome=error` beside each `bug_alert_delivery_auth_error`.
 
 ### Common Slack errors and what they mean
 
@@ -281,8 +309,8 @@ the checks that need controlled state.
 - [x] Evidence quotes are verbatim, not paraphrased (2b)
 - [x] Every evidence quote is attributed to the **customer**, never an agent (2b audit query)
 - [x] The severity split is not entirely `medium` (2b) — `3 high / 12 medium / 1 low`
-- [ ] Categorization quality did **not** degrade (2c) — **outstanding**, needs an operator eye on the board
-- [ ] `BUG_ALERT_MIN_CONFIDENCE` re-picked from observed data (2d) — **outstanding**; `0.6` has rejected nothing, observed range 0.65–0.95
+- [x] Categorization quality did **not** degrade (2c) — taxonomy still spread; argument from coherence, not a diff (see caveat)
+- [x] `BUG_ALERT_MIN_CONFIDENCE` re-picked from observed data (2d) — **keep `0.6`**; severity is the real filter
 - [x] All ten Part 3 checks pass, especially #2, #3 and #6 (no duplicate posts)
 - [x] No evidence text anywhere in the logs (#9)
 - [x] `alembic current` → `0027`, `alembic heads` → single head
