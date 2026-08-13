@@ -1,6 +1,6 @@
 # Intercom Triage — Tasks
 
-**Status:** ready · **Version:** 2.1 · **Implements:** `spec.md` v2.2, `plan.md` v2.1
+**Status:** ready · **Version:** 2.2 · **Implements:** `spec.md` v2.3, `plan.md` v2.2
 
 Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](../_archive/tasks/).
 
@@ -220,9 +220,10 @@ Index of tasks. Each task is a single PR; full bodies (acceptance criteria, depe
 
 ### Phase 22 — Early bug detection → Slack alerts
 
-Two slices. Slice 1 (T173–T175) detects and records without any Slack credential and is
+Three slices. Slice 1 (T173–T175) detects and records without any Slack credential and is
 independently shippable: it is what makes the confidence floor calibratable against real
-traffic before anything is allowed to post.
+traffic before anything is allowed to post. Slice 2 (T176–T178) delivers. Slice 3
+(T179–T180) is the correction pass from the first live run.
 
 - T173 ✓ — Bug verdict as a fifth categorization facet: `bug_severity` / `bug_confidence` / `bug_evidence` on all three `SYSTEM_PROMPT` response options + a BUG rules block (biased to null); `_parse_bug_verdict` never raises and drops all three fields together on an out-of-vocabulary severity, so a malformed facet costs the ticket its bug flag and never its category; fields threaded through `ParsedAssignment` → `CategorizationResult` at every build site, defaulting to `None` so a fallback carries no verdict (invariant #7 by construction); `OpenRouterClient.complete` gains a `max_tokens` **parameter** (default 400) with only `pipeline._complete` passing 550, so playbook drafting is neither lengthened nor re-priced; corrected the two stale comments claiming categorization sends strict `json_schema` (reverted in T151). No extra AI call; cache key untouched (invariant #6). FR-075, US-044, plan §20.
 - T174 ✓ — Migration 0027: three nullable bug-verdict columns on `ai_cache` (so a cache HIT still yields a verdict — the class of bug 0026 fixed for `subject`) wired at all three `services/cache.py` sites, including the update branch clearing a verdict that went away; new `bug_alerts` table with `ticket_id` as PK (the dedup guarantee), severity/posted-severity/evidence-length/occurrences CHECKs, and the `ix_bug_alerts_outbox` index. Verified on a real DB that the SQLite batch recreate preserved every pre-existing `ai_cache` CHECK, pinned by a test. FR-076, US-044, plan §20, migration 0027.
@@ -230,6 +231,13 @@ traffic before anything is allowed to post.
 - T176 ✓ — `clients/slack.py` post-only client: bot token + `chat.postMessage` (never an incoming webhook — a webhook returns no `ts`, making threaded escalation impossible); success decided by the BODY not the status, because Slack reports `channel_not_found` / `invalid_auth` as HTTP 200 `{"ok": false}` and a status check would mark the alert delivered and lose it; auth + bad-channel errors are permanent and skip retry, `ratelimited`/429/5xx retry with jittered backoff honoring `Retry-After`; `SLACK_BOT_TOKEN` is a `SecretStr` and is deliberately absent from `missing_secrets`; `slack_configured` on `/health`; `xoxb-` gitleaks rule; evidence never reaches a log record (caplog-asserted). FR-077, NFR-015/NFR-016, US-044, plan §20.
 - T177 ✓ — Delivery: `deliver_pending_bug_alerts` selects the outbox (`posted_at IS NULL`) plus escalation rows (`severity > posted_severity`) above the floor, worst-first, bounded by `bug_alert_max_per_cycle`; post → store `ts` → mark delivered (a crash mid-way risks one duplicate post; the reverse risks losing an alert permanently); per-row `try` so one bad channel cannot stall the rest, while a revoked token stops the pass; Block Kit card with the verbatim quote, category, confidence, occurrence count and an Intercom deep link, escalation posting a short threaded reply rather than a second card; fifth background loop in `main.py`, interval-gated, default 0 = off, never invoked from `run_sync_cycle` (a hanging Slack call inside `SYNC_LOCK` would stall the whole sync). FR-077/FR-078, US-044, plan §20.
 - T178 ✓ — `GET /bug-alerts?severity=&delivered=` + `POST /bug-alerts/{ticket_id}/dismiss` (idempotent; 404 unknown), thin router → service, registered under `protected` with `"/bug-alerts"` added to the `test_auth_required` parametrize list (the enforcement mechanism for invariant #15); `BugAlertRead` on `schemas.py`, NOT on `HydratedTicket` (invariant #2 untouched, no webapp change in v1); the list deliberately includes `low` and dismissed rows because it is the calibration surface for the admittedly-guessed `bug_alert_min_confidence`. FR-079, US-044, plan §20.
+
+Slice 3 (T179–T180) is the correction pass from the first live run against real Intercom
+traffic — 14 detections, 13 posted, 0 duplicates — which surfaced two things the mocked
+suite structurally could not.
+
+- T179 ✓ — Evidence provenance enforced in code: a live card quoted our own support agent ("I noticed that your analytics aren't displaying properly") as though the customer had reported it — 1 in 14, and structural rather than a prompt bug, since `parts[]` legitimately carries admin replies (invariant #3) and the agent often states the defect more crisply than the customer. `pipeline.verify_bug_evidence` runs between `parse_response` and `resolve`: the quote must appear verbatim within ONE customer-authored part (per-part containment, so a quote stitched across two messages is rejected), comparison folding case / whitespace / quote-and-dash typography — not cosmetic, a genuine live quote differed only by `“…”` → `"…"` and would otherwise have been discarded. A failed check drops the quote and KEEPS the verdict (an evidence-less bug report is still a bug report) and increments `bug_evidence_rejected_total`, so drift is visible without logs that may not carry evidence text at all (NFR-016). Prompt tightened in parallel (quote only `[user:…]`/`[contact:…]`/`[lead:…]` lines, never `[admin:…]`/`[bot:…]`) but the code is the guarantee. Severity rubric widened at the same time: 13 of 14 live alerts compressed to `medium` because `high` read as "platform-wide outage" — it now says to judge from THIS customer's position and names money/credit consumption explicitly. Also pinned Slack OFF in the `test_config` fixture: `AppConfig` reads the developer's real `.env`, so a live bug channel configured for manual testing failed `/health`'s `slack_configured is False` on that machine only — and could have handed a test app a real channel to post into. FR-075a, US-044, plan §20.
+- T180 ✓ — Card enriched into a triage surface: wrapped in a Slack attachment purely for the severity-coloured left rail (unreachable via Block Kit, and the cue that reads as severity before any text); reporter name / email / Intercom user id / phone / location / company from `tickets.author`, ticket state + coarse age, owner via a `users` alias join, AI summary (clipped on a word boundary — a mid-word cut reads as a rendering bug), plus category, confidence, occurrences, `ai_priority`, `ai_sentiment`, `ai_labels`. Every field already denormalized on `tickets`, so this is one wider `SELECT` and no second AI call. `TicketContext` is a frozen value object rather than the ORM row because `bug_alerts` has no FK — an alert whose ticket was deleted must still announce, degrading to severity + evidence alone. Title is an inline mrkdwn link rather than an actions button (Slack badges link buttons from non-Marketplace apps with a warning glyph). Top-level `text` and the attachment `fallback` stay quote-free: both surface in push previews. FR-077a, US-044, plan §20.
 
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
@@ -364,11 +372,13 @@ Every requirement maps to at least one task.
 | NFR-012 | T168 |
 | NFR-013 | T169 |
 | NFR-014 | T169 |
-| US-044 | T173, T174, T175, T176, T177, T178 |
+| US-044 | T173, T174, T175, T176, T177, T178, T179, T180 |
 | FR-075 | T173 |
+| FR-075a | T179 |
 | FR-076 | T174, T175 |
 | FR-077 | T176, T177 |
+| FR-077a | T180 |
 | FR-078 | T175, T177 |
 | FR-079 | T178 |
 | NFR-015 | T176 |
-| NFR-016 | T176 |
+| NFR-016 | T176, T180 |

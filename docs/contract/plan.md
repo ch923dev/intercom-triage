@@ -1,6 +1,6 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 2.1 · **Implements:** `spec.md` v2.2 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 2.2 · **Implements:** `spec.md` v2.3 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
 
@@ -870,6 +870,35 @@ The parser is deliberately tolerant: an out-of-vocabulary severity drops the who
 verdict (all three fields move as a unit) rather than raising, because a malformed bug
 facet must cost the ticket its bug flag, never its category.
 
+### Evidence provenance is verified in code, not requested in the prompt (FR-075a)
+
+The first live run produced a card quoting **our own support agent** — *"I noticed that
+your analytics aren't displaying properly"* — as though the customer had reported it.
+The customer's actual words were elsewhere in the thread. Rate: 1 in 14.
+
+The cause is structural, not a prompt bug: `parts[]` legitimately contains admin replies
+(invariant #3), the agent often states a defect more crisply than the customer does, and
+the model reaches for the clearest sentence. Prompt wording cannot hold this across a
+model swap, so `pipeline.verify_bug_evidence` checks it deterministically after
+`parse_response` and before `resolve`:
+
+- The quote must appear in **one** customer-authored part (`is_admin=False`).
+  Containment is tested per part — a quote stitched from two messages was never said in
+  one breath.
+- Comparison folds case, whitespace, and quote/dash typography. This is not cosmetic: a
+  genuine live quote differed only by `“…”` → `"…"`, and without folding the check would
+  have thrown it away.
+- A failed check drops the quote and **keeps** the verdict. An evidence-less bug report
+  is still a bug report; discarding the detection would be the worse trade.
+  `bug_evidence_rejected_total` counts them, so drift is visible without reading logs
+  (which may not carry evidence text at all — NFR-016).
+
+The prompt is tightened in parallel (quote only `[user:…]` / `[contact:…]` /
+`[lead:…]` transcript lines, never `[admin:…]` / `[bot:…]`), but the code is the
+guarantee. The severity rubric was widened at the same time: `high` was being read as
+"platform-wide outage", so 13 of 14 live alerts compressed to `medium`; it now says to
+judge from *this customer's* position and names money/credit consumption explicitly.
+
 `OpenRouterClient.complete` gains a `max_tokens` **parameter** (default 400) and
 `pipeline._complete` passes 550. A raised module constant would silently lengthen and
 re-price playbook drafting, which shares the same client method.
@@ -932,6 +961,32 @@ jittered backoff honoring `Retry-After`, matching the Intercom/OpenRouter client
 
 `logged_call("slack.post_message", ticket_id=…)` receives identifiers only. The evidence
 quote is customer conversation text and never enters a log record (NFR-016).
+
+### The card is a triage surface, not a notification (FR-077a)
+
+The card is wrapped in a Slack **attachment** for one reason: the severity-coloured left
+rail is only reachable through an attachment's `color`, and it is the cue that reads as
+severity before any text does. Blocks nested inside render identically otherwise.
+
+Every field on the card is already denormalized onto `tickets` (plus one `users` join for
+the owner), so enrichment costs one wider `SELECT` and **no** second AI call: reporter
+name / email / user id / phone / location / company from `tickets.author`, state and age,
+owner, the AI summary, category, confidence, occurrences, `ai_priority`, `ai_sentiment`,
+`ai_labels`. The user id is Intercom's user-facing `external_id` when the contact has
+one, because the normalizer already prefers it — so it matches the Intercom panel.
+
+`TicketContext` is a frozen value object, not the ORM row: `bug_alerts` has no FK, so a
+record whose ticket has since been deleted must still announce. Absent context degrades
+to every field `None`, and `_field` omits an empty value rather than rendering a blank
+label.
+
+The title is an **inline mrkdwn link** rather than an actions button: Slack badges link
+buttons from non-Marketplace apps with a warning glyph, and the title is the natural
+click target anyway.
+
+Two strings stay quote-free on purpose — the top-level `text` and the attachment
+`fallback`. Both surface in push notifications and channel previews, which is the least
+appropriate place for a raw customer sentence.
 
 ### Read + dismiss
 

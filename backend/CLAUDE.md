@@ -193,6 +193,8 @@ Tests bypass the OpenRouter network entirely (`pytest-httpx` mocks where AI call
 - Don't bypass Alembic by adding columns directly on the model — every schema change is a new revision.
 - Don't cache fallback `CategorizationResult` rows.
 - Don't call Slack from inside `run_sync_cycle` / `ingest_tickets`. A hanging Slack request under `SYNC_LOCK` stalls the whole sync cycle; delivery has its own loop.
+- Don't downgrade `pipeline.verify_bug_evidence` to a prompt instruction. `parts[]` carries admin replies, and the model quoted our own agent as the "customer" on the first live run. The code check is the guarantee; the prompt is the hint.
+- Don't let `test_config` (tests/conftest.py) inherit Slack from the developer's `.env`. It is pinned off on purpose — a live channel configured for manual testing otherwise fails `/health` assertions on that machine only, and could hand a test app a real channel to post into.
 - Don't use `datetime.utcnow()` (deprecated) or aware UTC datetimes for DB writes — use `naive_utcnow()`.
 - Don't feed `internal_notes` into the AI prompt.
 - Don't introduce a router that calls another router; share logic via `app/services/*`.

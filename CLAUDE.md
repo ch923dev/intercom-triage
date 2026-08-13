@@ -118,7 +118,16 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     fifth facet on the EXISTING categorization call — no second AI call, cache
     key untouched (#6), and a fallback carries no verdict (#7). Delivery runs in
     its own background loop and is **never** called inside `SYNC_LOCK`. Evidence
-    quotes are customer text: never logged (NFR-016).
+    quotes are customer text: never logged (NFR-016), and never shown in the
+    top-level Slack `text` / attachment `fallback` (both surface in push
+    previews).
+    **The evidence quote's provenance is enforced in code, not asked for in the
+    prompt.** `parts[]` legitimately carries admin replies (#3) and the model
+    will quote our own agent describing the defect — it did, live, 1 in 14.
+    `pipeline.verify_bug_evidence` requires the quote to appear verbatim inside
+    ONE customer-authored part (per-part containment; typography folded), drops
+    it otherwise, and **keeps the verdict** either way. Loosening this to a
+    prompt instruction reintroduces agent quotes on the next model swap.
 
 ## Subagent doctrine
 

@@ -156,6 +156,38 @@ read `/bug-alerts` again and judge by hand:
 - Is `evidence` a real verbatim quote, or a paraphrase the model invented?
 - Is the severity split sane, or is everything `medium`?
 
+**Results of the first live run (2026-08-13, 14 detections / 13 posted / 0
+duplicates).** Both remaining questions failed, and both were fixed (T179):
+
+- **1 of 14 quotes was our own support agent**, not the customer. Now enforced in
+  code (`verify_bug_evidence`), not just requested in the prompt. Audit a run
+  yourself with the query below.
+- **13 of 14 compressed to `medium`, 0 `high`** — the rubric read `high` as
+  "platform-wide outage", so per-customer breakage never tripped it. Rubric
+  widened; re-check the split on the next run.
+
+Audit evidence provenance on any run:
+
+```bash
+cd backend
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -c "
+import sqlite3, json, re
+def norm(s): return ' '.join((s or '').casefold().split())
+c = sqlite3.connect('data/triage.db')
+for tid, sev, ev in c.execute('select ticket_id, severity, evidence from bug_alerts'):
+    if not ev: continue
+    row = c.execute('select parts from tickets where id=?', (tid,)).fetchone()
+    parts = json.loads(row[0]) if row else []
+    e = norm(ev)
+    src = next((('ADMIN!!' if p.get('is_admin') else 'customer')
+                for p in parts if e in norm(p.get('body'))), 'NEITHER!')
+    print(src, sev.ljust(6), tid, '|', ev[:80])
+"
+```
+
+Every line should read `customer`. An `ADMIN!!` or `NEITHER!` after T179 means
+the guard regressed.
+
 > **Nothing changed, nothing detected.** Sync skips unchanged conversations
 > server-side, and conversations categorized before migration 0027 carry no
 > verdict (there is no backfill, by design). If `/bug-alerts` is empty, that is
@@ -195,7 +227,7 @@ Check each of these:
 
 | # | Do this | Expect |
 |---|---|---|
-| 1 | Wait one interval | A card lands: severity emoji + title, the customer quote blockquoted, category · confidence · seen-count, **Open in Intercom** button |
+| 1 | Wait one interval | A card lands with a severity-coloured left rail: emoji + severity + the title as a link to the conversation; the customer quote blockquoted; reporter name / email / user id / location; ticket state + age; owner; the AI summary; then category · confidence · seen-count · priority · sentiment · labels · ticket id |
 | 2 | Wait another interval | **No second post.** `posted_at` is now set; the outbox is empty |
 | 3 | Re-run the same sync / re-post the synthetic ticket | **Still no second post** — occurrences bumps, delivery does not |
 | 4 | Raise a severity by hand: `UPDATE bug_alerts SET severity='high' WHERE ticket_id='manual-bug-1';` | A short **threaded reply** under the original message ("⬆️ Escalated medium → high"), not a new card |
@@ -223,6 +255,8 @@ Check each of these:
 - [ ] `/health` reports `slack_configured: true`, `status: ok`, Slack absent from `missing_secrets`
 - [ ] Detection flags real bugs and leaves non-bugs alone (2b)
 - [ ] Evidence quotes are verbatim, not paraphrased (2b)
+- [ ] Every evidence quote is attributed to the **customer**, never an agent (2b audit query)
+- [ ] The severity split is not entirely `medium` (2b)
 - [ ] Categorization quality did **not** degrade (2c)
 - [ ] `BUG_ALERT_MIN_CONFIDENCE` re-picked from observed data (2d)
 - [ ] All ten Part 3 checks pass, especially #2, #3 and #6 (no duplicate posts)
