@@ -238,6 +238,30 @@ Check each of these:
 | 9 | Grep the backend log for a phrase from a customer quote | **Zero hits.** Evidence text must never reach a log line (NFR-016) |
 | 10 | Watch a sync while Slack is slow/broken | Sync latency is unaffected — delivery is a separate loop and is never called inside `SYNC_LOCK` |
 
+### Results of the live Part 3 run (2026-08-13)
+
+All ten checks executed against the real workspace. Synthetic tickets
+`manual-bug-1` / `manual-bug-2` were ingested through `POST /tickets/ingest` for
+the checks that need controlled state.
+
+| # | Result |
+|---|---|
+| 1 | Card posted for `manual-bug-1` (`high`, 0.95, verbatim customer quote, `ts 1786610549.685039`) |
+| 2–3 | Re-posting the identical payload bumped `occurrences` 1→2 and posted **nothing**; Slack post count held at 4 across 2.5 poll cycles |
+| 4 | Verified on real traffic: two tickets escalated `medium`→`high`, both landed as threaded replies with `slack_ts` unchanged |
+| 5 | `severity` lowered below `posted_severity` → nothing posted |
+| 6 | Dismissed, then re-armed under **both** delivery branches at once (`posted_at=NULL` *and* `severity` > `posted_severity`) → nothing posted. A genuine re-detection (new customer message → new content signature → real AI call) bumped `occurrences` to 3 and left `dismissed_at` intact |
+| 7 | `SLACK_BOT_TOKEN=xoxb-nope` → three cycles of `bug_alert_delivery_auth_error` (WARNING), `posted_at` stayed `NULL`, pass aborted after the first row |
+| 8 | Token restored + restart → the held alert drained on the next cycle (`posted_at 08:55:35Z`, new `ts`) — the outbox self-healed across a process restart |
+| 9 | Every stored `evidence` string probed against the full backend log in overlapping 6-word windows: **0 hits** |
+| 10 | Ingest latency unchanged while the token was broken — delivery failed in its own loop |
+
+> **Reading the log during check 7.** A rejected post still emits
+> `external_call op=slack.post_message outcome=ok`, because `logged_call` wraps
+> only the HTTP request and Slack reports `invalid_auth` as HTTP 200. The line
+> that tells the truth is the `bug_alert_delivery_auth_error` WARNING beside it.
+> Do not read `outcome=ok` as "Slack accepted it".
+
 ### Common Slack errors and what they mean
 
 | Error in the log | Cause | Fix |
@@ -252,15 +276,15 @@ Check each of these:
 
 ## Part 4 — Sign-off
 
-- [ ] `/health` reports `slack_configured: true`, `status: ok`, Slack absent from `missing_secrets`
-- [ ] Detection flags real bugs and leaves non-bugs alone (2b)
-- [ ] Evidence quotes are verbatim, not paraphrased (2b)
-- [ ] Every evidence quote is attributed to the **customer**, never an agent (2b audit query)
-- [ ] The severity split is not entirely `medium` (2b)
-- [ ] Categorization quality did **not** degrade (2c)
-- [ ] `BUG_ALERT_MIN_CONFIDENCE` re-picked from observed data (2d)
-- [ ] All ten Part 3 checks pass, especially #2, #3 and #6 (no duplicate posts)
-- [ ] No evidence text anywhere in the logs (#9)
-- [ ] `alembic current` → `0027`, `alembic heads` → single head
-- [ ] Backend gate green (`ruff` + `format` + `mypy` + `pytest`)
+- [x] `/health` reports `slack_configured: true`, `status: ok`, Slack absent from `missing_secrets`
+- [x] Detection flags real bugs and leaves non-bugs alone (2b)
+- [x] Evidence quotes are verbatim, not paraphrased (2b)
+- [x] Every evidence quote is attributed to the **customer**, never an agent (2b audit query)
+- [x] The severity split is not entirely `medium` (2b) — `3 high / 12 medium / 1 low`
+- [ ] Categorization quality did **not** degrade (2c) — **outstanding**, needs an operator eye on the board
+- [ ] `BUG_ALERT_MIN_CONFIDENCE` re-picked from observed data (2d) — **outstanding**; `0.6` has rejected nothing, observed range 0.65–0.95
+- [x] All ten Part 3 checks pass, especially #2, #3 and #6 (no duplicate posts)
+- [x] No evidence text anywhere in the logs (#9)
+- [x] `alembic current` → `0027`, `alembic heads` → single head
+- [x] Backend gate green (`ruff` + `format` + `mypy` + `pytest`) — 643 passed
 - [ ] Webapp gate green (unchanged in v1, run it to prove that)
