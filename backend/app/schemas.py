@@ -76,6 +76,8 @@ NonActionableKind = Literal["auto_reply", "thanks", "spam", "out_of_office", "ot
 # Roadmap 0.2 — triage facets emitted by the categorization call.
 AIPriority = Literal["low", "normal", "high", "urgent"]
 AISentiment = Literal["negative", "neutral", "positive"]
+# US-044 — early bug detection.
+BugSeverity = Literal["low", "medium", "high"]
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -99,6 +101,11 @@ class HealthResponse(BaseModel):
     # tells the operator when few-shot / RAG / clustering are quietly off.
     embeddings_available: bool
     clustering_available: bool
+    # US-044 — whether bug alerts can be DELIVERED (bot token + channel both
+    # set). Deliberately not part of `missing_secrets`: an unconfigured Slack is
+    # a disabled optional feature, not a degraded service, so it must not flip
+    # `status` to "degraded" for an operator who never wanted alerts.
+    slack_configured: bool
 
 
 # ── Category ──────────────────────────────────────────────────────────────────
@@ -181,6 +188,36 @@ class FollowupRead(BaseModel):
     fired: bool
     created_at: UTCDatetime
     updated_at: UTCDatetime
+
+
+# ── Bug alerts (US-044) ───────────────────────────────────────────────────────
+
+
+class BugAlertRead(BaseModel):
+    """One AI-detected product-bug report. Alert state, NOT conversation shape —
+    deliberately its own schema rather than fields on `HydratedTicket`
+    (cross-package invariant #2 stays untouched, and the webapp needs no change).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    ticket_id: str
+    severity: BugSeverity
+    confidence: float
+    # The customer's verbatim words. Read-only here; never logged (NFR-016).
+    evidence: str | None
+    occurrences: int
+    first_detected_at: UTCDatetime
+    last_detected_at: UTCDatetime
+    posted_at: UTCDatetime | None
+    posted_severity: BugSeverity | None
+    slack_channel: str | None
+    slack_ts: str | None
+    dismissed_at: UTCDatetime | None
+    # Composed at read time from the `tickets` row so the list is usable on its
+    # own; absent when the ticket has aged out (there is no FK by design).
+    title: str | None = None
+    url: str | None = None
 
 
 class FollowupSet(BaseModel):

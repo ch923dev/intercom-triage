@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.clients.intercom import IntercomClient
 from app.clients.onlysales import OnlySalesClient
 from app.clients.openrouter import OpenRouterClient
+from app.clients.slack import SlackClient
 from app.config import AppConfig, get_config
 from app.db import make_engine, make_session_factory
 from app.deps import get_current_user
@@ -28,6 +29,7 @@ from app.models import init_db
 from app.observability import configure_logging, log_event
 from app.routers import attachments as attachments_router
 from app.routers import auth as auth_router
+from app.routers import bug_alerts as bug_alerts_router
 from app.routers import categories as categories_router
 from app.routers import clusters as clusters_router
 from app.routers import followups as followups_router
@@ -175,6 +177,37 @@ async def _intercom_poll_loop(
         await asyncio.sleep(config.intercom_poll_interval_seconds)
 
 
+async def _bug_alert_delivery_loop(
+    session_factory: async_sessionmaker[AsyncSession],
+    config: AppConfig,
+    slack: SlackClient,
+) -> None:
+    """Background loop: drain the bug-alert outbox to Slack (US-044). Once at
+    startup, then every `config.bug_alert_poll_interval_seconds`.
+
+    Deliberately its own loop rather than a step inside the sync cycle: a
+    hanging Slack request must never stall ingest, and Slack's ~1
+    msg/sec/channel budget makes a burst slow by nature. Catches broad
+    `Exception` for the same reason as the other loops — a loop that dies on one
+    error is a silent outage."""
+    from app.services.bug_alerts import deliver_pending_bug_alerts
+
+    while True:
+        try:
+            async with session_factory() as session:
+                sent = await deliver_pending_bug_alerts(session, slack, config)
+            if sent:
+                log_event("bug_alert_delivery", op="background", sent=sent)
+        except Exception as exc:
+            log_event(
+                "bug_alert_delivery_error",
+                level=logging.WARNING,
+                op="background",
+                error=str(exc),
+            )
+        await asyncio.sleep(config.bug_alert_poll_interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Boot: logging → DB (create_all + seed) → external clients. Reverse on shutdown."""
@@ -213,12 +246,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     onlysales = OnlySalesClient(base=config.onlysales_auth_base)
 
+    # Slack — delivery only. Detection and recording run without it, so an
+    # unset token is a disabled feature, not a degraded boot (it is
+    # deliberately absent from `missing_secrets`).
+    slack: SlackClient | None = None
+    if config.slack_configured:
+        slack = SlackClient(config.slack_bot_token.get_secret_value())
+
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.config = config
     app.state.openrouter = openrouter
     app.state.intercom = intercom
     app.state.onlysales = onlysales
+    app.state.slack = slack
 
     if config.missing_secrets:
         log_event(
@@ -255,6 +296,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     app.state.intercom_poll_task = intercom_poll_task
 
+    # Bug-alert delivery — needs BOTH a configured Slack and a positive
+    # interval. Interval 0 (the default) records verdicts without ever posting,
+    # which is the intended state until the confidence floor is calibrated.
+    bug_alert_task: asyncio.Task[None] | None = None
+    if slack is not None and config.bug_alert_poll_interval_seconds > 0:
+        bug_alert_task = asyncio.create_task(
+            _bug_alert_delivery_loop(session_factory, config, slack),
+        )
+    app.state.bug_alert_task = bug_alert_task
+
     try:
         yield
     finally:
@@ -280,10 +331,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await intercom_poll_task
             except asyncio.CancelledError:
                 pass
+        if bug_alert_task is not None:
+            bug_alert_task.cancel()
+            try:
+                await bug_alert_task
+            except asyncio.CancelledError:
+                pass
         if openrouter is not None:
             await openrouter.aclose()
         if intercom is not None:
             await intercom.aclose()
+        if slack is not None:
+            await slack.aclose()
         await onlysales.aclose()
         await engine.dispose()
 
@@ -322,6 +381,7 @@ def create_app() -> FastAPI:
     app.include_router(snippets_router.router, dependencies=protected)
     app.include_router(attachments_router.router)
     app.include_router(clusters_router.router, dependencies=protected)
+    app.include_router(bug_alerts_router.router, dependencies=protected)
     app.include_router(metrics_router.router, dependencies=protected)
     app.include_router(stats_router.router, dependencies=protected)
 
