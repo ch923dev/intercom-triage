@@ -35,7 +35,7 @@ Guidance for Claude Code when working in `backend/`.
 - AI cache rows are **never** populated with a fallback result (`CategorizationResult.fallback = True`). Caching a fallback would pin the ticket to the fallback category until a new customer message arrives. Preserve this guard in `services/tickets.ingest_tickets`.
 - `tickets.title_user_edited` / `summary_user_edited` are sticky flags: the ingest path must not overwrite operator edits. Any change to `_upsert_ticket` keeps these.
 - Tests use in-memory SQLite via the same `init_db` path (see `tests/conftest.py`). The `_run_migrations_sync` helper exists specifically because `alembic.command.upgrade` opens a fresh connection — never replace it with the convenience command.
-- Background tasks (`_cache_sweep_loop`, `_attachment_sweep_loop`, `_clustering_loop`, `_intercom_poll_loop`) catch broad `Exception` on purpose — they must survive transient DB / disk / network errors (a bad Intercom token included) and keep ticking. Don't narrow this.
+- Background tasks (`_cache_sweep_loop`, `_attachment_sweep_loop`, `_clustering_loop`, `_intercom_poll_loop`, `_bug_alert_delivery_loop`) catch broad `Exception` on purpose — they must survive transient DB / disk / network errors (a bad Intercom token included) and keep ticking. Don't narrow this.
 
 ## 4. Goal-Driven Execution (in this repo)
 
@@ -114,9 +114,11 @@ app/
 ├── clients/openrouter.py  OpenRouter HTTP client (retries 429/5xx + jittered backoff)
 ├── clients/intercom.py    Intercom REST client (search/detail/contact; retries 429/5xx, rate-limit aware)
 ├── clients/onlysales.py   OnlySales auth client (proxies login → pyapi.onlysales.io)
+├── clients/slack.py       Slack Web API client, post-only (bot token; body-not-status error check)
 ├── routers/             health · auth (incl. users_router) · categories · proposals · tickets · settings ·
-│                        followups · notes · note_entries · attachments · clusters · metrics · stats · snippets · playbooks
-└── services/            auth · attachments · bulk · cache · categories · categorization_rule · clusters · followups ·
+│                        followups · notes · note_entries · attachments · clusters · metrics · stats · snippets ·
+│                        playbooks · bug_alerts
+└── services/            auth · attachments · bug_alerts · bulk · cache · categories · categorization_rule · clusters · followups ·
                          note_entries · notes · playbooks · proposals · resolution · settings · snippets · stats ·
                          sync · intercom_normalizer · tickets
 ```
@@ -131,6 +133,7 @@ app/
 - `rejected_proposal_signatures` — normalized signatures (whitespace-collapsed lowercase) of previously rejected names. Pipeline raises `ValueError` on a match → fallback.
 - `settings` — singleton (`CHECK id = 1`). Singleton enforced; `init_db` inserts row.
 - `followups` — PK = `ticket_id`; PUT upserts. No FK to tickets — id is Intercom-owned.
+- `bug_alerts` — PK = `ticket_id`, and that PK **is** the Slack dedup guarantee (inv #20). No FK — id is Intercom-owned. `posted_at IS NULL` is the outbox; `posted_severity` (delivery truth) is separate from `severity` (model truth). Insert-or-bump via one `ON CONFLICT DO UPDATE`; never SELECT-then-INSERT.
 - `note_entries` — append-only investigation log. New row with `timer_min` set upserts the `followups` row in the same transaction. Soft-delete via `deleted_at`.
 - `note_attachments` — polymorphic owner (`entry` | `ticket`), content-addressed by sha256 on disk. `ticket_id` always populated for index-only list lookups.
 - `users` — local mirror of an OnlySales identity (`onlysales_id` / `email` / `name` / `scope` / `is_active` / `last_login_at`). **No password column** (inv #19). FK target for `tickets.resolved_by` / `tickets.assigned_to` / `overrides.acted_by`.
@@ -189,6 +192,9 @@ Tests bypass the OpenRouter network entirely (`pytest-httpx` mocks where AI call
 - Don't add a SECOND Intercom client. `clients/intercom.py` is the one integration; route all Intercom calls through it.
 - Don't bypass Alembic by adding columns directly on the model — every schema change is a new revision.
 - Don't cache fallback `CategorizationResult` rows.
+- Don't call Slack from inside `run_sync_cycle` / `ingest_tickets`. A hanging Slack request under `SYNC_LOCK` stalls the whole sync cycle; delivery has its own loop.
+- Don't downgrade `pipeline.verify_bug_evidence` to a prompt instruction. `parts[]` carries admin replies, and the model quoted our own agent as the "customer" on the first live run. The code check is the guarantee; the prompt is the hint.
+- Don't let `test_config` (tests/conftest.py) inherit Slack from the developer's `.env`. It is pinned off on purpose — a live channel configured for manual testing otherwise fails `/health` assertions on that machine only, and could hand a test app a real channel to post into.
 - Don't use `datetime.utcnow()` (deprecated) or aware UTC datetimes for DB writes — use `naive_utcnow()`.
 - Don't feed `internal_notes` into the AI prompt.
 - Don't introduce a router that calls another router; share logic via `app/services/*`.

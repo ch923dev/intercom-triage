@@ -165,6 +165,14 @@ class AICacheEntry(Base):
     )
     # Roadmap 4.2 (T107) — structured kind for non-actionable cache entries.
     non_actionable_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # US-044 — bug verdict cached alongside the categorization so a cache HIT
+    # still yields a verdict to record. Without these, a re-sync of an unchanged
+    # conversation would silently drop the bug flag (the same class of bug that
+    # migration 0026 fixed for `subject`). Nullable: pre-0027 rows carry NULL and
+    # are never backfilled (design decision 3), and NULL also means "not a bug".
+    bug_severity: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bug_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bug_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         # XOR: exactly one of category_id, proposal_id is set.
@@ -210,6 +218,15 @@ class AICacheEntry(Base):
             "non_actionable_kind IS NULL OR non_actionable_kind "
             "IN ('auto_reply','thanks','spam','out_of_office','other')",
             name="ai_cache_non_actionable_kind_check",
+        ),
+        # US-044 — bug verdict enum + evidence cap, mirroring `bug_alerts`.
+        CheckConstraint(
+            "bug_severity IS NULL OR bug_severity IN ('low','medium','high')",
+            name="ai_cache_bug_severity_check",
+        ),
+        CheckConstraint(
+            "bug_evidence IS NULL OR length(bug_evidence) <= 200",
+            name="ai_cache_bug_evidence_len_check",
         ),
     )
 
@@ -382,6 +399,58 @@ class Followup(Base):
             name="followups_reason_len_check",
         ),
         Index("ix_followups_due_at", "due_at"),
+    )
+
+
+class BugAlert(Base):
+    """One AI-detected product-bug report per ticket (US-044).
+
+    `ticket_id` is the PK, and that IS the dedup guarantee — a duplicate Slack
+    post is impossible by construction rather than by an application-level
+    "have I sent this?" check, which would race between two sync cycles. Slack
+    offers no idempotency key of its own, so this row is the only place dedup
+    can live. No FK: the ticket id is owned by Intercom (cf. `followups`).
+
+    `posted_at IS NULL` IS the outbox — no queue table, no broker. It survives
+    restart and self-heals after a Slack outage. `posted_severity` is delivery
+    truth, deliberately separate from `severity` (model truth): escalation is
+    `severity > posted_severity`.
+    """
+
+    __tablename__ = "bug_alerts"
+
+    ticket_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    severity: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence: Mapped[str | None] = mapped_column(Text)
+    # How many ingest passes have seen this verdict. Sync skips unchanged
+    # conversations server-side, so a bump means real activity on the ticket —
+    # NOT a per-poll heartbeat, and NOT a count of distinct customers.
+    occurrences: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    first_detected_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_detected_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    posted_severity: Mapped[str | None] = mapped_column(Text)
+    slack_channel: Mapped[str | None] = mapped_column(Text)
+    slack_ts: Mapped[str | None] = mapped_column(Text)
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('low','medium','high')",
+            name="bug_alerts_severity_check",
+        ),
+        CheckConstraint(
+            "posted_severity IS NULL OR posted_severity IN ('low','medium','high')",
+            name="bug_alerts_posted_severity_check",
+        ),
+        CheckConstraint(
+            "evidence IS NULL OR length(evidence) <= 200",
+            name="bug_alerts_evidence_len_check",
+        ),
+        CheckConstraint("occurrences >= 1", name="bug_alerts_occurrences_check"),
+        # The delivery loop's only query: undelivered, undismissed rows.
+        Index("ix_bug_alerts_outbox", "posted_at", "dismissed_at"),
     )
 
 

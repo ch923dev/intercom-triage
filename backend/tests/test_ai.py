@@ -284,6 +284,28 @@ async def test_categorize_sends_response_format(session: AsyncSession) -> None:
     assert fake.last_response_format == CATEGORIZATION_RESPONSE_FORMAT
 
 
+@pytest.mark.asyncio
+async def test_categorize_raises_max_tokens_above_the_client_default(
+    session: AsyncSession,
+) -> None:
+    """US-044 — the fifth (bug) facet needs headroom the 400 default lacks.
+
+    Raised at THIS call site only: `complete()` is shared with playbook drafting,
+    which must keep the cheaper default.
+    """
+    fb = await _fallback_id(session)
+    fake = FakeOpenRouter({"X1": existing_assignment(1)})
+    await categorize_many(
+        [make_hydrated("X1")],
+        session=session,
+        client=fake,  # type: ignore[arg-type]
+        model="m",
+        concurrency=2,
+        fallback_category_id=fb,
+    )
+    assert fake.last_max_tokens == 550
+
+
 # ── 0.2 — priority / sentiment / multi-label triage facets ─────────────────────
 
 

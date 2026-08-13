@@ -29,6 +29,7 @@ from app.schemas import (
     TicketSchema,
     UserRef,
 )
+from app.services.bug_alerts import record_bug_alerts
 from app.services.cache import get_cached, set_cached
 from app.services.categories import get_fallback
 from app.services.categorization_rule import effective_category
@@ -357,6 +358,10 @@ async def ingest_tickets(
         await session.commit()
         metrics.incr("tickets_ingested_total", len(hydrated))
         await _embed_ingested_tickets(session, hydrated, config)
+        # No AI ran, so every result is a fallback and carries no bug verdict
+        # (invariant #7). Called anyway so the two ingest paths stay identical —
+        # the pass is a no-op on an empty verdict set.
+        await record_bug_alerts(session, fallback_results, config)
         return IngestResponse(received=len(hydrated), categorized=0)
 
     # Cache key is the last-part timestamp (see `_content_signature`) — AI only
@@ -440,6 +445,10 @@ async def ingest_tickets(
     await session.commit()
     metrics.incr("tickets_ingested_total", len(hydrated))
     await _embed_ingested_tickets(session, hydrated, config)
+    # US-044 — post-commit, best-effort. Covers cache HITS too: `results` holds
+    # the reconstructed cached verdict, so a bug that stops generating new
+    # customer messages still keeps its alert row alive.
+    await record_bug_alerts(session, results, config)
     return IngestResponse(received=len(hydrated), categorized=len(uncached))
 
 

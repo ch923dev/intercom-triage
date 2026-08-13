@@ -25,6 +25,14 @@ description = "Intercom Access Token"
 regex = '''(?i)intercom_access_token\s*[:=]\s*['"]?[A-Za-z0-9+/=_-]{20,}'''
 keywords = ["intercom_access_token"]
 
+# Slack bot token (xoxb-...). Fixed prefix, so match the token itself rather
+# than the variable name.
+[[rules]]
+id = "slack-bot-token"
+description = "Slack bot token"
+regex = '''xoxb-[0-9]{10,}-[0-9]{10,}-[A-Za-z0-9]{20,}'''
+keywords = ["xoxb-"]
+
 [allowlist]
 description = "Known-safe matches — placeholders, examples, test fixtures, audit notes"
 paths = [

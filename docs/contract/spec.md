@@ -1,8 +1,12 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 2.1 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 2.3 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v2.2 (from the first live run):** evidence provenance is now enforced, not merely requested — added FR-075a after a live alert quoted a *support agent* describing the defect as though the customer had reported it. Added FR-077a: the announcement carries reporter identity and ticket context, so a bug can be triaged from the channel. No change to detection timing, dedup, or the cache key.
+
+**Changes from v2.1:** early bug detection alerted to Slack. Added US-044 — when a conversation reports a product defect, the team is told in Slack once, ranked by severity and evidenced by the customer's own words. Added FR-075..FR-079 and NFR-015/016. Updated §2 (scope) and §7 (decisions). Detection rides the existing categorization call; no new AI call, no change to the board, and no webapp surface in v1.
 
 **Changes from v2.0:** manual resync surfaced in the UI. Added FR-074 — a webapp Sync control (Topbar, lookback-bounded; empty board, unbounded) drives the existing `POST /tickets/sync`, with process-wide cycle serialization (409 on concurrent manual trigger, treated as benign by the client). No other behavior changed.
 
@@ -32,7 +36,7 @@ Reduce the time spent triaging Intercom conversations. The native Intercom UI re
 
 ## 2. Scope
 
-In scope: a hosted backend and a webapp surface shared by a team. Intercom integration server-side via a workspace Access Token (the backend polls `api.intercom.io`). AI categorization and summarization against a curated taxonomy. AI proposal flow for new categories. Manual category override that persists. Dynamic category curation. **Authentication via delegated OnlySales identity** (the backend proxies login, mirrors the user, and issues its own session). **Multi-user shared board** — one Intercom workspace, one ticket pool, many operators. **Ticket assignment + My Queue**. **Attribution** — manual resolve and recategorize stamp the acting operator.
+In scope: a hosted backend and a webapp surface shared by a team. Intercom integration server-side via a workspace Access Token (the backend polls `api.intercom.io`). AI categorization and summarization against a curated taxonomy. AI proposal flow for new categories. Manual category override that persists. Dynamic category curation. **Authentication via delegated OnlySales identity** (the backend proxies login, mirrors the user, and issues its own session). **Multi-user shared board** — one Intercom workspace, one ticket pool, many operators. **Ticket assignment + My Queue**. **Attribution** — manual resolve and recategorize stamp the acting operator. **Outbound Slack alerts for early-detected product bugs** (one-way, post-only).
 
 Out of scope: **multi-tenancy** (no per-tenant data isolation; every authenticated user sees the same tickets; no `tenant_id`), per-user Intercom tokens, replying to tickets from the tool, long-term analytics, helpdesks other than Intercom, mobile-native surfaces, webhook-driven live updates (backlog). **Per-user follow-ups/notes** (deferred to Phase 4 — `note_entries.user_id` not yet active). **pgvector/semantic layer on Postgres** (deferred — hosted v1 runs embeddings/clustering off).
 
@@ -506,6 +510,21 @@ Acceptance:
 - The upstream OnlySales refresh token is stored Fernet-encrypted at rest, never in plaintext.
 - `GET /users` returns only `{id, name}` (see US-041) — no credential or identity fields are exposed.
 
+### US-044 — Early bug detection alerted to Slack
+As an operator, when a customer reports something broken, I want engineering told in Slack while it is still one ticket — ranked, evidenced, and exactly once — instead of finding out on the fourth report.
+
+Acceptance:
+- Every categorized conversation is judged for whether it reports a **product defect** — not a question, feature request, billing dispute, or user error — and, when it does, carries a severity of `high` / `medium` / `low`, a confidence, and one verbatim quote of the customer's own words showing the defect.
+- The judgement adds no second AI call and does not change when categorization re-runs; a conversation that is not a bug report carries no verdict, and a degraded (fallback) categorization never produces one.
+- Each detected bug is recorded once per ticket. Re-detection updates the existing record — raising severity, refreshing the evidence, bumping an occurrence count — and can never create a second record.
+- A recorded bug is announced in one configured Slack channel at most once. A repeat detection at the same or lower severity announces nothing.
+- When a recorded bug's severity later rises, the escalation is announced as a reply beneath the original message, not as a new one.
+- Severities below the configured floor are recorded and readable but never announced.
+- An operator can dismiss an alert; a dismissed alert is never announced again, even if re-detected.
+- Announcement never blocks or slows ticket ingestion. A Slack outage leaves alerts pending, not lost, and they are announced once Slack recovers — including across a restart.
+- With Slack unconfigured, detection and recording still run and remain readable; only announcement is disabled.
+- Alerts are readable through the API, filterable by severity and by whether they have been announced.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -584,6 +603,13 @@ Acceptance:
 | FR-072 | Manual resolve (single + bulk) and mark-non-actionable (single + bulk) stamp `tickets.resolved_by = current_user`. A category override stamps `overrides.acted_by = current_user`. AI-driven and system paths leave these fields null. Both fields are surfaced on `TicketSchema` as `UserRef {id, name}` via a user-join; they are never on `HydratedTicket` (invariant #2 unchanged). | US-042 |
 | FR-073 | The webapp `auth` Pinia store holds the in-memory access token and current user. On app load it attempts a silent `/auth/refresh` (cookie) to bootstrap the session; failure shows the login screen. The API client attaches `Authorization: Bearer` and sends credentials (for the cookie); on `401` it attempts one `/auth/refresh` then retries; a second failure clears state and shows login. | US-040 |
 | FR-074 | The webapp exposes a manual Sync control that triggers `POST /tickets/sync` and then reloads the board: the Topbar button bounds the fetch to the board's lookback window (`?lookback_hours`); the empty-board button runs the unbounded historical fetch. Sync cycles are serialized process-wide — a manual request arriving while a cycle is already running receives 409, which the client treats as benign (the running cycle's rows arrive on the follow-up board reload). A 503 (no Access Token) surfaces inline. | US-001 |
+| FR-075 | The categorization of a conversation additionally yields a bug verdict: a severity (`low`\|`medium`\|`high`\|none), a confidence, and one verbatim customer quote (<=200 chars) evidencing the defect. The verdict is produced by the same judgement pass as the category — no additional AI call — and does not affect when that pass re-runs. A degraded (fallback) categorization carries no verdict, and is never cached. Conversations judged before this capability existed carry no verdict and are not re-judged. | US-044 |
+| FR-075a | The evidence quote must be attributable to the **customer**. A quote that does not appear verbatim within a single customer-authored message — including one lifted from a support agent's reply, one stitched from two messages, or a paraphrase — is discarded. Discarding the quote never discards the verdict: an evidence-less bug report is still recorded and still announced. Comparison ignores case, whitespace, and quote/dash typography, so a genuinely verbatim quote is not lost to punctuation normalization. | US-044 |
+| FR-076 | A verdict at or above the configured confidence floor is recorded as at most **one** record per ticket, keyed by the ticket. A duplicate is impossible by construction rather than by an application-level "have I already recorded this?" check. Re-detection raises severity (never lowers it), refreshes the evidence on a raise, bumps an occurrence count, and leaves announcement state and any dismissal untouched. Recording happens after the conversation is stored, and a recording failure never fails ingestion. | US-044 |
+| FR-077 | Unannounced records at or above the configured severity floor are posted to one configured Slack channel, worst severity first, bounded per pass. The posted message's identity is stored before the record is marked announced. A later severity rise posts a threaded reply under the original message and updates the announced severity; an equal or lower severity posts nothing; a dismissed record posts nothing. | US-044 |
+| FR-077a | The announcement carries enough context to triage without opening the conversation: severity (as a colour and a label), the ticket title linked to the conversation, the evidence quote, the reporter's name / email / user id / location / company when known, ticket state and age, current owner, the AI summary, category, confidence, occurrence count, priority, sentiment, and labels. Every field is omitted rather than shown empty, and a record whose ticket no longer exists still announces with severity and evidence alone. The notification/preview line carries no evidence quote. | US-044 |
+| FR-078 | No Slack call occurs within a sync/ingest cycle. Announcement runs on its own interval-gated schedule (default off). A Slack outage leaves records unannounced rather than lost; they are announced on a later pass, including after a restart. With Slack unconfigured, detection and recording continue and only announcement is disabled. | US-044 |
+| FR-079 | `GET /bug-alerts` lists recorded bug alerts with severity, confidence, evidence, occurrence count, announcement state, and ticket context, filterable by `severity` and by announced/unannounced. `POST /bug-alerts/{ticket_id}/dismiss` dismisses one (idempotent; 404 when unknown). Both require authentication. | US-044 |
 
 ## 6. Non-functional requirements
 
@@ -603,6 +629,8 @@ Acceptance:
 | NFR-012 | The refresh token is stored as a sha256 hash only (`sessions.refresh_token_hash`); the raw token is never written to the database or logs. |
 | NFR-013 | `/auth/login` is rate-limited per source IP and per target email; rate-limiter buckets are evicted after their window to prevent unbounded memory growth. |
 | NFR-014 | Refresh token reuse-detection: replaying a rotated-away token revokes the entire session chain immediately. Two browser tabs or a double-fired refresh sharing one cookie may trigger this and force a re-login; this is an accepted tradeoff for small-team scope. |
+| NFR-015 | The Slack credential is a server-side secret; it never reaches the webapp bundle, logs, or error responses. A missing credential disables alert delivery only — it is reported by `/health`, is not fatal at startup, and does not mark the service degraded (an unconfigured Slack is a disabled optional feature, not a failure). |
+| NFR-016 | Customer evidence quotes are never logged. Alert-related log lines carry identifiers, severity, and outcome only — extending NFR-006 (conversation bodies are never logged) to the bug-evidence field. |
 
 ## 7. Decisions
 
@@ -615,6 +643,11 @@ All open questions are resolved.
 - **Storage backend:** SQLite (local/dev) or PostgreSQL (hosted). Swappable by changing `DATABASE_URL`; schema is portable. The embedded semantic layer (sqlite-vec) is disabled when running on Postgres in hosted v1; pgvector is a deferred fast-follow.
 - **Per-user follow-ups/notes:** deferred (Phase 4). `note_entries.user_id` does not yet exist as an active column. Settings stays a shared team-wide singleton.
 - **Refresh token reuse-detection:** replaying a rotated token revokes the chain. Two tabs sharing one cookie can trigger this; accepted for small-team scope (NFR-014).
+- **Bug-alert transport:** a Slack app posting as a bot, not an incoming webhook. A webhook returns no message identity, which makes a threaded escalation reply impossible — and threading is what keeps one bug to one conversation in the channel.
+- **Bug-alert dedup:** the record itself is the guarantee. One record per ticket, keyed by the ticket, so a duplicate announcement cannot be constructed. Slack offers no idempotency key, so an application-level "did I send this?" check would race between two concurrent ingests.
+- **Bug-alert grouping:** per ticket, not per underlying defect. Recognising that three tickets describe one bug is a clustering problem (roadmap 3.1) and is deliberately not attempted here.
+- **Bug-alert confidence floor:** an explicit guess, unlike the needs-review threshold, which is calibrated against a labelled corpus. No labelled bug corpus exists; the floor is re-picked from observed traffic before delivery is enabled.
+- **Bug-alert backfill:** none. Conversations judged before the capability existed are not re-judged — a re-scan would spend real money re-reading history to alert on bugs that are already old.
 - **Update mechanism:** poll-on-open for v1. Webhook deferred to backlog.
 - **Taxonomy mutability:** dynamic. AI may propose, operator curates. "Other" is permanent and non-archivable.
 - **Low-confidence handling:** confidence is displayed on every card; needs-review lane for below-threshold tickets.

@@ -45,4 +45,5 @@ async def health(config: AppConfig = Depends(get_app_config)) -> HealthResponse:
         review_confidence_threshold=config.review_confidence_threshold,
         embeddings_available=embeddings_available,
         clustering_available=clustering_available,
+        slack_configured=config.slack_configured,
     )

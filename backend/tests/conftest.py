@@ -79,6 +79,15 @@ def test_config(tmp_path_factory: pytest.TempPathFactory) -> AppConfig:
         attachments_dir=attachments_root,
         session_jwt_secret="test-session-secret",
         session_cookie_secure=False,  # http://test base URL — no Secure flag
+        # Slack pinned OFF. `AppConfig` reads the developer's real `.env`, so an
+        # operator who configured a live bug channel for manual testing would
+        # otherwise flip `slack_configured` and fail the suite on their machine
+        # only — and, worse, hand a test app a real channel to post into. Tests
+        # that exercise delivery build their own `AppConfig` with these set.
+        slack_bot_token="",
+        slack_bug_channel="",
+        bug_alerts_enabled=False,
+        bug_alert_poll_interval_seconds=0,
     )
 
 

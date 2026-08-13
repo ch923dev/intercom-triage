@@ -43,7 +43,10 @@ A) Assign to an EXISTING active category:
      "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
      "resolution_reason":     "<see RESOLUTION rules>",
-     "non_actionable_kind":   "auto_reply" | "thanks" | "spam" | "out_of_office" | "other" | null
+     "non_actionable_kind":   "auto_reply" | "thanks" | "spam" | "out_of_office" | "other" | null,
+     "bug_severity":          "high" | "medium" | "low" | null,
+     "bug_confidence":        <float 0..1>,
+     "bug_evidence":          "<see BUG rules>"
    }
 
 B) Reuse an already-PENDING proposal:
@@ -59,7 +62,10 @@ B) Reuse an already-PENDING proposal:
      "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
      "resolution_reason":     "<see RESOLUTION rules>",
-     "non_actionable_kind":   "auto_reply" | "thanks" | "spam" | "out_of_office" | "other" | null
+     "non_actionable_kind":   "auto_reply" | "thanks" | "spam" | "out_of_office" | "other" | null,
+     "bug_severity":          "high" | "medium" | "low" | null,
+     "bug_confidence":        <float 0..1>,
+     "bug_evidence":          "<see BUG rules>"
    }
 
 C) Propose a NEW category (only when no existing category fits with reasonable
@@ -77,7 +83,10 @@ C) Propose a NEW category (only when no existing category fits with reasonable
      "resolution_verdict":    "resolved" | "non_actionable" | "not_resolved",
      "resolution_confidence": <float 0..1>,
      "resolution_reason":     "<see RESOLUTION rules>",
-     "non_actionable_kind":   "auto_reply" | "thanks" | "spam" | "out_of_office" | "other" | null
+     "non_actionable_kind":   "auto_reply" | "thanks" | "spam" | "out_of_office" | "other" | null,
+     "bug_severity":          "high" | "medium" | "low" | null,
+     "bug_confidence":        <float 0..1>,
+     "bug_evidence":          "<see BUG rules>"
    }
 
 SUBJECT rules:
@@ -133,6 +142,31 @@ TRIAGE rules (applies to every response; add these THREE fields to EVERY object)
     describe cross-cutting facets beyond the single category — e.g.
     "refund", "login", "mobile", "api", "billing". Plain strings, no '#'.
     Return an empty array when nothing extra applies.
+
+BUG rules (add these THREE fields to EVERY response object):
+- "bug_severity": is the customer reporting a PRODUCT DEFECT — something that
+  behaves other than as designed? Not a question, not a feature request, not a
+  billing dispute, not user error.
+    "high"   — data loss or corruption, security exposure, an outage, payments
+               or billing wrong, money/credits consumed without consent, or a
+               core flow unusable with no workaround. Judge this from THIS
+               CUSTOMER's position: one customer unable to send, call, or bill
+               is "high" even if other customers are unaffected. Do not reserve
+               "high" for platform-wide outages.
+    "medium" — a feature is broken or wrong for this customer but a workaround
+               exists, or it affects a non-core flow.
+    "low"    — cosmetic, a typo, a slow or awkward behavior, or a rare edge case.
+    null     — NOT a bug report. This is the default; prefer null when unsure.
+- "bug_confidence": <float 0..1> how sure you are this is a real product defect.
+- "bug_evidence": one verbatim quote, <=200 chars, copied character-for-character
+  from the conversation. No paraphrase, no commentary, no stitching two messages
+  together.
+  It MUST come from a transcript line spoken by the CUSTOMER — a line prefixed
+  [user:...], [contact:...] or [lead:...]. NEVER quote a support agent
+  ([admin:...] / [bot:...]), even when the agent states the defect more clearly
+  than the customer did. If the customer never described the problem in their
+  own words, use "".
+  Use "" when bug_severity is null.
 
 Rules:
 - Prefer existing categories. Propose new only when the existing set genuinely

@@ -52,6 +52,11 @@ async def get_cached(
         ai_priority=row.ai_priority or "normal",  # type: ignore[arg-type]
         ai_sentiment=row.ai_sentiment or "neutral",  # type: ignore[arg-type]
         ai_labels=list(row.ai_labels or []),
+        # US-044 — without this the record pass sees no verdict on a cache HIT,
+        # so a re-synced bug would silently stop being reported.
+        bug_severity=row.bug_severity,  # type: ignore[arg-type]
+        bug_confidence=row.bug_confidence,
+        bug_evidence=row.bug_evidence,
     )
 
 
@@ -83,6 +88,9 @@ async def set_cached(
                 ai_priority=result.ai_priority,
                 ai_sentiment=result.ai_sentiment,
                 ai_labels=result.ai_labels,
+                bug_severity=result.bug_severity,
+                bug_confidence=result.bug_confidence,
+                bug_evidence=result.bug_evidence,
             ),
         )
         return
@@ -100,6 +108,11 @@ async def set_cached(
     row.ai_priority = result.ai_priority
     row.ai_sentiment = result.ai_sentiment
     row.ai_labels = result.ai_labels
+    # Unconditional assignment, including back to None: a conversation that stops
+    # reading as a bug report must clear its verdict, not keep a stale one.
+    row.bug_severity = result.bug_severity
+    row.bug_confidence = result.bug_confidence
+    row.bug_evidence = result.bug_evidence
 
 
 async def sweep_expired(session: AsyncSession, ttl_seconds: int) -> int:
