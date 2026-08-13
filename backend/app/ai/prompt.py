@@ -148,15 +148,25 @@ BUG rules (add these THREE fields to EVERY response object):
   behaves other than as designed? Not a question, not a feature request, not a
   billing dispute, not user error.
     "high"   — data loss or corruption, security exposure, an outage, payments
-               broken, or a core flow unusable with no workaround.
+               or billing wrong, money/credits consumed without consent, or a
+               core flow unusable with no workaround. Judge this from THIS
+               CUSTOMER's position: one customer unable to send, call, or bill
+               is "high" even if other customers are unaffected. Do not reserve
+               "high" for platform-wide outages.
     "medium" — a feature is broken or wrong for this customer but a workaround
                exists, or it affects a non-core flow.
     "low"    — cosmetic, a typo, a slow or awkward behavior, or a rare edge case.
     null     — NOT a bug report. This is the default; prefer null when unsure.
 - "bug_confidence": <float 0..1> how sure you are this is a real product defect.
-- "bug_evidence": the customer's OWN WORDS that show the defect — one verbatim
-  quote, <=200 chars, copied exactly from the conversation, no paraphrase and no
-  commentary. Use "" when bug_severity is null.
+- "bug_evidence": one verbatim quote, <=200 chars, copied character-for-character
+  from the conversation. No paraphrase, no commentary, no stitching two messages
+  together.
+  It MUST come from a transcript line spoken by the CUSTOMER — a line prefixed
+  [user:...], [contact:...] or [lead:...]. NEVER quote a support agent
+  ([admin:...] / [bot:...]), even when the agent states the defect more clearly
+  than the customer did. If the customer never described the problem in their
+  own words, use "".
+  Use "" when bug_severity is null.
 
 Rules:
 - Prefer existing categories. Propose new only when the existing set genuinely

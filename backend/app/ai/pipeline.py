@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from sqlalchemy import select
@@ -247,6 +247,65 @@ def _parse_bug_verdict(
         else None
     )
     return severity, confidence, evidence
+
+
+# Typography a model routinely "tidies" while quoting: curly quotes, dashes,
+# non-breaking / zero-width spaces. Folding these is what stops a genuinely
+# verbatim quote from being rejected by the provenance check below — observed
+# live on a quote whose only deviation was “…” → "…".
+_QUOTE_FOLD = str.maketrans(
+    {
+        "‘": "'",
+        "’": "'",
+        "‚": "'",
+        "‛": "'",
+        "“": '"',
+        "”": '"',
+        "„": '"',
+        "‟": '"',
+        "–": "-",
+        "—": "-",
+        "−": "-",
+        " ": " ",
+        "​": "",
+        "﻿": "",
+    }
+)
+
+
+def _fold_for_match(text: str) -> str:
+    """Casefolded, whitespace-collapsed, typography-normalized comparison form."""
+    return " ".join(text.translate(_QUOTE_FOLD).casefold().split())
+
+
+def verify_bug_evidence(parsed: ParsedAssignment, ticket: HydratedTicket) -> ParsedAssignment:
+    """Drop `bug_evidence` unless it is verbatim from a CUSTOMER message.
+
+    The prompt asks for the customer's own words, but `parts[]` legitimately
+    carries admin replies too, and the model will quote our own agent describing
+    the defect — "I noticed that your analytics aren't displaying properly" was
+    the support rep, not the customer. In Slack that reads as a customer report
+    when it is not one, which is exactly the trust the quote is there to buy.
+    Measured on live traffic: 1 in 14.
+
+    Prompt wording cannot survive a model swap, so the check is deterministic.
+    Containment is tested per part, not against the concatenated thread: a
+    "quote" stitched from two separate messages was never said in one breath.
+    A failed check drops the quote and KEEPS the verdict — an evidence-less bug
+    report is still a bug report, and silently discarding the detection would be
+    the worse trade.
+    """
+    if parsed.bug_evidence is None:
+        return parsed
+    needle = _fold_for_match(parsed.bug_evidence)
+    if needle and any(
+        needle in _fold_for_match(part.body)
+        for part in ticket.parts
+        if not part.is_admin and part.body
+    ):
+        return parsed
+    metrics.incr("bug_evidence_rejected_total")
+    return replace(parsed, bug_evidence=None)
 
 
 def parse_response(raw: str) -> ParsedAssignment:
@@ -613,7 +672,7 @@ async def categorize_many(
         try:
             if isinstance(raw, BaseException):
                 raise raw
-            parsed = parse_response(raw)
+            parsed = verify_bug_evidence(parse_response(raw), ticket)
             out[ticket.id] = await resolve(parsed, session=session, state=state)
             metrics.incr("ai_calls_total.ok")
         except Exception:
