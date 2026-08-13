@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Cap on the number of ticket ids in a single bulk request (FR-036, plan §8d).
@@ -158,6 +159,33 @@ class AppConfig(BaseSettings):
     # needs a handful of points to find structure; fewer is just noise).
     clustering_min_tickets: int = Field(default=5, ge=2)
 
+    # ── Slack bug alerts (US-044) ─────────────────────────────────────────────
+    # Detection rides the existing categorization call (zero extra AI cost). An
+    # unconfigured Slack disables DELIVERY only — detection and recording keep
+    # running and stay readable via `GET /bug-alerts`, which is exactly how the
+    # feature is meant to be calibrated before it is ever allowed to post.
+    #
+    # The token is a `SecretStr` so it cannot leak through a repr / log line /
+    # error page. (`openrouter_api_key` and `intercom_access_token` above are
+    # plain `str` for historical reasons — do not copy that.)
+    slack_bot_token: SecretStr = SecretStr("")
+    slack_bug_channel: str = ""
+    bug_alerts_enabled: bool = False
+    # Floor for what reaches Slack. Below it, a verdict is still recorded and
+    # readable — it just never posts. `low` is deliberately not the default: a
+    # false positive costs channel trust, a false negative costs one late ticket.
+    bug_alert_min_severity: Literal["low", "medium", "high"] = "medium"
+    # NOTE: an admitted guess, unlike `review_confidence_threshold` (which
+    # `tests/test_review_calibration.py` calibrates). No labelled bug corpus
+    # exists yet — read the observed distribution off `GET /bug-alerts` on real
+    # traffic and re-pick this before enabling delivery.
+    bug_alert_min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    # Delivery loop cadence. 0 = OFF, so an out-of-the-box boot posts nothing.
+    bug_alert_poll_interval_seconds: int = Field(default=0, ge=0)
+    # Slack allows roughly 1 message/second/channel; a burst is inherently slow,
+    # so each pass is bounded and the remainder waits in the outbox.
+    bug_alert_max_per_cycle: int = Field(default=10, ge=1)
+
     # ── Server ────────────────────────────────────────────────────────────────
     log_level: str = "INFO"
 
@@ -205,7 +233,17 @@ class AppConfig(BaseSettings):
         return bool(self.session_jwt_secret.strip())
 
     @property
+    def slack_configured(self) -> bool:
+        """Whether bug alerts can actually be DELIVERED (both halves present)."""
+        return bool(self.slack_bot_token.get_secret_value().strip()) and bool(
+            self.slack_bug_channel.strip()
+        )
+
+    @property
     def missing_secrets(self) -> list[str]:
+        # Slack is deliberately absent: an unconfigured Slack is a DISABLED
+        # optional feature, not a degraded service. Listing it here would flip
+        # `/health` to "degraded" for every operator who never wanted alerts.
         out: list[str] = []
         if not self.openrouter_configured:
             out.append("OPENROUTER_API_KEY")

@@ -258,11 +258,13 @@ class CapturingOpenRouter(FakeOpenRouter):
         messages: list[dict[str, str]],
         ticket_id: str | None = None,
         response_format: dict[str, object] | None = None,
+        max_tokens: int = 400,
     ) -> str:
         self.last_messages = messages
         return await super().complete(
             model=model,
             messages=messages,
             ticket_id=ticket_id,
+            max_tokens=max_tokens,
             response_format=response_format,  # type: ignore[arg-type]
         )

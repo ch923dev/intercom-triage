@@ -31,6 +31,13 @@ _SENTIMENT_VALUES: frozenset[str] = frozenset(("negative", "neutral", "positive"
 
 # T107 — structured sub-classification for non_actionable verdicts.
 _NON_ACTIONABLE_KINDS: tuple[str, ...] = ("auto_reply", "thanks", "spam", "out_of_office", "other")
+
+# US-044 — early bug detection. A fifth facet on the SAME categorization call:
+# no extra AI spend, and the cache key (invariant #6) is untouched. `None` is the
+# default at every layer, so a fallback result carries no verdict by construction
+# (invariant #7) and a non-bug ticket is indistinguishable from an un-analyzed one.
+BugSeverity = Literal["low", "medium", "high"]
+_BUG_SEVERITIES: tuple[str, ...] = ("low", "medium", "high")
 # Defaults applied to a fallback result and to any malformed/missing facet — a
 # neutral baseline so a card never renders an empty / misleading badge.
 _DEFAULT_PRIORITY: Priority = "normal"
@@ -58,6 +65,11 @@ class ParsedAssignment:
     priority: Priority = _DEFAULT_PRIORITY
     sentiment: Sentiment = _DEFAULT_SENTIMENT
     labels: list[str] = field(default_factory=list)
+    # US-044 — bug verdict. All three move together: no severity means no bug,
+    # so the confidence and the quote are meaningless without it.
+    bug_severity: BugSeverity | None = None
+    bug_confidence: float | None = None
+    bug_evidence: str | None = None
 
 
 @dataclass
@@ -82,6 +94,13 @@ class CategorizationResult:
     ai_priority: Priority = _DEFAULT_PRIORITY
     ai_sentiment: Sentiment = _DEFAULT_SENTIMENT
     ai_labels: list[str] = field(default_factory=list)
+    # US-044 — bug verdict, carried to `services.bug_alerts` (which records it)
+    # and to `ai_cache` (so a cache hit still yields a verdict). A fallback result
+    # leaves these at None: a fallback is never cached (invariant #7) and must
+    # never fabricate a bug report.
+    bug_severity: BugSeverity | None = None
+    bug_confidence: float | None = None
+    bug_evidence: str | None = None
 
 
 # ── T014 — parser ─────────────────────────────────────────────────────────────
@@ -196,6 +215,40 @@ def _parse_non_actionable_kind(verdict: str | None, raw_kind: object) -> NonActi
     return "other"
 
 
+def _parse_bug_verdict(
+    obj: dict[str, Any],
+) -> tuple[BugSeverity | None, float | None, str | None]:
+    """Read the US-044 bug facet. Never raises — an absent or malformed verdict
+    degrades to "not a bug", exactly like the triage facets degrade to neutral.
+
+    All three fields move as a unit: an out-of-vocabulary severity drops the
+    confidence and the quote with it, so a caller can branch on `severity is
+    not None` alone. The evidence is truncated to 200 chars to match the
+    `bug_alerts.evidence` CHECK — a model that ignores the prompt's length rule
+    must not fail the insert.
+    """
+    raw_severity = obj.get("bug_severity")
+    severity: BugSeverity | None = None
+    if isinstance(raw_severity, str) and raw_severity.strip().lower() in _BUG_SEVERITIES:
+        severity = raw_severity.strip().lower()  # type: ignore[assignment]
+    if severity is None:
+        return None, None, None
+
+    confidence: float | None
+    try:
+        confidence = max(0.0, min(1.0, float(str(obj.get("bug_confidence")))))
+    except (TypeError, ValueError):
+        confidence = None
+
+    raw_evidence = obj.get("bug_evidence")
+    evidence = (
+        raw_evidence.strip()[:200]
+        if isinstance(raw_evidence, str) and raw_evidence.strip()
+        else None
+    )
+    return severity, confidence, evidence
+
+
 def parse_response(raw: str) -> ParsedAssignment:
     """Parse a model response into a typed assignment. Raises `ValueError` on any
     malformed shape — the caller treats that as a fallback trigger (FR-007)."""
@@ -209,6 +262,7 @@ def parse_response(raw: str) -> ParsedAssignment:
     verdict, res_conf, res_reason = _parse_resolution(obj)
     priority, sentiment, labels = _parse_triage(obj)
     na_kind = _parse_non_actionable_kind(verdict, obj.get("non_actionable_kind"))
+    bug_severity, bug_confidence, bug_evidence = _parse_bug_verdict(obj)
 
     if assignment == "existing":
         category_id = _coerce_int(obj.get("category_id"))
@@ -227,6 +281,9 @@ def parse_response(raw: str) -> ParsedAssignment:
             priority=priority,
             sentiment=sentiment,
             labels=labels,
+            bug_severity=bug_severity,
+            bug_confidence=bug_confidence,
+            bug_evidence=bug_evidence,
         )
 
     if assignment == "pending_proposal":
@@ -246,6 +303,9 @@ def parse_response(raw: str) -> ParsedAssignment:
             priority=priority,
             sentiment=sentiment,
             labels=labels,
+            bug_severity=bug_severity,
+            bug_confidence=bug_confidence,
+            bug_evidence=bug_evidence,
         )
 
     if assignment == "new_proposal":
@@ -267,6 +327,9 @@ def parse_response(raw: str) -> ParsedAssignment:
             priority=priority,
             sentiment=sentiment,
             labels=labels,
+            bug_severity=bug_severity,
+            bug_confidence=bug_confidence,
+            bug_evidence=bug_evidence,
         )
 
     raise ValueError(f"unknown assignment kind: {assignment!r}")
@@ -310,6 +373,9 @@ async def resolve(
             ai_priority=parsed.priority,
             ai_sentiment=parsed.sentiment,
             ai_labels=parsed.labels,
+            bug_severity=parsed.bug_severity,
+            bug_confidence=parsed.bug_confidence,
+            bug_evidence=parsed.bug_evidence,
         )
 
     if parsed.kind == "pending_proposal":
@@ -328,6 +394,9 @@ async def resolve(
             ai_priority=parsed.priority,
             ai_sentiment=parsed.sentiment,
             ai_labels=parsed.labels,
+            bug_severity=parsed.bug_severity,
+            bug_confidence=parsed.bug_confidence,
+            bug_evidence=parsed.bug_evidence,
         )
 
     # new_proposal
@@ -352,6 +421,9 @@ async def resolve(
             ai_priority=parsed.priority,
             ai_sentiment=parsed.sentiment,
             ai_labels=parsed.labels,
+            bug_severity=parsed.bug_severity,
+            bug_confidence=parsed.bug_confidence,
+            bug_evidence=parsed.bug_evidence,
         )
 
     proposal = CategoryProposal(
@@ -378,6 +450,9 @@ async def resolve(
         ai_priority=parsed.priority,
         ai_sentiment=parsed.sentiment,
         ai_labels=parsed.labels,
+        bug_severity=parsed.bug_severity,
+        bug_confidence=parsed.bug_confidence,
+        bug_evidence=parsed.bug_evidence,
     )
 
 
@@ -489,10 +564,17 @@ async def categorize_many(
             model=use_model,
             messages=messages,
             ticket_id=ticket.id,
-            # Strict JSON-schema enforcement (roadmap 2.1). An endpoint that
-            # rejects the schema raises OpenRouterError → per-ticket fallback
-            # below; parse_response stays as the defensive net for refusals.
+            # Plain json_object mode — strict json_schema was reverted (T151):
+            # the default Anthropic model 400s on it via OpenRouter, sinking
+            # EVERY ticket to fallback. SYSTEM_PROMPT is the response contract
+            # and parse_response is the defensive net for refusals / drift.
             response_format=CATEGORIZATION_RESPONSE_FORMAT,
+            # Above the 400 default: the response now carries a fifth facet (the
+            # US-044 bug verdict, incl. a <=200-char quote) and a truncated
+            # object fails the parse, costing the whole categorization. Raised
+            # HERE and not on the client default so playbook drafting — which
+            # shares `complete()` — is neither lengthened nor re-priced.
+            max_tokens=550,
         )
 
     async def _call(ticket: HydratedTicket) -> str:

@@ -115,18 +115,22 @@ class OpenRouterClient:
         messages: list[dict[str, str]],
         ticket_id: str | None = None,
         response_format: dict[str, Any] | None = None,
+        max_tokens: int = 400,
     ) -> str:
         """Call `/chat/completions` and return the assistant message content.
 
         Request shape per plan §7: `temperature=0.1`, `max_tokens=400`,
         `response_format={type:"json_object"}`.
 
-        ``response_format`` defaults to ``{"type": "json_object"}`` so existing
-        callers (e.g. the playbook drafter) are unaffected.  The categorization
-        pipeline passes a strict ``{"type": "json_schema", ...}`` value to enforce
-        the response shape natively (roadmap 2.1).  An endpoint that rejects the
-        schema returns a non-retryable 4xx, which surfaces as ``OpenRouterError``
-        and degrades to the caller's per-ticket fallback — ingest never aborts.
+        ``response_format`` defaults to ``{"type": "json_object"}``.  A strict
+        ``{"type": "json_schema", ...}`` value was tried for categorization
+        (roadmap 2.1) and reverted in T151 — the default Anthropic model rejects
+        it via OpenRouter with a non-retryable 400, which sank every ticket to
+        the per-ticket fallback.  Every caller now sends json_object.
+
+        ``max_tokens`` is a per-call parameter rather than a module constant
+        because callers differ: categorization needs headroom for its extra
+        facets, while playbook drafting is happy (and cheaper) at the default.
 
         Retries up to ``_MAX_ATTEMPTS`` times on 429/5xx and transient network
         errors, with exponential backoff plus jitter.  Non-retryable statuses
@@ -138,7 +142,7 @@ class OpenRouterClient:
             "model": model,
             "messages": messages,
             "temperature": 0.1,
-            "max_tokens": 400,
+            "max_tokens": max_tokens,
             "response_format": response_format or {"type": "json_object"},
         }
 

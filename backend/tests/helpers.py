@@ -114,6 +114,7 @@ class FakeOpenRouter:
         self.by_ticket = by_ticket
         self.calls = 0
         self.last_response_format: dict[str, Any] | None = None
+        self.last_max_tokens: int | None = None
 
     async def complete(
         self,
@@ -122,9 +123,11 @@ class FakeOpenRouter:
         messages: list[dict[str, str]],
         ticket_id: str | None = None,
         response_format: dict[str, Any] | None = None,
+        max_tokens: int = 400,
     ) -> str:
         self.calls += 1
         self.last_response_format = response_format
+        self.last_max_tokens = max_tokens
         if ticket_id is None or ticket_id not in self.by_ticket:
             raise OpenRouterError("no canned response")
         return self.by_ticket[ticket_id]
@@ -151,6 +154,7 @@ class FakeCascadeOpenRouter:
         messages: list[dict[str, str]],
         ticket_id: str | None = None,
         response_format: dict[str, Any] | None = None,
+        max_tokens: int = 400,
     ) -> str:
         self.calls_by_model[model] = self.calls_by_model.get(model, 0) + 1
         if ticket_id is None or (model, ticket_id) not in self.by_model_ticket:
