@@ -214,10 +214,30 @@ class BugAlertRead(BaseModel):
     slack_channel: str | None
     slack_ts: str | None
     dismissed_at: UTCDatetime | None
+    # Acknowledgement (T183). Independent of `dismissed_at`: acked = owned,
+    # dismissed = finished, and a row may carry both. `acked_by` is composed
+    # through a `users` join like `resolved_by` (invariant #17), so the operator
+    # is named rather than reduced to an id the client has to resolve.
+    acked_at: UTCDatetime | None = None
+    acked_by: UserRef | None = None
     # Composed at read time from the `tickets` row so the list is usable on its
     # own; absent when the ticket has aged out (there is no FK by design).
     title: str | None = None
     url: str | None = None
+
+
+class BugAlertAckResult(BaseModel):
+    """`POST /bug-alerts/{id}/ack` response.
+
+    Carries `slack_updated` because the acknowledgement and its mirror can
+    legitimately disagree: the row is committed first and the Slack update is
+    best-effort (FR-087), so `alert.acked_at` set with `slack_updated=False` is a
+    real, reportable outcome — acknowledged here, channel not updated — and not
+    an error the client should retry.
+    """
+
+    alert: BugAlertRead
+    slack_updated: bool
 
 
 class FollowupSet(BaseModel):

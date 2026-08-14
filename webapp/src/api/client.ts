@@ -6,6 +6,7 @@
 
 import type {
   BugAlert,
+  BugAlertAckResult,
   BugSeverity,
   BulkResult,
   CategoriesResponse,
@@ -471,6 +472,13 @@ export const api = {
    *  re-detection — the backend never clears `dismissed_at`. */
   dismissBugAlert: (ticketId: string): Promise<BugAlert> =>
     request(`/bug-alerts/${encodeURIComponent(ticketId)}/dismiss`, { method: 'POST' }),
+
+  /** Acknowledge an alert — "someone owns this" — and mirror it into the Slack
+   *  message that announced it. The acknowledger is the authenticated user, so
+   *  no id is sent. Idempotent. Returns the alert plus whether the Slack message
+   *  was updated; `slack_updated: false` is a normal outcome, not a failure. */
+  ackBugAlert: (ticketId: string): Promise<BugAlertAckResult> =>
+    request(`/bug-alerts/${encodeURIComponent(ticketId)}/ack`, { method: 'POST' }),
 
   // ── metrics (roadmap 1.4 — token / cost meter) ────────────────────────────
   /** Process-lifetime counters + per-day OpenRouter spend. */

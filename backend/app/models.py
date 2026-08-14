@@ -434,6 +434,14 @@ class BugAlert(Base):
     slack_channel: Mapped[str | None] = mapped_column(Text)
     slack_ts: Mapped[str | None] = mapped_column(Text)
     dismissed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Phase 24 (T183) — acknowledgement. "Someone owns this", which is a
+    # different fact from `dismissed_at` ("this is finished"); an alert may carry
+    # both. Board-state only, never on HydratedTicket (invariant #2), and never
+    # written by the record pass, so it survives re-detection (FR-085).
+    acked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    acked_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -449,6 +457,12 @@ class BugAlert(Base):
             name="bug_alerts_evidence_len_check",
         ),
         CheckConstraint("occurrences >= 1", name="bug_alerts_occurrences_check"),
+        # Acknowledged-by-nobody and acknowledged-at-no-time are both nonsense;
+        # the pair moves together or not at all.
+        CheckConstraint(
+            "(acked_at IS NULL) = (acked_by IS NULL)",
+            name="bug_alerts_ack_pair_check",
+        ),
         # The delivery loop's only query: undelivered, undismissed rows.
         Index("ix_bug_alerts_outbox", "posted_at", "dismissed_at"),
     )

@@ -121,6 +121,17 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     quotes are customer text: never logged (NFR-016), and never shown in the
     top-level Slack `text` / attachment `fallback` (both surface in push
     previews).
+    **Acknowledgement travels outward only.** `acked_at`/`acked_by` (migration
+    0028, XOR-locked by CHECK) are set from the board and mirrored into the
+    already-posted message with `chat.update` — never by Slack calling us. There
+    is deliberately no interactivity endpoint: that would need a public HTTPS
+    address, HMAC signature verification, and a new auth-allowlist entry (#15),
+    for a feature the outbound path delivers without any of it. Ack is recorded
+    BEFORE Slack is called and a mirror failure never rolls it back (the board is
+    the record, the channel a projection); it is independent of `dismissed_at`
+    (owned vs finished, a row may carry both); and like `posted_*` it is absent
+    from the record pass's explicit `ON CONFLICT` set-clause, which is the only
+    reason it survives re-detection and escalation.
     **The evidence quote's provenance is enforced in code, not asked for in the
     prompt.** `parts[]` legitimately carries admin replies (#3) and the model
     will quote our own agent describing the defect — it did, live, 1 in 14.

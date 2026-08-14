@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from fastapi import HTTPException
@@ -36,7 +36,7 @@ from app.config import AppConfig
 from app.metrics import metrics
 from app.models import BugAlert, Category, Ticket, User
 from app.observability import log_event
-from app.schemas import BugAlertRead
+from app.schemas import BugAlertRead, UserRef
 from app.util import naive_utcnow
 
 logger = logging.getLogger(__name__)
@@ -126,10 +126,14 @@ async def record_bug_alerts(
                     "evidence": case((escalating, stmt.excluded.evidence), else_=BugAlert.evidence),
                     "occurrences": BugAlert.occurrences + 1,
                     "last_detected_at": stmt.excluded.last_detected_at,
-                    # `posted_*` and `dismissed_at` are deliberately untouched:
-                    # delivery state and the operator's dismissal are not the
-                    # model's to revise. Escalation past `posted_severity` is
-                    # what re-opens delivery, and that is read, not written, here.
+                    # `posted_*`, `dismissed_at`, and `acked_at`/`acked_by` are
+                    # deliberately untouched: delivery state, the operator's
+                    # dismissal, and who acknowledged it are not the model's to
+                    # revise (FR-085). Escalation past `posted_severity` is what
+                    # re-opens delivery, and that is read, not written, here.
+                    # This set-clause being explicit is what makes that hold —
+                    # a blanket "update everything from excluded" would erase an
+                    # acknowledgement on the next re-detection.
                 },
             )
         )
@@ -246,8 +250,31 @@ def _identity_fields(ctx: TicketContext) -> list[dict[str, str]]:
     return [f for f in candidates if f is not None]
 
 
-def _alert_attachments(alert: BugAlert, ctx: TicketContext) -> list[dict[str, Any]]:
-    """The full alert card, wrapped in a severity-coloured attachment."""
+def _ack_line(alert: BugAlert, acker: str | None) -> str | None:
+    """ "Acknowledged by X · <time>", or None when nobody has.
+
+    The stamp uses Slack's `!date` token so each reader sees it in their own
+    timezone — the message is durable, so a relative age ("5m ago") would be a
+    lie the moment anyone scrolled back to it. The text after `|` is what
+    clients that cannot render the token show instead.
+    """
+    if alert.acked_at is None:
+        return None
+    epoch = int(alert.acked_at.replace(tzinfo=UTC).timestamp())
+    stamp = f"<!date^{epoch}^{{date_short_pretty}} {{time}}|{alert.acked_at:%Y-%m-%d %H:%M} UTC>"
+    return f"✅ Acknowledged by {acker or 'an operator'} · {stamp}"
+
+
+def _alert_attachments(
+    alert: BugAlert, ctx: TicketContext, *, acker: str | None = None
+) -> list[dict[str, Any]]:
+    """The full alert card, wrapped in a severity-coloured attachment.
+
+    Also the builder for the acknowledgement edit (FR-086) — deliberately one
+    builder, so the evidence quote cannot end up in the top-level `text` /
+    `fallback` on the edit path after being kept out of it on the post path
+    (NFR-016).
+    """
     emoji = _SEVERITY_EMOJI.get(alert.severity, "⚪")
     headline = ctx.title or alert.ticket_id
     # Inline link rather than an actions button: Slack badges link buttons from
@@ -305,6 +332,10 @@ def _alert_attachments(alert: BugAlert, ctx: TicketContext) -> list[dict[str, An
     facts.append(f"`{alert.ticket_id}`")
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": " · ".join(facts)}]})
 
+    ack = _ack_line(alert, acker)
+    if ack is not None:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ack}]})
+
     return [
         {
             "color": _SEVERITY_COLOR.get(alert.severity, "#868F96"),
@@ -315,6 +346,59 @@ def _alert_attachments(alert: BugAlert, ctx: TicketContext) -> list[dict[str, An
             "fallback": _fallback_text(alert, ctx),
         }
     ]
+
+
+async def _ticket_contexts(
+    session: AsyncSession, ticket_ids: list[str]
+) -> dict[str, TicketContext]:
+    """Board-side card context for the given tickets, keyed by ticket id.
+
+    Shared by delivery and by the acknowledgement mirror so an edited card is
+    built from the same data as the original post — a second copy of this join
+    is how the two would drift apart.
+    """
+    if not ticket_ids:
+        return {}
+    assignee = aliased(User)
+    return {
+        row.id: TicketContext(
+            title=row.title,
+            url=row.url,
+            category=row.category,
+            state=row.state,
+            summary=row.summary or None,
+            created_at=row.created_at,
+            sentiment=row.ai_sentiment,
+            priority=row.ai_priority,
+            labels=list(row.ai_labels or []),
+            author=dict(row.author or {}),
+            assignee=row.assignee,
+        )
+        for row in (
+            await session.execute(
+                select(
+                    Ticket.id,
+                    Ticket.title,
+                    Ticket.url,
+                    Ticket.state,
+                    Ticket.summary,
+                    Ticket.created_at,
+                    Ticket.ai_sentiment,
+                    Ticket.ai_priority,
+                    Ticket.ai_labels,
+                    Ticket.author,
+                    Category.name.label("category"),
+                    assignee.name.label("assignee"),
+                )
+                .outerjoin(Category, Ticket.category_id == Category.id)
+                .outerjoin(assignee, Ticket.assigned_to == assignee.id)
+                # A ticket row is normally present (the alert came from an
+                # ingest), but the alert table has no FK on purpose, so treat
+                # absence as "no context" rather than as an error.
+                .where(Ticket.id.in_(ticket_ids))
+            )
+        ).all()
+    }
 
 
 def _escalation_text(alert: BugAlert) -> str:
@@ -372,47 +456,7 @@ async def deliver_pending_bug_alerts(
     if not rows:
         return 0
 
-    ticket_ids = [row.ticket_id for row in rows]
-    assignee = aliased(User)
-    context = {
-        row.id: TicketContext(
-            title=row.title,
-            url=row.url,
-            category=row.category,
-            state=row.state,
-            summary=row.summary or None,
-            created_at=row.created_at,
-            sentiment=row.ai_sentiment,
-            priority=row.ai_priority,
-            labels=list(row.ai_labels or []),
-            author=dict(row.author or {}),
-            assignee=row.assignee,
-        )
-        for row in (
-            await session.execute(
-                select(
-                    Ticket.id,
-                    Ticket.title,
-                    Ticket.url,
-                    Ticket.state,
-                    Ticket.summary,
-                    Ticket.created_at,
-                    Ticket.ai_sentiment,
-                    Ticket.ai_priority,
-                    Ticket.ai_labels,
-                    Ticket.author,
-                    Category.name.label("category"),
-                    assignee.name.label("assignee"),
-                )
-                .outerjoin(Category, Ticket.category_id == Category.id)
-                .outerjoin(assignee, Ticket.assigned_to == assignee.id)
-                # A ticket row is normally present (the alert came from an
-                # ingest), but the alert table has no FK on purpose, so treat
-                # absence as "no context" rather than as an error.
-                .where(Ticket.id.in_(ticket_ids))
-            )
-        ).all()
-    }
+    context = await _ticket_contexts(session, [row.ticket_id for row in rows])
 
     sent = 0
     for alert in rows:
@@ -464,7 +508,52 @@ async def deliver_pending_bug_alerts(
     return sent
 
 
-# ── Read + dismiss ────────────────────────────────────────────────────────────
+# ── Read + dismiss + ack ──────────────────────────────────────────────────────
+
+
+def _to_read(
+    alert: BugAlert,
+    *,
+    title: str | None = None,
+    url: str | None = None,
+    acked_by: UserRef | None = None,
+) -> BugAlertRead:
+    """Build the wire shape explicitly.
+
+    NOT `model_validate(alert)`: the ORM row's `acked_by` is a user id, while the
+    schema field of that name is a `UserRef`, so attribute-based validation would
+    try to coerce an int into a model and fail on every acknowledged row. The
+    same reason `TicketSchema` is constructed field-by-field (invariant #17).
+    One converter, so the list / dismiss / ack paths cannot disagree.
+    """
+    return BugAlertRead(
+        ticket_id=alert.ticket_id,
+        severity=cast("Any", alert.severity),
+        confidence=alert.confidence,
+        evidence=alert.evidence,
+        occurrences=alert.occurrences,
+        first_detected_at=alert.first_detected_at,
+        last_detected_at=alert.last_detected_at,
+        posted_at=alert.posted_at,
+        posted_severity=cast("Any", alert.posted_severity),
+        slack_channel=alert.slack_channel,
+        slack_ts=alert.slack_ts,
+        dismissed_at=alert.dismissed_at,
+        acked_at=alert.acked_at,
+        acked_by=acked_by,
+        title=title,
+        url=url,
+    )
+
+
+async def _user_refs(session: AsyncSession, ids: set[int]) -> dict[int, UserRef]:
+    """`{id: UserRef}` for the ids given — the attribution join, done once."""
+    if not ids:
+        return {}
+    return {
+        u.id: UserRef(id=u.id, name=u.name)
+        for u in (await session.scalars(select(User).where(User.id.in_(ids)))).all()
+    }
 
 
 async def list_bug_alerts(
@@ -491,9 +580,18 @@ async def list_bug_alerts(
     elif delivered is False:
         stmt = stmt.where(BugAlert.posted_at.is_(None))
 
+    rows = (await session.execute(stmt)).all()
+    users = await _user_refs(
+        session, {alert.acked_by for alert, _, _ in rows if alert.acked_by is not None}
+    )
     return [
-        BugAlertRead.model_validate(alert).model_copy(update={"title": title, "url": url})
-        for alert, title, url in (await session.execute(stmt)).all()
+        _to_read(
+            alert,
+            title=title,
+            url=url,
+            acked_by=users.get(alert.acked_by) if alert.acked_by is not None else None,
+        )
+        for alert, title, url in rows
     ]
 
 
@@ -503,6 +601,8 @@ async def dismiss_bug_alert(session: AsyncSession, ticket_id: str) -> BugAlertRe
 
     Dismissal outranks re-detection: the record pass never clears
     `dismissed_at`, so a model that keeps insisting cannot resurrect the alert.
+    Dismissing does NOT clear an acknowledgement — who picked this up survives
+    closing it out.
     """
     alert = await session.get(BugAlert, ticket_id)
     if alert is None:
@@ -510,4 +610,84 @@ async def dismiss_bug_alert(session: AsyncSession, ticket_id: str) -> BugAlertRe
     if alert.dismissed_at is None:
         alert.dismissed_at = naive_utcnow()
         await session.commit()
-    return BugAlertRead.model_validate(alert)
+    users = await _user_refs(session, {alert.acked_by} if alert.acked_by is not None else set())
+    return _to_read(
+        alert, acked_by=users.get(alert.acked_by) if alert.acked_by is not None else None
+    )
+
+
+async def ack_bug_alert(
+    session: AsyncSession,
+    ticket_id: str,
+    *,
+    user_id: int,
+    slack: SlackClient | None,
+    config: AppConfig,
+) -> tuple[BugAlertRead, bool]:
+    """Acknowledge an alert, then mirror it into the Slack message it came from.
+
+    Returns `(alert, slack_updated)`.
+
+    **Record first, mirror second** (FR-087). The acknowledgement is committed
+    before Slack is touched, and a Slack failure is logged and reported as
+    `slack_updated=False` rather than rolled back: the board is the record and
+    the channel is a projection of it. The other order would let a Slack outage
+    refuse acknowledgements, which is backwards — the fact is local.
+
+    Idempotent (FR-084): a second acknowledgement keeps the first operator and
+    timestamp and makes NO Slack call, so re-clicking cannot spam the channel.
+    That also means a failed mirror is not repaired by acknowledging again —
+    accepted deliberately (plan §22), because the fact is already on the board.
+
+    Acknowledgement is not dismissal. An alert may be acknowledged (someone owns
+    it) and later dismissed (it is finished); neither clears the other.
+    """
+    alert = await session.get(BugAlert, ticket_id)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="bug alert not found")
+
+    already_acked = alert.acked_at is not None
+    if not already_acked:
+        alert.acked_at = naive_utcnow()
+        alert.acked_by = user_id
+        await session.commit()
+
+    users = await _user_refs(session, {alert.acked_by} if alert.acked_by is not None else set())
+    acker = users.get(alert.acked_by) if alert.acked_by is not None else None
+    read = _to_read(alert, acked_by=acker)
+
+    # Nothing to mirror: already acknowledged (so the message already says so),
+    # Slack switched off, or an alert that was never announced — the last is a
+    # normal state, not a failure (FR-086).
+    if (
+        already_acked
+        or slack is None
+        or not config.slack_configured
+        or not alert.slack_channel
+        or not alert.slack_ts
+    ):
+        return read, False
+
+    ctx = (await _ticket_contexts(session, [alert.ticket_id])).get(alert.ticket_id, TicketContext())
+    try:
+        await slack.update_message(
+            channel=alert.slack_channel,
+            ts=alert.slack_ts,
+            text=_fallback_text(alert, ctx),
+            attachments=_alert_attachments(alert, ctx, acker=acker.name if acker else None),
+            ticket_id=alert.ticket_id,
+        )
+    except Exception as exc:
+        # The acknowledgement stands. Identifiers only — an alert's evidence
+        # quote is customer text and never reaches a log line (NFR-016).
+        log_event(
+            "bug_alert_ack_mirror_error",
+            level=logging.WARNING,
+            op="ack",
+            ticket_id=alert.ticket_id,
+            error=str(exc),
+        )
+        return read, False
+
+    metrics.incr("bug_alerts_acked_total")
+    return read, True

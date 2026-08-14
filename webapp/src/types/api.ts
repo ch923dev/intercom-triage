@@ -162,8 +162,21 @@ export interface BugAlert {
   slack_channel: string | null;
   slack_ts: string | null;
   dismissed_at: string | null;
+  // Acknowledged = someone owns this. Independent of `dismissed_at` (finished),
+  // so a row can carry both — an alert that was picked up and then closed out.
+  acked_at: string | null;
+  acked_by: UserRef | null;
   title: string | null;
   url: string | null;
+}
+
+// `POST /bug-alerts/{id}/ack`. `slack_updated: false` next to a set `acked_at`
+// is a success, not a failure: the alert was never announced, Slack is off, or
+// the edit failed. The acknowledgement is recorded either way (FR-087), so the
+// UI must not present this as "the ack did not happen".
+export interface BugAlertAckResult {
+  alert: BugAlert;
+  slack_updated: boolean;
 }
 
 // A semantically-ranked playbook suggestion for a ticket (roadmap 3.3). `score`

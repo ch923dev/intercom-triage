@@ -10,6 +10,7 @@ vi.mock('@/api/client', () => ({
   api: {
     listBugAlerts: vi.fn(),
     dismissBugAlert: vi.fn(),
+    ackBugAlert: vi.fn(),
   },
 }));
 
@@ -29,6 +30,8 @@ function make(over: Partial<BugAlert> = {}): BugAlert {
     slack_channel: null,
     slack_ts: null,
     dismissed_at: null,
+    acked_at: null,
+    acked_by: null,
     title: 'Export broken',
     url: 'https://example.com/conv/T1',
     ...over,
@@ -147,6 +150,88 @@ describe('BugAlertsPage', () => {
     const rows = wrapper.findAll('li.card');
     expect(rows).toHaveLength(1);
     expect(rows[0].text()).toContain('sent');
+  });
+
+  it('acknowledges a row and swaps the button for a done marker', async () => {
+    const wrapper = await mountWith([make({ posted_at: '2026-08-14T09:00:00Z' })]);
+    mocked.ackBugAlert.mockResolvedValue({
+      alert: make({
+        posted_at: '2026-08-14T09:00:00Z',
+        acked_at: '2026-08-15T10:00:00Z',
+        acked_by: { id: 1, name: 'Christian' },
+      }),
+      slack_updated: true,
+    });
+
+    await wrapper.get('button.ack').trigger('click');
+    await new Promise((r) => setTimeout(r, 0));
+    await wrapper.vm.$nextTick();
+
+    expect(mocked.ackBugAlert).toHaveBeenCalledWith('T1');
+    expect(wrapper.find('button.ack').exists()).toBe(false);
+    expect(wrapper.text()).toContain('acknowledged');
+    // The state line names the owner rather than just saying "announced".
+    expect(wrapper.text()).toContain('owned by Christian');
+  });
+
+  it('reports a failed Slack mirror without implying the ack was lost', async () => {
+    const wrapper = await mountWith([
+      make({ posted_at: '2026-08-14T09:00:00Z', slack_channel: 'C1', slack_ts: '1.2' }),
+    ]);
+    mocked.ackBugAlert.mockResolvedValue({
+      alert: make({
+        posted_at: '2026-08-14T09:00:00Z',
+        slack_channel: 'C1',
+        slack_ts: '1.2',
+        acked_at: '2026-08-15T10:00:00Z',
+        acked_by: { id: 1, name: 'Christian' },
+      }),
+      slack_updated: false,
+    });
+
+    await wrapper.get('button.ack').trigger('click');
+    await new Promise((r) => setTimeout(r, 0));
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).toContain('Slack message not updated');
+    expect(wrapper.text()).toContain('owned by Christian'); // the ack still stands
+  });
+
+  it('offers no Acknowledge button on an already-acknowledged row', async () => {
+    const wrapper = await mountWith([
+      make({ acked_at: '2026-08-15T10:00:00Z', acked_by: { id: 1, name: 'Christian' } }),
+    ]);
+    expect(wrapper.find('button.ack').exists()).toBe(false);
+    // Dismiss is still available — owning something is not finishing it.
+    expect(wrapper.find('button.dismiss').exists()).toBe(true);
+  });
+
+  it('keeps the owner visible on a row that was acknowledged and then dismissed', async () => {
+    const wrapper = await mountWith([
+      make({
+        acked_at: '2026-08-15T10:00:00Z',
+        acked_by: { id: 1, name: 'Christian' },
+        dismissed_at: '2026-08-15T11:00:00Z',
+      }),
+    ]);
+    const text = wrapper.text();
+    expect(text).toContain('dismissed');
+    expect(text).toContain('acked by Christian');
+  });
+
+  it('filters by the acknowledged state', async () => {
+    const wrapper = await mountWith([
+      make({
+        ticket_id: 'owned',
+        acked_at: '2026-08-15T10:00:00Z',
+        acked_by: { id: 1, name: 'C' },
+      }),
+      make({ ticket_id: 'fresh', posted_at: '2026-08-14T09:00:00Z', posted_severity: 'medium' }),
+    ]);
+    await wrapper.findAll('select')[1].setValue('acknowledged');
+    const rows = wrapper.findAll('li.card');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text()).toContain('owned');
   });
 
   it('explains an empty list without implying a failure', async () => {
