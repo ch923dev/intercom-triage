@@ -1,6 +1,6 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 2.3 · **Implements:** `spec.md` v2.4 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 2.4 · **Implements:** `spec.md` v2.5 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
 
@@ -1080,3 +1080,114 @@ re-detection), editing severity or evidence by hand (they are AI output; an
 operator-edited "detection" is not a detection), a per-card board marker, and
 anything that posts to Slack from the client (invariant: the backend owns
 delivery, NFR-015 keeps the token server-side).
+
+---
+
+## §22 — Bug-alert acknowledgement (spec v2.5 · US-046 · FR-084..FR-088)
+
+The channel could not distinguish an alert somebody owns from one nobody has
+read. Two engineers investigate the same bug, or none do. Acknowledgement fixes
+that, and it has to be visible **in Slack**, because Slack is where the alert was
+seen.
+
+### Why the acknowledgement travels outward, not inward
+
+The obvious design is a Block Kit **Acknowledge** button on the alert. It was
+rejected, and the reason is structural rather than aesthetic:
+
+* Slack delivers an interaction by **POSTing to a public HTTPS Request URL**. Our
+  backend answers on `127.0.0.1`, and this repo ships no hosting config on
+  purpose. A button therefore needs a tunnel in dev and real infrastructure
+  later — infrastructure we have explicitly deferred to the operator.
+* That endpoint could not be protected by our session (Slack has no bearer
+  token of ours). It would need HMAC request-signature verification plus a
+  replay window, and it would have to join the auth allowlist — which invariant
+  #15 defines as a security regression unless argued for deliberately.
+* It needs a Slack-user → `users` mapping we do not have.
+
+So acknowledgement is **outbound only**: the operator acts on the board, the
+backend rewrites the Slack message. Slack never calls us (FR-088). The cost of
+this choice is that acknowledgement cannot originate in Slack; the benefit is no
+public surface, no signing secret, no allowlist change, and no new Slack scope.
+Should hosting arrive, the button becomes an additive second entry point — the
+state it would write already exists.
+
+### `chat.update`, not a threaded reply
+
+We already store `slack_channel` + `slack_ts` per alert (they were stored so the
+review page could deep-link, §21). Those are exactly the coordinates
+`chat.update` needs, so the acknowledgement can be **folded into the original
+card**. A threaded reply was the alternative and is worse here: the question
+being answered is "is this one handled?", which should be legible from the
+message itself, not from opening a thread. Escalations stay threaded replies —
+those are events in time, and the thread is the right shape for a sequence.
+
+The updated card is rebuilt by the same attachment builder as the original post,
+with an acknowledgement line appended. One builder, so NFR-016 cannot drift
+between the post path and the update path: the evidence quote stays inside the
+attachment blocks and out of the top-level `text` / `fallback`, which is what
+surfaces in push previews.
+
+### Ordering: record first, mirror second
+
+`acked_at` / `acked_by` are committed **before** Slack is called (FR-087). The
+board is the record and the channel is a projection of it. A Slack failure is
+logged and reported to the caller as a partial success — acknowledged, channel
+not updated — rather than rolled back. The reverse order would let a Slack
+outage refuse acknowledgements, which is precisely backwards: the fact is local.
+
+There is deliberately **no retry queue** for the mirror. `posted_at IS NULL` is
+an outbox because losing an announcement loses information nobody has seen;
+losing an acknowledgement mirror only loses a line on a message whose owner is
+already recorded and visible on the board. A second acknowledgement is a no-op
+(FR-084), so a failed mirror is not repaired by re-clicking — accepted, and
+called out here so it is not read as an oversight.
+
+### State shape
+
+Two nullable columns on `bug_alerts`, XOR-locked as a pair by CHECK
+(`acked_at IS NULL` ⇔ `acked_by IS NULL`) — the same pattern as
+`resolved_at`/`resolved_source` (invariant #10) and the parked trio (#14).
+`acked_by` is `users.id` with `ON DELETE SET NULL`, and is exposed as
+`UserRef {id, name}` composed via a join at read time, exactly like
+`resolved_by` (invariant #17). Migration `0028`.
+
+`record_bug_alerts` must not write either column. Its `ON CONFLICT DO UPDATE`
+already enumerates its set-clause explicitly, so ack durability across
+re-detection holds by construction rather than by a guard — the same way
+`posted_*` and `dismissed_at` are protected today (FR-085).
+
+**Acknowledgement and dismissal are independent.** Ack means *owned*; dismiss
+means *finished*. Dismissing does not clear an ack, so "who picked this up" is
+not destroyed by closing it out. The review page therefore reads four states:
+awaiting announcement → announced → acknowledged → dismissed, and ack is
+displayed alongside dismissal rather than replaced by it.
+
+**Escalation does not clear the ack.** Considered and rejected: forcing re-ack
+on escalation would delete attribution (there is no undo, and no history table
+for alerts), and the escalation is already announced as a threaded reply under
+the card the acknowledger is subscribed to. The cost is that nobody is *forced*
+to re-acknowledge a bug that got worse. That is a policy question, not a missing
+mechanism — if the operator wants re-ack on escalation, it is a follow-up that
+clears the pair inside the escalation branch.
+
+### Shape
+
+| File | Change |
+|---|---|
+| `alembic/versions/0028_*.py` | `acked_at` + `acked_by` + the XOR CHECK (batch mode — SQLite rebuilds for a table constraint) |
+| `models.py` | the two columns + CheckConstraint on `BugAlert` |
+| `schemas.py` | `BugAlertRead.acked_at` + `.acked_by: UserRef | None` |
+| `clients/slack.py` | `update_message` (`chat.update`); the retry/verdict loop generalized over the endpoint so both calls log per-attempt truth |
+| `services/bug_alerts.py` | `ack_bug_alert`; ack line in the attachment builder |
+| `routers/bug_alerts.py` | `POST /bug-alerts/{ticket_id}/ack` |
+| `deps.py` | `get_slack` (matches `get_openrouter` / `get_intercom`) |
+| webapp | `BugAlert.acked_*`, `ackBugAlert`, store `ack()`, an Ack button + acked state |
+
+### Not in scope
+
+A Slack-side button (above), un-acknowledging (ack is cheap to grant and
+attribution should not be erasable), re-ack on escalation (above), per-alert
+assignment to a *different* user than the acknowledger (the board already has
+ticket assignment — inventing a second owner field here would compete with it),
+and any retry/outbox for the mirror (above).

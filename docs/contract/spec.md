@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 2.4 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 2.5 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v2.4:** a bug alert can be acknowledged, and the acknowledgement reaches the channel. Added US-046 and FR-084..FR-088. Acknowledgement is a state of its own, distinct from dismissal: acknowledged means *someone owns this*, dismissed means *this is closed out or was never a bug*. The operator acknowledges on the board and the already-posted Slack message rewrites itself in place to name them — so the channel learns it without anyone typing there, and without the product accepting inbound traffic from Slack. Detection, dedup, the cache key, and the announcement path are untouched.
 
 **Changes from v2.3:** bug alerts become reviewable in the product. Added US-045 and FR-080..FR-083 — the alerts recorded by US-044 are readable and dismissible from the webapp, closing the gap where dismissing a false positive required calling the API by hand. No backend behavior changes: the read and dismiss endpoints already exist (FR-079) and detection, dedup, and announcement are untouched.
 
@@ -538,6 +540,20 @@ Acceptance:
 - The navigation shows how many alerts still await a decision.
 - The page never creates or edits an alert beyond dismissing it — detection stays the AI's job.
 
+### US-046 — Acknowledging an alert, visible in the channel
+As an operator, I want to acknowledge a bug alert and have the Slack message say so, because right now the channel cannot tell an alert somebody owns from one nobody has read — so two engineers investigate the same bug, or none do.
+
+Acceptance:
+- An operator can acknowledge an alert from the board in one action, and the alert records who acknowledged it and when.
+- Acknowledgement is its own state, not a synonym for dismissal. An acknowledged alert is still open — someone owns it. A dismissed alert is finished. An alert can be acknowledged and later dismissed; the acknowledgement is not erased by the dismissal.
+- The Slack message that announced the alert is updated in place to name the acknowledger, so the channel learns of it without a second message and without anyone posting there.
+- Acknowledging never requires Slack to reach the product. Nothing is exposed for Slack to call back into.
+- An alert that was never announced can still be acknowledged; there is simply no message to update.
+- If updating Slack fails, the acknowledgement still stands. The board is the record; the channel is a mirror of it, and a mirror that fails must not lose the fact.
+- Acknowledgement survives re-detection: a model that keeps re-reporting the same bug cannot un-acknowledge it, and cannot overwrite who acknowledged it.
+- Acknowledging twice changes nothing — the original acknowledger and time stand, and Slack is not re-poked.
+- A severity escalation does not clear the acknowledgement. Ownership is not revoked by the bug getting worse; the escalation is already announced under the original message, where the acknowledger sees it.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -627,6 +643,11 @@ Acceptance:
 | FR-081 | Dismissal is available per entry and drives the existing dismiss endpoint. The entry updates in place without reloading the page, and a failed dismissal reports the failure and leaves the entry unchanged. Dismissal is the only mutation this surface performs. | US-045 |
 | FR-082 | An announced entry offers a direct link to its Slack message, derived from the stored channel and message identity. An entry without both offers no link rather than a broken one. | US-045 |
 | FR-083 | The navigation carries a count of alerts awaiting a decision — recorded and not dismissed — so an operator sees pending bug review without opening the page. | US-045 |
+| FR-084 | An alert can be acknowledged, recording the acknowledging operator's identity and the time. Acknowledgement is idempotent: a second acknowledgement keeps the first operator and timestamp, and performs no further outward action. Acknowledgement and dismissal are independent states — an alert may be acknowledged, dismissed, both, or neither, and dismissing does not clear an acknowledgement. | US-046 |
+| FR-085 | The acknowledging operator and the acknowledgement time are set together or not at all, and are never written by the detection/recording pass. Re-detection and severity escalation leave both untouched. | US-046 |
+| FR-086 | Acknowledging an announced alert updates that alert's existing Slack message in place, so the announcement itself shows who acknowledged it and when. No second message is posted. An alert that was never announced is acknowledged with no outward call. | US-046 |
+| FR-087 | The acknowledgement is recorded before Slack is contacted, and a Slack failure neither reverses it nor fails the operator's request. The failure is logged and reported as a partial success — acknowledged, channel not updated. | US-046 |
+| FR-088 | Acknowledgement is initiated only from the product. The system exposes no endpoint for Slack (or any third party) to acknowledge an alert, and requires no publicly reachable address. | US-046 |
 
 ## 6. Non-functional requirements
 

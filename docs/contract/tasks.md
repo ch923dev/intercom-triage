@@ -1,6 +1,6 @@
 # Intercom Triage — Tasks
 
-**Status:** ready · **Version:** 2.3 · **Implements:** `spec.md` v2.4, `plan.md` v2.3
+**Status:** ready · **Version:** 2.4 · **Implements:** `spec.md` v2.5, `plan.md` v2.4
 
 Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](../_archive/tasks/).
 
@@ -248,6 +248,17 @@ already authenticated and already return everything the surface needs.
 - T181 — Webapp data layer: `BugSeverity` + `BugAlert` in `types/api.ts` mirroring `BugAlertRead` field-for-field (hand-mirrored, as every type here is — no codegen step, invariant #2 untouched because an alert is board-state, not conversation shape); `listBugAlerts` / `dismissBugAlert` on `api/client.ts`; `stores/bugAlerts.ts` with `load()` and `dismiss()`. `dismiss` splices in the single row the endpoint returns rather than refetching the list — a refetch would flicker and would let a detection landing between the two calls clobber the view. `pendingCount` (recorded, not dismissed) for the nav badge. FR-081/FR-083, US-045, plan §21.
 - T182 — `components/BugAlertsPage.vue` + nav wiring: worst-first list with severity colour + label, title linked to the conversation, the evidence quote, confidence, occurrences, first/last detection, and delivery state (announced / waiting / dismissed); per-row Dismiss; severity + state filters applied client-side over the loaded list; Slack deep link built from `slack_channel` + `slack_ts` (`.` stripped), rendered only when both are present so a never-announced alert gets no broken link. `'bugs'` joins the `View` union, `App.vue` renders it, `Topbar.vue` gains the entry + pending badge. Loaded on first open, not in `loadAll()` — the board does not need it and bootstrap is already four round-trips. FR-080/FR-082/FR-083, US-045, plan §21.
 
+### Phase 24 — Bug-alert acknowledgement (US-046 · spec v2.5 · plan §22)
+
+Cross-package: a migration, a new Slack verb, an endpoint, and the webapp control.
+Acknowledgement travels outward only — the product is never made reachable *from* Slack
+(FR-088), so there is no interactivity endpoint, no signing secret, and no allowlist change.
+
+- T183 — Migration `0028` + state: `bug_alerts.acked_at` (naive UTC) + `bug_alerts.acked_by` (`users.id`, `ON DELETE SET NULL`) plus a CHECK making the pair XOR-locked (`acked_at IS NULL` ⇔ `acked_by IS NULL`), mirroring invariant #10 / #14. Written with `batch_alter_table` because SQLite rebuilds the table to gain a table-level constraint. `BugAlertRead` gains `acked_at` + `acked_by: UserRef | None`, composed through a `users` join in `list_bug_alerts` exactly like `resolved_by` (invariant #17) — attribution stays board-state and never reaches `HydratedTicket` (invariant #2). Assert in a test that `record_bug_alerts` leaves both columns alone across a re-detection AND across an escalation. FR-084/FR-085, plan §22.
+- T184 — `chat.update` + ack service: generalize the retry/verdict loop in `clients/slack.py` over the endpoint so `update_message` inherits the body-not-status check, the per-attempt `outcome=error` logging, and the auth-error classification rather than reimplementing them; keep identifiers-only logging (NFR-016). `ack_bug_alert` commits `acked_at`/`acked_by` FIRST, then best-effort rebuilds the card through the SAME attachment builder as the original post (so the evidence quote cannot leak into `text`/`fallback` on this path either) and calls `chat.update` with the stored `slack_channel` + `slack_ts`. Idempotent — a second ack keeps the first operator and makes no Slack call. No Slack coordinates → local ack, no outward call. A Slack failure is logged and surfaced as partial success, never a rollback. FR-086/FR-087, plan §22.
+- T185 — `POST /bug-alerts/{ticket_id}/ack`: authenticated (the acknowledger IS `get_current_user`, so identity is never client-supplied), 404 on an unknown alert, returns the updated `BugAlertRead` plus whether the channel was updated. `get_slack` joins `deps.py` alongside `get_openrouter` / `get_intercom`, returning `None` when Slack is unconfigured. FR-084/FR-086/FR-088, plan §22.
+- T186 — Webapp ack: `acked_at` + `acked_by` on the `BugAlert` type, `ackBugAlert` on the client, `ack()` on the store splicing in the returned row (same reasoning as `dismiss`), and an Ack button on `BugAlertsPage.vue`. The row shows acknowledged-by-whom alongside dismissal rather than instead of it, and the state filter gains `acknowledged`. A mirror failure is reported on the row without implying the ack was lost. FR-084/FR-087, plan §22.
+
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
@@ -396,3 +407,9 @@ Every requirement maps to at least one task.
 | FR-081 | T181, T182 |
 | FR-082 | T182 |
 | FR-083 | T181, T182 |
+| US-046 | T183, T184, T185, T186 |
+| FR-084 | T183, T185, T186 |
+| FR-085 | T183 |
+| FR-086 | T184, T185 |
+| FR-087 | T184, T186 |
+| FR-088 | T185 |
