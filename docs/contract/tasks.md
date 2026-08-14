@@ -1,6 +1,6 @@
 # Intercom Triage — Tasks
 
-**Status:** ready · **Version:** 2.4 · **Implements:** `spec.md` v2.5, `plan.md` v2.4
+**Status:** ready · **Version:** 2.5 · **Implements:** `spec.md` v2.6, `plan.md` v2.5
 
 Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](../_archive/tasks/).
 
@@ -259,6 +259,18 @@ Acknowledgement travels outward only — the product is never made reachable *fr
 - T185 — `POST /bug-alerts/{ticket_id}/ack`: authenticated (the acknowledger IS `get_current_user`, so identity is never client-supplied), 404 on an unknown alert, returns the updated `BugAlertRead` plus whether the channel was updated. `get_slack` joins `deps.py` alongside `get_openrouter` / `get_intercom`, returning `None` when Slack is unconfigured. FR-084/FR-086/FR-088, plan §22.
 - T186 — Webapp ack: `acked_at` + `acked_by` on the `BugAlert` type, `ackBugAlert` on the client, `ack()` on the store splicing in the returned row (same reasoning as `dismiss`), and an Ack button on `BugAlertsPage.vue`. The row shows acknowledged-by-whom alongside dismissal rather than instead of it, and the state filter gains `acknowledged`. A mirror failure is reported on the row without implying the ack was lost. FR-084/FR-087, plan §22.
 
+### Phase 25 — Bug notes + recurrence suggestion (US-047 · spec v2.6 · plan §23)
+
+The incident record for a defect, and the retrieval that makes writing one worthwhile.
+Deliberately NOT playbooks: `suggest_playbooks` is category-scoped and bugs are not
+(plan §23). No AI call — embedding + cosine only, so the categorization cache key is
+untouched (inv #6).
+
+- T187 — Migration `0029` + state: `bug_alerts.note` (≤2000), `note_by` (`users.id`, `ON DELETE SET NULL`), `note_at`, CHECK-locked as a trio (all set or all null) like the parked fields (inv #14). `BugAlertRead` gains all three (`note_by` as `UserRef`, composed through the same `_user_refs` join as `acked_by`). Assert the trio survives re-detection, escalation, ack, and dismissal — it is absent from `record_bug_alerts`'s explicit `ON CONFLICT` set-clause, and a test pins that rather than trusting it. FR-089/FR-090, plan §23.
+- T188 — `similar_noted_bugs(session, ticket_id, top_n)`: candidates are every OTHER alert carrying a note, across all categories. Query text is the alert's evidence + its ticket's customer-visible text (parts + title, never `internal_notes` — inv #4); each candidate embeds from *its own* evidence + title, so the match is symptom-to-symptom and the note is only the payload. Cosine, sorted, cut at a similarity floor — unlike `suggest_playbooks`, which needs no floor because category filtering bounds it (plan §23). Returns `[]` when `encoder_available()` is false, when there are no noted alerts, or when there is nothing to embed; never raises. FR-091/FR-093/FR-094, plan §23.
+- T189 — Endpoints + the Slack card: `PUT /bug-alerts/{ticket_id}/note` (set / edit / clear via empty body; stamps `note_by` = authenticated caller as the MOST RECENT author) and `GET /bug-alerts/{ticket_id}/similar`. The alert card gains a "seen before" block naming the earlier ticket and quoting its note — built by the same `_alert_attachments` builder, and kept out of `text`/`fallback` like the evidence quote, because a note may itself quote a customer (NFR-016). Computed at delivery, which already runs outside `SYNC_LOCK` (inv #20), so the embedding work cannot stall ingest. FR-091/FR-092, plan §23.
+- T190 — Webapp: `note`/`note_by`/`note_at` on the `BugAlert` type, `setBugNote` + `getSimilarBugs` on the client, store actions splicing the returned row, an inline note editor per row, and a "seen before" panel showing the matched ticket, its score, and its note. Absent quietly when there is no match — an empty panel would read as a broken feature. FR-089/FR-092, plan §23.
+
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
@@ -413,3 +425,10 @@ Every requirement maps to at least one task.
 | FR-086 | T184, T185 |
 | FR-087 | T184, T186 |
 | FR-088 | T185 |
+| US-047 | T187, T188, T189, T190 |
+| FR-089 | T187, T189, T190 |
+| FR-090 | T187 |
+| FR-091 | T188, T189 |
+| FR-092 | T189, T190 |
+| FR-093 | T188 |
+| FR-094 | T188 |

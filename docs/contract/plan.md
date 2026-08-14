@@ -1,6 +1,6 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 2.4 · **Implements:** `spec.md` v2.5 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 2.5 · **Implements:** `spec.md` v2.6 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
 
@@ -1191,3 +1191,119 @@ attribution should not be erasable), re-ack on escalation (above), per-alert
 assignment to a *different* user than the acknowledger (the board already has
 ticket assignment — inventing a second owner field here would compete with it),
 and any retry/outbox for the mirror (above).
+
+---
+
+## §23 — Bug notes + recurrence suggestion (spec v2.6 · US-047 · FR-089..FR-094)
+
+A bug alert said what was wrong and never what it turned out to be. So the same
+defect gets investigated twice. This adds the incident record — and, more
+importantly, gets it back out when the defect recurs.
+
+### Why not playbooks
+
+Playbooks are the existing durable-knowledge primitive (invariant #13), and this
+was the obvious place to put it. It does not fit, for one structural reason:
+`suggest_playbooks` draws its candidates from `list_for_ticket`, i.e. the
+ticket's **effective category**. Bugs do not respect category. "Export button
+does nothing" arrives as Technical Issue, as Billing (they were exporting an
+invoice), and as How-To (they think they are doing it wrong) — the same defect,
+three categories. A category-scoped match misses precisely the recurrence this
+exists to catch.
+
+So bug notes are a second, deliberately narrow store: one note per alert, keyed
+by the alert, searched across all categories. Playbooks keep their job (a
+category's response recipe); a bug note is one defect's incident record.
+Promoting a note into a playbook is left as a follow-up rather than assumed.
+
+### Matching on the symptom, returning the answer
+
+The comparison is between **symptoms**, not between remedies: the query is the
+new alert's evidence quote plus its ticket's customer-visible text, and each
+candidate is embedded from *its* evidence plus title. The note is the payload
+that gets returned, never part of what is matched. Embedding the note would rank
+by remedy language ("clear the cache") and match a cache-clearing fix to any
+other cache-clearing fix, which is not the question being asked.
+
+Consequences worth stating:
+
+* **Only customer-visible text is embedded** — parts and title, never
+  `internal_notes` (invariant #4). Same rule the AI prompt follows, for the same
+  reason.
+* **No AI call.** This is embedding + cosine, so the categorization cache key is
+  untouched (invariant #6) and a suggestion costs no tokens.
+* **A similarity floor, unlike playbooks.** `suggest_playbooks` has no floor
+  because category filtering already bounds its candidates; a weak same-category
+  match is still same-category. Cross-category matching has no such backstop, so
+  a floor is required — below it we say nothing. A confidently-wrong prior fix is
+  worse than silence, because it will be followed.
+
+  **The floor was measured, and the first guess was wrong.** 0.55 was picked by
+  intuition; against the dev corpus (18 alerts, one noted) the two hand-confirmed
+  same-defect reports scored **0.504** and **0.532**, so 0.55 rejected both — the
+  feature would have shipped looking complete and never fired. An unmistakably
+  unrelated report scored 0.047. The floor is now **0.50**, under both confirmed
+  matches and ~1.5x above the middle band (0.30–0.33).
+
+  Two caveats recorded rather than smoothed over: the corpus is a single product,
+  whose support vocabulary overlaps heavily ("messages", "sending", "workflow"),
+  which inflates absolute similarity; and it is calibrated on ONE note. This
+  needs re-measuring once several notes exist. The lesson generalises — a
+  threshold on model output is not knowable by reasoning, only by looking at the
+  distribution.
+* **Candidates are the noted alerts, scored directly**, rather than a
+  `nearest_neighbours` sweep over `ticket_embeddings` intersected with noted
+  alerts. The k-NN route needs an arbitrary over-fetch (a match at rank 60 is
+  invisible at k=50) and matches whole-ticket text rather than the bug symptom.
+  Noted alerts are few by nature — an operator writes one per real defect — so
+  scoring them all is exact and bounded. This mirrors `suggest_playbooks`.
+
+### Where it is computed
+
+At **delivery**, not detection: the card is built in
+`deliver_pending_bug_alerts`, which already runs outside `SYNC_LOCK`, so the
+embedding work cannot stall ingest (invariant #20). The Bugs page recomputes on
+demand through the same function, which is what makes a note written *after* an
+announcement still reach the next reader (FR-092). Nothing about the match is
+stored: it is derived, like "ready to resume" (#14) and `SuggestedPlaybook`.
+
+### Degradation
+
+`embeddings.encoder_available()` false, no noted alerts, or no customer-visible
+text to embed → no suggestion, and the note itself stays fully readable and
+writable (FR-094). Hosted v1 runs embeddings off by scope, so **this is the
+normal hosted path, not an edge case** — the note is the durable half of the
+feature and must not depend on the suggestion half.
+
+### State shape
+
+`note` (TEXT, ≤2000), `note_by` (`users.id`, `ON DELETE SET NULL`), `note_at`,
+all on `bug_alerts`, CHECK-locked as a trio like the parked fields (#14): all
+set or all null. An empty note clears the trio. Migration `0029`.
+
+`note_by` is the **most recent** author, not the original — the board is
+team-wide (guardrail: no per-user data), so any operator may correct a note, and
+recording only the last editor is the honest thing a single column can say. No
+history table; if an audit trail is ever wanted, that is a deliberate addition,
+not something to fake with a second column.
+
+Like `acked_*`, the trio is absent from `record_bug_alerts`'s explicit
+`ON CONFLICT` set-clause, which is what makes FR-090 hold by construction.
+
+### Shape
+
+| File | Change |
+|---|---|
+| `alembic/versions/0029_*.py` | the trio + CHECK (batch mode) |
+| `models.py` | three columns + CheckConstraint |
+| `schemas.py` | `BugAlertRead.note/note_by/note_at`, `BugNoteRequest`, `SimilarBug` |
+| `services/bug_alerts.py` | `set_bug_note`, `similar_noted_bugs`, "seen before" block on the card |
+| `routers/bug_alerts.py` | `PUT /bug-alerts/{id}/note`, `GET /bug-alerts/{id}/similar` |
+| webapp | note editor + "seen before" panel on the row, store actions |
+
+### Not in scope
+
+Promoting a note to a playbook (a real follow-up, deliberately not assumed);
+note history / per-author audit; matching across *un*noted alerts (nothing to
+offer); operator-tunable floor or top-N (constants until there is evidence about
+the right values); and any AI-authored note — the note is what a human learned.

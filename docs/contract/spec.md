@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 2.5 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 2.6 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v2.5:** a bug alert can carry what was learned about it, and that knowledge comes back. Added US-047 and FR-089..FR-094. An operator writes a note on an alert — root cause, workaround, what was actually done — and when a *similar* bug is detected later, the system surfaces the earlier bug and its note, both in the Slack announcement and on the review page. Matching is on the bug's symptom, not on the note, and is deliberately **not** limited to one category: the same defect arrives worded differently and filed differently. Distinct from playbooks (US-020), which stay category-scoped response recipes; a bug note is the incident record for one defect. No new AI call and no change to the categorization cache.
 
 **Changes from v2.4:** a bug alert can be acknowledged, and the acknowledgement reaches the channel. Added US-046 and FR-084..FR-088. Acknowledgement is a state of its own, distinct from dismissal: acknowledged means *someone owns this*, dismissed means *this is closed out or was never a bug*. The operator acknowledges on the board and the already-posted Slack message rewrites itself in place to name them — so the channel learns it without anyone typing there, and without the product accepting inbound traffic from Slack. Detection, dedup, the cache key, and the announcement path are untouched.
 
@@ -554,6 +556,21 @@ Acceptance:
 - Acknowledging twice changes nothing — the original acknowledger and time stand, and Slack is not re-poked.
 - A severity escalation does not clear the acknowledgement. Ownership is not revoked by the bug getting worse; the escalation is already announced under the original message, where the acknowledger sees it.
 
+### US-047 — What we learned about a bug, offered back when it recurs
+As an operator, I want to write down what a bug turned out to be and what fixed it, so that the next time the same defect walks in, whoever picks it up is told what we already know instead of investigating it from scratch.
+
+Acceptance:
+- An operator can write, edit, and clear a note on a bug alert — root cause, workaround, what was done — and the note records who last wrote it and when.
+- The note is durable operator knowledge: re-detection, escalation, acknowledgement, and dismissal all leave it untouched. Only an operator changes it.
+- When a new bug alert is announced, if an earlier *noted* bug is sufficiently similar, the announcement carries that earlier bug's identity and its note, so the fix is visible where triage starts.
+- The review page shows the same thing for any alert, recomputed when opened — so an alert announced before anyone wrote the note still benefits from it later.
+- Similarity is judged on what the customer reported, not on the note text: the symptom is what recurs, the note is the answer being retrieved.
+- Matching is not confined to a category. The same defect is routinely categorized differently depending on how the customer phrased it, and a match that respected category boundaries would miss exactly the recurrence this exists to catch.
+- A weak match is not offered. Below a confidence floor the system says nothing rather than proposing an unrelated bug's fix, because a wrong prior fix costs more than no suggestion.
+- An alert never matches itself, and only alerts that actually carry a note are ever offered.
+- Where semantic matching is unavailable, notes remain writable and readable and no suggestion is offered. The feature degrades to silence, never to an error.
+- The note is team-wide, like the rest of the board: any operator may edit it, and the record shows the most recent author.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -648,6 +665,12 @@ Acceptance:
 | FR-086 | Acknowledging an announced alert updates that alert's existing Slack message in place, so the announcement itself shows who acknowledged it and when. No second message is posted. An alert that was never announced is acknowledged with no outward call. | US-046 |
 | FR-087 | The acknowledgement is recorded before Slack is contacted, and a Slack failure neither reverses it nor fails the operator's request. The failure is logged and reported as a partial success — acknowledged, channel not updated. | US-046 |
 | FR-088 | Acknowledgement is initiated only from the product. The system exposes no endpoint for Slack (or any third party) to acknowledge an alert, and requires no publicly reachable address. | US-046 |
+| FR-089 | A bug alert carries an optional operator note (root cause / workaround / what was done), with the identity of its most recent author and the time it was written. The three move together or not at all. Setting an empty note clears all three. | US-047 |
+| FR-090 | The note is never written or cleared by detection, delivery, acknowledgement, or dismissal — only by an operator editing it. | US-047 |
+| FR-091 | On announcing a bug alert, the system offers the most similar earlier alert that carries a note, together with that note, inside the announcement. Similarity is computed over what the customer reported (the alert's evidence and the ticket's customer-visible text), never over note text, and never over team-only internal notes. | US-047 |
+| FR-092 | The same suggestion is available per alert on demand and is recomputed at that moment, so notes written after an announcement still reach an operator reviewing the alert. | US-047 |
+| FR-093 | Candidate matches exclude the alert itself and any alert without a note, span all categories, and are rejected below a similarity floor — no suggestion is preferable to an unrelated one. | US-047 |
+| FR-094 | Where semantic matching is unavailable or there is nothing to compare against, notes stay fully readable and writable and no suggestion is produced. This is not an error state. | US-047 |
 
 ## 6. Non-functional requirements
 
