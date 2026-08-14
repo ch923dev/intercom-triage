@@ -1,8 +1,10 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 2.2 · **Implements:** `spec.md` v2.3 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 2.3 · **Implements:** `spec.md` v2.4 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
+
+**Changes from v2.2:** adds §21 — the bug-alert review surface in the webapp (spec v2.4, US-045, FR-080..FR-083). Pure webapp: a Pinia store over the endpoints §20 already ships, a page in the existing in-memory router, and a nav badge. No backend change, no new endpoint, and `HydratedTicket` untouched.
 
 **Changes from v2.0:** early bug detection → Slack alerts. Adds §20: the bug verdict as a fifth categorization facet, the `bug_alerts` primary-key dedup guarantee + `posted_at IS NULL` outbox, the record/deliver split, the post-only Slack client, and the read/dismiss endpoints. Spec v2.2 implemented by T173–T178 (migration 0027).
 
@@ -1014,3 +1016,67 @@ Per-severity channels (config is a plain string, not a dict), cross-ticket bug g
 (that is clustering, roadmap 3.1), any webapp surface, interactive Slack actions
 (dismiss-from-Slack needs a public request URL and signature verification), and
 backfilling historical conversations.
+
+---
+
+## §21 — Bug-alert review surface (spec v2.4 · US-045 · FR-080..FR-083)
+
+Pure webapp. §20 already ships both endpoints (FR-079) and they are already
+authenticated, so this section adds **no backend code, no endpoint, and no schema
+change**. `HydratedTicket` is untouched (invariant #2) — an alert is board-state
+about a ticket, not part of the conversation contract, and it stays on its own
+type exactly as `BugAlertRead` does server-side.
+
+### Why a page, not a card chip
+
+The board is a triage queue; the alert list is a **review queue with a different
+verdict** ("is this really a bug?"). It is read worst-first across all tickets,
+including ones that have aged off the board, and its rows include `low` and
+dismissed entries that must never appear as board noise. That is the
+`ProposalsPage` shape, not the `ResolutionChip` shape. A per-card marker is a
+plausible later addition; it is not the surface that closes the gap this section
+exists for (dismissing a false positive without `curl`).
+
+### Shape
+
+- **`types/api.ts`** — `BugSeverity` + `BugAlert`, mirroring `BugAlertRead` field
+  for field. Mirrored by hand like every other type here; there is no codegen
+  step and there will not be one.
+- **`api/client.ts`** — `listBugAlerts(params?)` and `dismissBugAlert(ticketId)`.
+  Filters ride the query string so the server keeps doing the ordering.
+- **`stores/bugAlerts.ts`** — Pinia store: `alerts`, `loading`, `error`, `load()`,
+  `dismiss(ticketId)`. `dismiss` replaces the one row from the endpoint's response
+  rather than refetching the list, so the page does not flicker and a concurrent
+  detection elsewhere is not clobbered by a stale list. A `pendingCount` getter
+  (recorded, not dismissed) feeds the nav badge (FR-083).
+- **`components/BugAlertsPage.vue`** — the list. Severity is colour + label, the
+  title links to Intercom, the evidence quote is quoted, and delivery state is one
+  of announced / waiting / dismissed. Two filters (severity, state), applied
+  client-side over the loaded list — the set is small and the endpoint is already
+  the calibration surface.
+- **`stores/view.ts` + `App.vue` + `Topbar.vue`** — `'bugs'` joins the `View`
+  union, the page renders in the existing shell, and the nav gains an entry with
+  the pending badge. The in-memory router stays as-is; no vue-router.
+
+### Slack deep link (FR-082)
+
+Built client-side from the stored pair: `https://slack.com/archives/{channel}/p{ts}`
+with the `.` stripped from `ts`. Either half missing → no link rendered, never a
+broken one. Nothing new is stored for this; `slack_channel` and `slack_ts` are
+already on the record because escalation threading needs them.
+
+### Load timing
+
+The store loads when the page is first opened, not in `App.vue`'s `loadAll()`.
+Bug alerts are not needed to render the board, and bootstrap is already four
+round-trips. The nav badge therefore reads zero until the page has been visited
+once — accepted, and the alternative (a fifth bootstrap call for a surface most
+sessions never open) is the worse trade.
+
+### Deliberately not in this section
+
+Undismiss (dismissal is meant to be final — FR-076 keeps it sticky against
+re-detection), editing severity or evidence by hand (they are AI output; an
+operator-edited "detection" is not a detection), a per-card board marker, and
+anything that posts to Slack from the client (invariant: the backend owns
+delivery, NFR-015 keeps the token server-side).

@@ -86,3 +86,6 @@ canvas.json.bak
 # ── Local agent tooling (machine-specific; carry Bearer tokens — never commit) ──
 .mcp.json
 opencode.json
+
+# Impeccable design-hook caches (per-directory, tool-local)
+.impeccable/

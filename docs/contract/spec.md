@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 2.3 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 2.4 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v2.3:** bug alerts become reviewable in the product. Added US-045 and FR-080..FR-083 — the alerts recorded by US-044 are readable and dismissible from the webapp, closing the gap where dismissing a false positive required calling the API by hand. No backend behavior changes: the read and dismiss endpoints already exist (FR-079) and detection, dedup, and announcement are untouched.
 
 **Changes from v2.2 (from the first live run):** evidence provenance is now enforced, not merely requested — added FR-075a after a live alert quoted a *support agent* describing the defect as though the customer had reported it. Added FR-077a: the announcement carries reporter identity and ticket context, so a bug can be triaged from the channel. No change to detection timing, dedup, or the cache key.
 
@@ -36,7 +38,7 @@ Reduce the time spent triaging Intercom conversations. The native Intercom UI re
 
 ## 2. Scope
 
-In scope: a hosted backend and a webapp surface shared by a team. Intercom integration server-side via a workspace Access Token (the backend polls `api.intercom.io`). AI categorization and summarization against a curated taxonomy. AI proposal flow for new categories. Manual category override that persists. Dynamic category curation. **Authentication via delegated OnlySales identity** (the backend proxies login, mirrors the user, and issues its own session). **Multi-user shared board** — one Intercom workspace, one ticket pool, many operators. **Ticket assignment + My Queue**. **Attribution** — manual resolve and recategorize stamp the acting operator. **Outbound Slack alerts for early-detected product bugs** (one-way, post-only).
+In scope: a hosted backend and a webapp surface shared by a team. Intercom integration server-side via a workspace Access Token (the backend polls `api.intercom.io`). AI categorization and summarization against a curated taxonomy. AI proposal flow for new categories. Manual category override that persists. Dynamic category curation. **Authentication via delegated OnlySales identity** (the backend proxies login, mirrors the user, and issues its own session). **Multi-user shared board** — one Intercom workspace, one ticket pool, many operators. **Ticket assignment + My Queue**. **Attribution** — manual resolve and recategorize stamp the acting operator. **Outbound Slack alerts for early-detected product bugs** (one-way, post-only), reviewable and dismissible from the webapp.
 
 Out of scope: **multi-tenancy** (no per-tenant data isolation; every authenticated user sees the same tickets; no `tenant_id`), per-user Intercom tokens, replying to tickets from the tool, long-term analytics, helpdesks other than Intercom, mobile-native surfaces, webhook-driven live updates (backlog). **Per-user follow-ups/notes** (deferred to Phase 4 — `note_entries.user_id` not yet active). **pgvector/semantic layer on Postgres** (deferred — hosted v1 runs embeddings/clustering off).
 
@@ -525,6 +527,17 @@ Acceptance:
 - With Slack unconfigured, detection and recording still run and remain readable; only announcement is disabled.
 - Alerts are readable through the API, filterable by severity and by whether they have been announced.
 
+### US-045 — Bug alerts reviewable in the product
+As an operator, I want to review and dismiss detected bugs from the tool I already have open, rather than calling the API by hand — a false positive I cannot dismiss is one that keeps costing the channel trust.
+
+Acceptance:
+- Recorded bug alerts are readable in the webapp on their own page, worst severity first, each showing severity, the ticket title linked to the conversation, the customer's evidence quote, confidence, occurrence count, when it was first and last detected, and whether it has been announced.
+- An operator can dismiss an alert in one action from that page; the row updates in place, and the alert is never announced again.
+- Nothing is hidden by default. Dismissed alerts and alerts below the announcement floor stay visible, because this is the calibration surface — the operator narrows it by choice, not by default.
+- An announced alert offers a direct link to its Slack message; one that was never announced offers no link rather than a broken one.
+- The navigation shows how many alerts still await a decision.
+- The page never creates or edits an alert beyond dismissing it — detection stays the AI's job.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -610,6 +623,10 @@ Acceptance:
 | FR-077a | The announcement carries enough context to triage without opening the conversation: severity (as a colour and a label), the ticket title linked to the conversation, the evidence quote, the reporter's name / email / user id / location / company when known, ticket state and age, current owner, the AI summary, category, confidence, occurrence count, priority, sentiment, and labels. Every field is omitted rather than shown empty, and a record whose ticket no longer exists still announces with severity and evidence alone. The notification/preview line carries no evidence quote. | US-044 |
 | FR-078 | No Slack call occurs within a sync/ingest cycle. Announcement runs on its own interval-gated schedule (default off). A Slack outage leaves records unannounced rather than lost; they are announced on a later pass, including after a restart. With Slack unconfigured, detection and recording continue and only announcement is disabled. | US-044 |
 | FR-079 | `GET /bug-alerts` lists recorded bug alerts with severity, confidence, evidence, occurrence count, announcement state, and ticket context, filterable by `severity` and by announced/unannounced. `POST /bug-alerts/{ticket_id}/dismiss` dismisses one (idempotent; 404 when unknown). Both require authentication. | US-044 |
+| FR-080 | The webapp presents recorded bug alerts as their own page, ordered worst severity first. Each entry shows severity, the ticket title linked to the conversation, the evidence quote, confidence, occurrence count, first/last detection, and delivery state (announced / awaiting announcement / dismissed). Dismissed and below-floor entries are listed, not hidden; the operator narrows the list by severity and by state. An entry whose ticket has aged out still lists, identified by ticket id. | US-045 |
+| FR-081 | Dismissal is available per entry and drives the existing dismiss endpoint. The entry updates in place without reloading the page, and a failed dismissal reports the failure and leaves the entry unchanged. Dismissal is the only mutation this surface performs. | US-045 |
+| FR-082 | An announced entry offers a direct link to its Slack message, derived from the stored channel and message identity. An entry without both offers no link rather than a broken one. | US-045 |
+| FR-083 | The navigation carries a count of alerts awaiting a decision — recorded and not dismissed — so an operator sees pending bug review without opening the page. | US-045 |
 
 ## 6. Non-functional requirements
 

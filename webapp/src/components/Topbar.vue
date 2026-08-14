@@ -7,6 +7,7 @@
 import { computed } from 'vue';
 import Mono from './Mono.vue';
 import { useAuthStore } from '@/stores/auth';
+import { useBugAlertsStore } from '@/stores/bugAlerts';
 import { useCategoriesStore } from '@/stores/categories';
 import { useFollowupsStore } from '@/stores/followups';
 import { useSavedViewsStore } from '@/stores/savedViews';
@@ -22,6 +23,7 @@ const tickets = useTicketsStore();
 const tweaks = useTweaksStore();
 const categories = useCategoriesStore();
 const followups = useFollowupsStore();
+const bugAlerts = useBugAlertsStore();
 const savedViews = useSavedViewsStore();
 const view = useViewStore();
 
@@ -33,6 +35,7 @@ const NAV: { id: View; label: string }[] = [
   { id: 'playbooks', label: 'Playbooks' },
   { id: 'snippets', label: 'Snippets' },
   { id: 'stats', label: 'Stats' },
+  { id: 'bugs', label: 'Bugs' },
 ];
 
 const lastSync = computed(() => {
@@ -136,6 +139,11 @@ async function onLogout() {
         }}</span>
         <span v-else-if="n.id === 'followups' && followups.pendingCount" class="nav-badge">{{
           followups.pendingCount
+        }}</span>
+        <!-- Reads 0 until the Bugs page has been opened once: the store loads
+             lazily so the board's bootstrap stays four round-trips (plan §21). -->
+        <span v-else-if="n.id === 'bugs' && bugAlerts.pendingCount" class="nav-badge">{{
+          bugAlerts.pendingCount
         }}</span>
       </button>
     </nav>
