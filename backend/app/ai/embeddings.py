@@ -20,6 +20,7 @@ encoder via `set_encoder`, so `pytest` never downloads or runs the real model.
 from __future__ import annotations
 
 import logging
+import math
 import struct
 from collections.abc import Iterable
 from typing import Protocol
@@ -115,6 +116,22 @@ def embed_text(text_input: str) -> list[float]:
 
 
 # ── Text extraction (invariant #4) ────────────────────────────────────────────
+
+
+def cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity of two equal-length vectors. Returns 0.0 if either is a
+    zero vector (degenerate, no direction to compare).
+
+    Lives here rather than in a service because more than one ranker needs it —
+    playbook suggestion and bug-recurrence matching — and two copies of the same
+    six lines is two places for a sign or a norm to go wrong.
+    """
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 def _parts_text(parts: Iterable[ConversationPartSchema]) -> str:

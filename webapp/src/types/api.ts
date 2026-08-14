@@ -166,6 +166,26 @@ export interface BugAlert {
   // so a row can carry both — an alert that was picked up and then closed out.
   acked_at: string | null;
   acked_by: UserRef | null;
+  // The incident record: what this defect turned out to be. `note_by` is the
+  // MOST RECENT author — the board is team-wide, so anyone may correct a note.
+  note: string | null;
+  note_by: UserRef | null;
+  note_at: string | null;
+  title: string | null;
+  url: string | null;
+}
+
+// An earlier noted bug whose SYMPTOM resembles this one's. Derived server-side
+// per request, never stored — so a note written after an alert was announced
+// still reaches whoever opens it. `score` is cosine similarity in [-1, 1];
+// matches below the server's floor are not returned at all.
+export interface SimilarBug {
+  ticket_id: string;
+  severity: BugSeverity;
+  score: number;
+  note: string;
+  note_by: UserRef | null;
+  note_at: string | null;
   title: string | null;
   url: string | null;
 }

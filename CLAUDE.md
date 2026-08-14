@@ -132,6 +132,21 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     (owned vs finished, a row may carry both); and like `posted_*` it is absent
     from the record pass's explicit `ON CONFLICT` set-clause, which is the only
     reason it survives re-detection and escalation.
+    **The bug note is the incident record, and it is matched cross-category.**
+    `note`/`note_by`/`note_at` (migration 0029, CHECK-locked trio) are durable
+    operator knowledge like a playbook (#13) — absent from the record pass's
+    set-clause, so re-detection/escalation/ack/dismiss never touch them. The
+    recurrence lookup (`similar_noted_bugs`) is deliberately NOT scoped by
+    category the way `suggest_playbooks` is: the same defect arrives as Technical
+    Issue, Billing, and How-To depending on the customer's wording, so a
+    category-scoped match misses the recurrence it exists to catch. It matches
+    symptom-to-symptom (evidence + customer-visible text — never `internal_notes`
+    per #4, and never the note itself, which would rank by remedy language), and
+    it applies a similarity floor that playbook suggestion does not need, because
+    a cross-category match has no category to backstop a bad score. Embedding +
+    cosine only — no AI call, so the cache key is untouched (#6) — computed at
+    delivery (outside `SYNC_LOCK`) and re-derived per request, never stored. It
+    returns nothing when embeddings are off, which is the hosted-v1 default.
     **The evidence quote's provenance is enforced in code, not asked for in the
     prompt.** `parts[]` legitimately carries admin replies (#3) and the model
     will quote our own agent describing the defect — it did, live, 1 in 14.

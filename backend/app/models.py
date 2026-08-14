@@ -442,6 +442,16 @@ class BugAlert(Base):
     acked_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    # Phase 25 (T187) — the incident record: what this defect turned out to be.
+    # Durable operator knowledge, like a playbook (invariant #13) and unlike
+    # anything else on this row: detection, delivery, ack, and dismissal all
+    # leave it alone (FR-090). `note_by` is the MOST RECENT author — the board is
+    # team-wide, so anyone may correct a note; there is no history table.
+    note: Mapped[str | None] = mapped_column(Text)
+    note_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    note_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     __table_args__ = (
         CheckConstraint(
@@ -462,6 +472,16 @@ class BugAlert(Base):
         CheckConstraint(
             "(acked_at IS NULL) = (acked_by IS NULL)",
             name="bug_alerts_ack_pair_check",
+        ),
+        # A note with no author or no time records nothing; the trio moves together.
+        CheckConstraint(
+            "(note IS NULL AND note_by IS NULL AND note_at IS NULL) "
+            "OR (note IS NOT NULL AND note_by IS NOT NULL AND note_at IS NOT NULL)",
+            name="bug_alerts_note_trio_check",
+        ),
+        CheckConstraint(
+            "note IS NULL OR length(note) <= 2000",
+            name="bug_alerts_note_len_check",
         ),
         # The delivery loop's only query: undelivered, undismissed rows.
         Index("ix_bug_alerts_outbox", "posted_at", "dismissed_at"),

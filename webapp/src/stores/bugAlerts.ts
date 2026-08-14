@@ -9,7 +9,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/api/client';
-import type { BugAlert } from '@/types/api';
+import type { BugAlert, SimilarBug } from '@/types/api';
 
 export const useBugAlertsStore = defineStore('bugAlerts', () => {
   /** Worst severity first, then most recently detected. Server-ordered. */
@@ -21,6 +21,11 @@ export const useBugAlertsStore = defineStore('bugAlerts', () => {
   /** Ticket ids with an ack request in flight. Separate from `dismissing`: both
    *  buttons live on one row and only the clicked one should go quiet. */
   const acking = ref<Set<string>>(new Set());
+  /** Ticket ids with a note save in flight. */
+  const savingNote = ref<Set<string>>(new Set());
+  /** `{ticket_id: matches}` — "seen before" results, cached per alert. An empty
+   *  array is a loaded answer meaning "no precedent", NOT "not fetched yet". */
+  const similar = ref<Record<string, SimilarBug[]>>({});
   /** Ticket ids acknowledged locally whose Slack message could NOT be updated.
    *  Surfaced on the row so the operator knows the channel is out of date —
    *  the ack itself succeeded, so this is a caveat, not an error. */
@@ -100,16 +105,63 @@ export const useBugAlertsStore = defineStore('bugAlerts', () => {
     }
   }
 
+  /**
+   * Write or clear the incident record. Same single-row splice as the others.
+   *
+   * A saved note can change what `similar` returns for OTHER alerts, so any
+   * cached matches are dropped — recomputing on next open is cheaper than
+   * reasoning about which cached entries a new note invalidated.
+   */
+  async function saveNote(ticketId: string, note: string): Promise<void> {
+    savingNote.value = new Set(savingNote.value).add(ticketId);
+    error.value = null;
+    try {
+      const updated = await api.setBugNote(ticketId, note);
+      alerts.value = alerts.value.map((a) => (a.ticket_id === ticketId ? updated : a));
+      similar.value = {};
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      const next = new Set(savingNote.value);
+      next.delete(ticketId);
+      savingNote.value = next;
+    }
+  }
+
+  /**
+   * Load "seen before" matches for one alert, if not already loaded.
+   *
+   * An empty array is a real answer (no precedent, or semantic matching is off),
+   * so it is stored as such — without this the page would refetch forever on
+   * every alert that has no match, which is most of them.
+   */
+  async function loadSimilar(ticketId: string): Promise<void> {
+    if (ticketId in similar.value) return;
+    try {
+      const matches = await api.getSimilarBugs(ticketId);
+      similar.value = { ...similar.value, [ticketId]: matches };
+    } catch {
+      // A failed lookup is not worth a page-level error: the alert itself is
+      // intact and the hint is an enrichment. Cache the miss so it settles.
+      similar.value = { ...similar.value, [ticketId]: [] };
+    }
+  }
+
   return {
     alerts,
     loading,
     error,
     dismissing,
     acking,
+    savingNote,
     mirrorFailed,
+    similar,
     pendingCount,
     load,
     dismiss,
     ack,
+    saveNote,
+    loadSimilar,
   };
 });

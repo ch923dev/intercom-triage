@@ -18,7 +18,7 @@ Two properties are load-bearing and easy to lose in a refactor:
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -30,13 +30,14 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.ai import embeddings
 from app.ai.pipeline import CategorizationResult
 from app.clients.slack import SlackAuthError, SlackClient
 from app.config import AppConfig
 from app.metrics import metrics
 from app.models import BugAlert, Category, Ticket, User
 from app.observability import log_event
-from app.schemas import BugAlertRead, UserRef
+from app.schemas import BugAlertRead, SimilarBug, UserRef
 from app.util import naive_utcnow
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,8 @@ _SEVERITY_COLOR: dict[str, str] = {"high": "#E01E5A", "medium": "#ECB22E", "low"
 _MAX_FIELDS = 10
 # The card is a triage prompt, not the ticket. Anything longer belongs in Intercom.
 _SUMMARY_CHARS = 300
+# A note may run to 2000 chars; the card shows enough to act on and links the rest.
+_NOTE_CHARS = 400
 
 
 def _at_or_above(floor: str) -> list[str]:
@@ -265,8 +268,42 @@ def _ack_line(alert: BugAlert, acker: str | None) -> str | None:
     return f"✅ Acknowledged by {acker or 'an operator'} · {stamp}"
 
 
+def _seen_before_blocks(prior: SimilarBug | None) -> list[dict[str, Any]]:
+    """ "We have seen this before, and here is what we learned" — or nothing.
+
+    Absent rather than empty when there is no match: a "no similar bugs" line on
+    every alert would be noise on the majority of them, and would train people to
+    skip the block on the one that matters.
+
+    The note goes in a block, never in `text`/`fallback`, for the same reason the
+    evidence quote does not: an operator's note routinely quotes the customer,
+    and those two fields surface in push previews (NFR-016).
+    """
+    if prior is None:
+        return []
+    where = f"<{prior.url}|{prior.title}>" if prior.url and prior.title else f"`{prior.ticket_id}`"
+    who = f" — {prior.note_by.name}" if prior.note_by and prior.note_by.name else ""
+    return [
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"⤷ *Seen before* · {where} · {prior.score:.0%} similar\n"
+                    f">{_clip(prior.note, _NOTE_CHARS)}{who}"
+                ),
+            },
+        },
+    ]
+
+
 def _alert_attachments(
-    alert: BugAlert, ctx: TicketContext, *, acker: str | None = None
+    alert: BugAlert,
+    ctx: TicketContext,
+    *,
+    acker: str | None = None,
+    prior: SimilarBug | None = None,
 ) -> list[dict[str, Any]]:
     """The full alert card, wrapped in a severity-coloured attachment.
 
@@ -335,6 +372,8 @@ def _alert_attachments(
     ack = _ack_line(alert, acker)
     if ack is not None:
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ack}]})
+
+    blocks.extend(_seen_before_blocks(prior))
 
     return [
         {
@@ -406,6 +445,27 @@ def _escalation_text(alert: BugAlert) -> str:
     return f"⬆️ Escalated {alert.posted_severity} → {alert.severity} (seen {alert.occurrences}x)"
 
 
+async def _prior_fix_or_none(session: AsyncSession, ticket_id: str) -> SimilarBug | None:
+    """The best prior noted bug for the card, or None.
+
+    Swallows failures on purpose: an announcement must go out even if the encoder
+    is broken or a vector is malformed. The suggestion is an enrichment, and the
+    alert is the thing that must not be lost.
+    """
+    try:
+        matches = await similar_noted_bugs(session, ticket_id)
+    except Exception as exc:
+        log_event(
+            "bug_similar_lookup_error",
+            level=logging.WARNING,
+            op="delivery",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        return None
+    return matches[0] if matches else None
+
+
 async def deliver_pending_bug_alerts(
     session: AsyncSession,
     client: SlackClient,
@@ -471,10 +531,15 @@ async def deliver_pending_bug_alerts(
                     ticket_id=alert.ticket_id,
                 )
             else:
+                # Recurrence lookup happens here, not in the record pass: this
+                # loop is already outside SYNC_LOCK (invariant #20), so the
+                # embedding work cannot stall ingest. Best-effort — a matching
+                # failure must not cost the announcement itself.
+                prior = await _prior_fix_or_none(session, alert.ticket_id)
                 ts = await client.post_message(
                     channel=config.slack_bug_channel,
                     text=_fallback_text(alert, ctx),
-                    attachments=_alert_attachments(alert, ctx),
+                    attachments=_alert_attachments(alert, ctx, prior=prior),
                     ticket_id=alert.ticket_id,
                 )
         except SlackAuthError:
@@ -517,6 +582,7 @@ def _to_read(
     title: str | None = None,
     url: str | None = None,
     acked_by: UserRef | None = None,
+    note_by: UserRef | None = None,
 ) -> BugAlertRead:
     """Build the wire shape explicitly.
 
@@ -541,6 +607,9 @@ def _to_read(
         dismissed_at=alert.dismissed_at,
         acked_at=alert.acked_at,
         acked_by=acked_by,
+        note=alert.note,
+        note_by=note_by,
+        note_at=alert.note_at,
         title=title,
         url=url,
     )
@@ -554,6 +623,30 @@ async def _user_refs(session: AsyncSession, ids: set[int]) -> dict[int, UserRef]
         u.id: UserRef(id=u.id, name=u.name)
         for u in (await session.scalars(select(User).where(User.id.in_(ids)))).all()
     }
+
+
+def _actor_ids(alerts: Iterable[BugAlert]) -> set[int]:
+    """Every user id referenced by these alerts. One place to extend when a new
+    attribution column lands — otherwise a read path silently returns a null
+    actor for it, which looks like "nobody did this" rather than a bug."""
+    ids: set[int] = set()
+    for alert in alerts:
+        ids.update(i for i in (alert.acked_by, alert.note_by) if i is not None)
+    return ids
+
+
+async def _read_one(
+    session: AsyncSession, alert: BugAlert, *, title: str | None = None, url: str | None = None
+) -> BugAlertRead:
+    """`_to_read` with the attribution join resolved for a single alert."""
+    users = await _user_refs(session, _actor_ids([alert]))
+    return _to_read(
+        alert,
+        title=title,
+        url=url,
+        acked_by=users.get(alert.acked_by) if alert.acked_by is not None else None,
+        note_by=users.get(alert.note_by) if alert.note_by is not None else None,
+    )
 
 
 async def list_bug_alerts(
@@ -581,15 +674,14 @@ async def list_bug_alerts(
         stmt = stmt.where(BugAlert.posted_at.is_(None))
 
     rows = (await session.execute(stmt)).all()
-    users = await _user_refs(
-        session, {alert.acked_by for alert, _, _ in rows if alert.acked_by is not None}
-    )
+    users = await _user_refs(session, _actor_ids([alert for alert, _, _ in rows]))
     return [
         _to_read(
             alert,
             title=title,
             url=url,
             acked_by=users.get(alert.acked_by) if alert.acked_by is not None else None,
+            note_by=users.get(alert.note_by) if alert.note_by is not None else None,
         )
         for alert, title, url in rows
     ]
@@ -610,10 +702,7 @@ async def dismiss_bug_alert(session: AsyncSession, ticket_id: str) -> BugAlertRe
     if alert.dismissed_at is None:
         alert.dismissed_at = naive_utcnow()
         await session.commit()
-    users = await _user_refs(session, {alert.acked_by} if alert.acked_by is not None else set())
-    return _to_read(
-        alert, acked_by=users.get(alert.acked_by) if alert.acked_by is not None else None
-    )
+    return await _read_one(session, alert)
 
 
 async def ack_bug_alert(
@@ -652,9 +741,8 @@ async def ack_bug_alert(
         alert.acked_by = user_id
         await session.commit()
 
-    users = await _user_refs(session, {alert.acked_by} if alert.acked_by is not None else set())
-    acker = users.get(alert.acked_by) if alert.acked_by is not None else None
-    read = _to_read(alert, acked_by=acker)
+    read = await _read_one(session, alert)
+    acker = read.acked_by
 
     # Nothing to mirror: already acknowledged (so the message already says so),
     # Slack switched off, or an alert that was never announced — the last is a
@@ -691,3 +779,157 @@ async def ack_bug_alert(
 
     metrics.incr("bug_alerts_acked_total")
     return read, True
+
+
+# ── The incident record + recurrence ──────────────────────────────────────────
+
+# Cross-category matching has no category filter to fall back on, so a floor is
+# required — `suggest_playbooks` needs none because its candidates are already
+# same-category. Below this we say nothing: a confidently-wrong prior fix is
+# worse than silence, because someone will follow it.
+#
+# Measured, not guessed — but on thin evidence. Against the dev corpus (18 alerts,
+# 1 noted, all one product) scored against a note on "my messages arent sending":
+#
+#   0.55 0.53 0.53 0.51 0.51 0.50 | 0.45 0.45 | 0.33 0.31 0.30 | 0.23 … 0.05
+#
+# The two hand-confirmed same-defect reports ("messages on my account are not
+# working", "workflow stopped sending messages") scored 0.532 and 0.504, and an
+# unmistakably unrelated one ("cant find or make me a domain name") scored 0.047.
+# An earlier guess of 0.55 rejected BOTH true matches — the feature would have
+# looked implemented and never fired once.
+#
+# 0.50 sits under both confirmed matches and ~1.5x above the middle band. Note the
+# inflation risk: one product's support vocabulary overlaps heavily ("messages",
+# "sending", "workflow"), so absolute scores here run high and this floor is
+# calibrated on ONE note. Re-measure once a handful exist.
+_SIMILAR_MIN_SCORE = 0.50
+# Only the single best precedent is shown. The question a card answers is "has
+# anyone solved this?", not "here are five maybes" — so the floor guards the
+# quality of one suggestion rather than the length of a list.
+_SIMILAR_TOP_N = 1
+
+
+async def set_bug_note(
+    session: AsyncSession, ticket_id: str, *, note: str, user_id: int
+) -> BugAlertRead:
+    """Write, replace, or clear the incident record for one alert.
+
+    An empty (or whitespace-only) note CLEARS the trio rather than storing a
+    blank, so "no note" has exactly one representation — the same rule
+    `ticket_notes` follows by deleting its row.
+
+    `note_by` is the most recent author, not the original: the board is
+    team-wide, so a second operator correcting a note becomes its author. That
+    is a deliberate loss — see plan §23 on why there is no history table.
+    """
+    alert = await session.get(BugAlert, ticket_id)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="bug alert not found")
+
+    body = note.strip()
+    if body:
+        alert.note = body
+        alert.note_by = user_id
+        alert.note_at = naive_utcnow()
+    else:
+        # The trio is CHECK-locked, so it clears together or not at all.
+        alert.note = None
+        alert.note_by = None
+        alert.note_at = None
+    await session.commit()
+    metrics.incr("bug_notes_written_total" if body else "bug_notes_cleared_total")
+    return await _read_one(session, alert)
+
+
+def _symptom_text(alert: BugAlert, ctx: TicketContext) -> str:
+    """What the customer reported, for similarity purposes.
+
+    Evidence first (the customer's own words about the defect), then the ticket's
+    title and summary. Deliberately NOT the note: the note is the answer being
+    retrieved, and embedding it would rank by remedy language — matching any
+    cache-clearing fix to any other one, which is not the question. Never
+    `internal_notes` (invariant #4).
+    """
+    parts = [alert.evidence or "", ctx.title or "", ctx.summary or ""]
+    return "\n".join(p for p in parts if p).strip()
+
+
+async def similar_noted_bugs(
+    session: AsyncSession,
+    ticket_id: str,
+    *,
+    top_n: int = _SIMILAR_TOP_N,
+    min_score: float = _SIMILAR_MIN_SCORE,
+) -> list[SimilarBug]:
+    """Earlier noted bugs whose SYMPTOM resembles this one's, best first.
+
+    Deliberately unbounded by category: the same defect arrives as a Technical
+    Issue, as Billing, and as How-To depending on how the customer phrased it, so
+    a category-scoped match (what `suggest_playbooks` does) would miss exactly
+    the recurrence this exists to catch (plan §23).
+
+    Candidates are the noted alerts themselves, scored directly, rather than a
+    `nearest_neighbours` sweep intersected with them: k-NN needs an arbitrary
+    over-fetch (a match at rank 60 is invisible at k=50) and ranks whole-ticket
+    text instead of the bug symptom. An operator writes one note per real defect,
+    so the candidate set is small by nature and scoring all of it is exact.
+
+    Returns `[]` — never raises — when there is no encoder, no noted alert, or
+    nothing to embed. Hosted v1 runs embeddings off by scope, so the empty result
+    is the normal hosted path, not an edge case (FR-094).
+    """
+    if not embeddings.encoder_available():
+        return []
+
+    candidates = (
+        await session.scalars(
+            select(BugAlert).where(
+                BugAlert.note.is_not(None),
+                BugAlert.ticket_id != ticket_id,  # an alert never matches itself
+            )
+        )
+    ).all()
+    if not candidates:
+        return []
+
+    subject = await session.get(BugAlert, ticket_id)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="bug alert not found")
+
+    contexts = await _ticket_contexts(
+        session, [subject.ticket_id, *(c.ticket_id for c in candidates)]
+    )
+    query_text = _symptom_text(subject, contexts.get(subject.ticket_id, TicketContext()))
+    if not query_text:
+        return []
+
+    query_vec = embeddings.embed_text(query_text)
+    users = await _user_refs(session, {c.note_by for c in candidates if c.note_by is not None})
+
+    scored: list[SimilarBug] = []
+    for candidate in candidates:
+        ctx = contexts.get(candidate.ticket_id, TicketContext())
+        candidate_text = _symptom_text(candidate, ctx)
+        if not candidate_text or candidate.note is None:
+            continue
+        score = embeddings.cosine(query_vec, embeddings.embed_text(candidate_text))
+        if score < min_score:
+            continue
+        scored.append(
+            SimilarBug(
+                ticket_id=candidate.ticket_id,
+                severity=cast("Any", candidate.severity),
+                score=score,
+                note=candidate.note,
+                note_by=users.get(candidate.note_by) if candidate.note_by is not None else None,
+                note_at=candidate.note_at,
+                title=ctx.title,
+                url=ctx.url,
+            )
+        )
+
+    scored.sort(key=lambda s: s.score, reverse=True)
+    if scored:
+        metrics.incr("bug_similar_hits_total")
+    return scored[:top_n]

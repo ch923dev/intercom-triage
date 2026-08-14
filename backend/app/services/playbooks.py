@@ -10,7 +10,6 @@ The AI drafter reuses the OpenRouter client and excludes `internal_notes`
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 from fastapi import HTTPException
@@ -431,15 +430,8 @@ def _playbook_embedding_text(playbook: Playbook) -> str:
     return f"{playbook.label}\n\n{playbook.body}".strip()
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    """Cosine similarity of two equal-length vectors. Returns 0.0 if either is a
-    zero vector (degenerate, no direction to compare)."""
-    dot = sum(x * y for x, y in zip(a, b, strict=True))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+# Shared with bug-recurrence matching — see `embeddings.cosine`.
+_cosine = embeddings.cosine
 
 
 async def suggest_playbooks(

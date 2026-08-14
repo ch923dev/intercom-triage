@@ -5,7 +5,7 @@
      Slack announcement) and dismiss ("this is finished"). Detection stays the
      AI's job, and the backend owns every Slack call. -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import Mono from './Mono.vue';
 import { useBugAlertsStore } from '@/stores/bugAlerts';
 import { formatAgoFromDate, formatShortDateTime } from '@/utils/time';
@@ -80,6 +80,46 @@ function dismiss(ticketId: string) {
 function ack(ticketId: string) {
   void store.ack(ticketId).catch(() => undefined);
 }
+
+/** Ticket ids whose note editor is open. Editing is opt-in per row: a textarea on
+ *  every card would bury the alert content the page exists to show. */
+const editing = ref<Set<string>>(new Set());
+/** Draft note text per ticket, so an unsaved edit is not lost by a list refresh. */
+const drafts = ref<Record<string, string>>({});
+
+function startEditing(a: BugAlert) {
+  drafts.value = { ...drafts.value, [a.ticket_id]: a.note ?? '' };
+  editing.value = new Set(editing.value).add(a.ticket_id);
+}
+
+function stopEditing(ticketId: string) {
+  const next = new Set(editing.value);
+  next.delete(ticketId);
+  editing.value = next;
+}
+
+function saveNote(ticketId: string) {
+  void store
+    .saveNote(ticketId, drafts.value[ticketId] ?? '')
+    .then(() => stopEditing(ticketId))
+    .catch(() => undefined); // stays open so the text is not lost
+}
+
+/** Matches for one alert, or [] while still unfetched. */
+function priors(ticketId: string) {
+  return store.similar[ticketId] ?? [];
+}
+
+/** Fetch "seen before" for whatever is currently on screen. Per-alert and lazy:
+ *  each match is an embedding pass server-side, so it is not worth doing for rows
+ *  a filter has hidden. */
+watch(
+  visible,
+  (rows) => {
+    for (const a of rows) void store.loadSimilar(a.ticket_id);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -157,6 +197,56 @@ function ack(ticketId: string) {
               >open in Slack</a
             >
             <Mono :size="9" class="tid">{{ a.ticket_id }}</Mono>
+          </div>
+
+          <!-- "Seen before": an earlier bug someone already worked out. Rendered
+               only when there is a match — an empty panel on every alert would
+               train people to stop looking at the one that has something. -->
+          <div v-for="p in priors(a.ticket_id)" :key="p.ticket_id" class="prior">
+            <Mono :size="9" class="prior-head">
+              seen before ·
+              <a v-if="p.url" :href="p.url" target="_blank" rel="noopener">{{
+                p.title || p.ticket_id
+              }}</a>
+              <span v-else>{{ p.ticket_id }}</span>
+              · {{ Math.round(p.score * 100) }}% similar
+            </Mono>
+            <p class="prior-note">{{ p.note }}</p>
+            <Mono v-if="p.note_by" :size="9" class="prior-by">— {{ p.note_by.name }}</Mono>
+          </div>
+
+          <!-- The incident record for THIS bug. -->
+          <div class="note-block">
+            <template v-if="editing.has(a.ticket_id)">
+              <textarea
+                v-model="drafts[a.ticket_id]"
+                class="note-input"
+                rows="3"
+                maxlength="2000"
+                placeholder="Root cause, workaround, what was actually done…"
+              ></textarea>
+              <div class="note-actions">
+                <button
+                  class="note-save"
+                  :disabled="store.savingNote.has(a.ticket_id)"
+                  @click="saveNote(a.ticket_id)"
+                >
+                  Save
+                </button>
+                <button class="note-cancel" @click="stopEditing(a.ticket_id)">Cancel</button>
+                <Mono :size="9" class="note-hint">empty saves as no note</Mono>
+              </div>
+            </template>
+            <template v-else-if="a.note">
+              <p class="note-body">{{ a.note }}</p>
+              <div class="note-actions">
+                <Mono :size="9" class="note-by">
+                  noted by {{ a.note_by?.name ?? 'an operator' }}
+                </Mono>
+                <button class="note-edit" @click="startEditing(a)">Edit</button>
+              </div>
+            </template>
+            <button v-else class="note-edit" @click="startEditing(a)">Add note</button>
           </div>
         </div>
 
@@ -361,7 +451,7 @@ a.name:hover {
 /* Acknowledge is the more common action of the two — it reads first without
    becoming a filled button, which would outrank the severity chip. */
 .ack {
-  color: var(--ink-1);
+  color: var(--ink);
   border-color: var(--ink-3);
 }
 .done {
@@ -369,6 +459,88 @@ a.name:hover {
 }
 .acked-by {
   color: var(--ink-3);
+}
+/* Prior-fix panel. Inset and quieter than the alert itself: it is context for
+   the alert, not a competing alert. */
+.prior {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--panel);
+}
+.prior-head {
+  color: var(--ink-3);
+}
+.prior-head a {
+  color: var(--ink-2);
+}
+.prior-note {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+.prior-by {
+  color: var(--ink-3);
+}
+.note-block {
+  margin-top: 8px;
+}
+.note-body {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+.note-input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 8px;
+  color: var(--ink);
+  background: var(--bg);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  resize: vertical;
+}
+.note-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.note-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.note-by,
+.note-hint {
+  color: var(--ink-3);
+}
+.note-edit,
+.note-cancel,
+.note-save {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--bg);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.note-edit:hover,
+.note-cancel:hover,
+.note-save:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.note-save:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 /* The ack succeeded and only its mirror failed, so this is a caveat, not an
    error: same weight as the other meta, tinted to be noticed once. */

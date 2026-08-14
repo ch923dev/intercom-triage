@@ -19,7 +19,7 @@ from app.clients.slack import SlackClient
 from app.config import AppConfig
 from app.db import get_session
 from app.deps import CurrentUser, get_app_config, get_current_user, get_slack
-from app.schemas import BugAlertAckResult, BugAlertRead, BugSeverity
+from app.schemas import BugAlertAckResult, BugAlertRead, BugNoteRequest, BugSeverity, SimilarBug
 from app.services import bug_alerts as svc
 
 router = APIRouter(prefix="/bug-alerts", tags=["bug-alerts"])
@@ -66,3 +66,32 @@ async def ack_bug_alert(
         session, ticket_id, user_id=user.id, slack=slack, config=config
     )
     return BugAlertAckResult(alert=alert, slack_updated=slack_updated)
+
+
+@router.put("/{ticket_id}/note", response_model=BugAlertRead)
+async def set_bug_note(
+    ticket_id: str,
+    body: BugNoteRequest,
+    session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(get_current_user),
+) -> BugAlertRead:
+    """Write the incident record: root cause, workaround, what was done.
+
+    An empty note clears it. The caller becomes the note's most recent author —
+    the board is team-wide, so any operator may correct another's note.
+    """
+    return await svc.set_bug_note(session, ticket_id, note=body.note, user_id=user.id)
+
+
+@router.get("/{ticket_id}/similar", response_model=list[SimilarBug])
+async def similar_bugs(
+    ticket_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> list[SimilarBug]:
+    """Earlier noted bugs whose symptom resembles this one's, best first.
+
+    Recomputed per request, so a note written after this alert was announced
+    still reaches whoever opens it (FR-092). Empty — not an error — when semantic
+    matching is unavailable or nothing clears the similarity floor.
+    """
+    return await svc.similar_noted_bugs(session, ticket_id)

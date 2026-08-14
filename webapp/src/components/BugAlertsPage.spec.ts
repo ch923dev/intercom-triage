@@ -4,13 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BugAlertsPage from './BugAlertsPage.vue';
 import { useBugAlertsStore } from '@/stores/bugAlerts';
 import { api } from '@/api/client';
-import type { BugAlert } from '@/types/api';
+import type { BugAlert, SimilarBug } from '@/types/api';
 
 vi.mock('@/api/client', () => ({
   api: {
     listBugAlerts: vi.fn(),
     dismissBugAlert: vi.fn(),
     ackBugAlert: vi.fn(),
+    setBugNote: vi.fn(),
+    getSimilarBugs: vi.fn(),
   },
 }));
 
@@ -32,19 +34,47 @@ function make(over: Partial<BugAlert> = {}): BugAlert {
     dismissed_at: null,
     acked_at: null,
     acked_by: null,
+    note: null,
+    note_by: null,
+    note_at: null,
     title: 'Export broken',
     url: 'https://example.com/conv/T1',
     ...over,
   };
 }
 
-/** Mount with the store pre-seeded, bypassing onMounted's load. */
-async function mountWith(alerts: BugAlert[]) {
+/** Mount with the store pre-seeded, bypassing onMounted's load.
+ *
+ * `getSimilarBugs` defaults to no precedent: the page fetches it for every
+ * visible row, so without a default every test would trip over an unmocked call.
+ */
+async function mountWith(alerts: BugAlert[], priors: SimilarBug[] = []) {
   mocked.listBugAlerts.mockResolvedValue(alerts);
+  mocked.getSimilarBugs.mockResolvedValue(priors);
   const wrapper = mount(BugAlertsPage);
   await useBugAlertsStore().load();
+  await flush();
   await wrapper.vm.$nextTick();
   return wrapper;
+}
+
+/** Let queued microtasks settle — several actions are fire-and-forget. */
+function flush() {
+  return new Promise((r) => setTimeout(r, 0));
+}
+
+function makePrior(over: Partial<SimilarBug> = {}): SimilarBug {
+  return {
+    ticket_id: 'T-old',
+    severity: 'high',
+    score: 0.82,
+    note: 'stale cache key — clear session, re-export',
+    note_by: { id: 1, name: 'Christian' },
+    note_at: '2026-08-14T09:00:00Z',
+    title: 'Export button broken',
+    url: 'https://example.com/conv/T-old',
+    ...over,
+  };
 }
 
 describe('BugAlertsPage', () => {
@@ -232,6 +262,70 @@ describe('BugAlertsPage', () => {
     const rows = wrapper.findAll('li.card');
     expect(rows).toHaveLength(1);
     expect(rows[0].text()).toContain('owned');
+  });
+
+  it('shows a prior fix when one is offered', async () => {
+    const wrapper = await mountWith([make()], [makePrior()]);
+    const text = wrapper.text();
+    expect(text).toContain('seen before');
+    expect(text).toContain('Export button broken');
+    expect(text).toContain('82% similar');
+    expect(text).toContain('stale cache key');
+    expect(text).toContain('Christian');
+    expect(wrapper.get('.prior a').attributes('href')).toBe('https://example.com/conv/T-old');
+  });
+
+  it('shows no prior-fix panel when there is no precedent', async () => {
+    const wrapper = await mountWith([make()]);
+    // Absent, not empty — a "no similar bugs" line on every alert is noise.
+    expect(wrapper.find('.prior').exists()).toBe(false);
+  });
+
+  it('writes a note and shows its author', async () => {
+    const wrapper = await mountWith([make()]);
+    mocked.setBugNote.mockResolvedValue(
+      make({
+        note: 'stale cache key',
+        note_by: { id: 1, name: 'Christian' },
+        note_at: '2026-08-15T10:00:00Z',
+      }),
+    );
+
+    await wrapper.get('button.note-edit').trigger('click');
+    await wrapper.get('textarea.note-input').setValue('stale cache key');
+    await wrapper.get('button.note-save').trigger('click');
+    await flush();
+    await wrapper.vm.$nextTick();
+
+    expect(mocked.setBugNote).toHaveBeenCalledWith('T1', 'stale cache key');
+    expect(wrapper.text()).toContain('stale cache key');
+    expect(wrapper.text()).toContain('noted by Christian');
+    expect(wrapper.find('textarea.note-input').exists()).toBe(false); // editor closed
+  });
+
+  it('seeds the editor with the existing note so an edit is not a retype', async () => {
+    const wrapper = await mountWith([
+      make({ note: 'first take', note_by: { id: 1, name: 'C' }, note_at: '2026-08-15T09:00:00Z' }),
+    ]);
+    await wrapper.get('button.note-edit').trigger('click');
+    expect(wrapper.get<HTMLTextAreaElement>('textarea.note-input').element.value).toBe(
+      'first take',
+    );
+  });
+
+  it('keeps the editor open when saving fails, so the text is not lost', async () => {
+    const wrapper = await mountWith([make()]);
+    mocked.setBugNote.mockRejectedValue(new Error('offline'));
+
+    await wrapper.get('button.note-edit').trigger('click');
+    await wrapper.get('textarea.note-input').setValue('half-written thought');
+    await wrapper.get('button.note-save').trigger('click');
+    await flush();
+    await wrapper.vm.$nextTick();
+
+    const editor = wrapper.find<HTMLTextAreaElement>('textarea.note-input');
+    expect(editor.exists()).toBe(true);
+    expect(editor.element.value).toBe('half-written thought');
   });
 
   it('explains an empty list without implying a failure', async () => {
