@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 2.6 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 2.7 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v2.6:** the bug-alert surface is made to survive its own success. Added US-048 and FR-095..FR-097, all from a review of the shipped US-044..047 slices. Three facts drove it: the alert list is unbounded and nothing ever removes a row, so the calibration surface grows monotonically; the review page asks for a recurrence match for every row it renders, which costs rows × noted-alerts embedding work on one page open; and an unknown alert id answers 404 or an empty list depending on whether semantic matching happens to be available. Retention deliberately cannot touch a noted alert — the note is the recurrence corpus, so sweeping it would delete the knowledge US-047 exists to keep. No change to detection, dedup, the cache key, or the announcement path.
 
 **Changes from v2.5:** a bug alert can carry what was learned about it, and that knowledge comes back. Added US-047 and FR-089..FR-094. An operator writes a note on an alert — root cause, workaround, what was actually done — and when a *similar* bug is detected later, the system surfaces the earlier bug and its note, both in the Slack announcement and on the review page. Matching is on the bug's symptom, not on the note, and is deliberately **not** limited to one category: the same defect arrives worded differently and filed differently. Distinct from playbooks (US-020), which stay category-scoped response recipes; a bug note is the incident record for one defect. No new AI call and no change to the categorization cache.
 
@@ -571,6 +573,16 @@ Acceptance:
 - Where semantic matching is unavailable, notes remain writable and readable and no suggestion is offered. The feature degrades to silence, never to an error.
 - The note is team-wide, like the rest of the board: any operator may edit it, and the record shows the most recent author.
 
+### US-048 — The bug surface stays bounded and cheap as alerts pile up
+As an operator, I want the bug review surface to stay fast and finite after months of detection, so that the calibration list does not become a page that loads everything ever detected and re-derives every similarity match to render itself — and so that housekeeping never eats what we learned.
+
+Acceptance:
+- The alert list is bounded per request, with the worst-first ordering preserved, so a client cannot be handed an unbounded page as detection accumulates.
+- Alerts are subject to retention: a dismissed alert older than a configurable age may be removed. An alert carrying a note is **never** removed by retention regardless of age or dismissal — the note is the recurrence corpus, and deleting it would destroy exactly the knowledge the note exists to preserve.
+- Retention is off by default, and it never removes an alert that is still awaiting a decision or is still the most recent detection on its ticket.
+- Opening the review page performs no per-row similarity lookup. A recurrence match is fetched for an alert the operator actually opens, so page cost does not scale with the number of rows on screen.
+- An unknown alert id is reported as unknown by every bug-alert route, whether or not semantic matching is available. "No matches" and "no such alert" stay distinguishable answers.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -671,6 +683,9 @@ Acceptance:
 | FR-092 | The same suggestion is available per alert on demand and is recomputed at that moment, so notes written after an announcement still reach an operator reviewing the alert. | US-047 |
 | FR-093 | Candidate matches exclude the alert itself and any alert without a note, span all categories, and are rejected below a similarity floor — no suggestion is preferable to an unrelated one. | US-047 |
 | FR-094 | Where semantic matching is unavailable or there is nothing to compare against, notes stay fully readable and writable and no suggestion is produced. This is not an error state. | US-047 |
+| FR-095 | The bug-alert list is bounded per request by a caller-supplied limit with a server default, preserving the worst-first ordering, so the calibration surface cannot return an unbounded page. | US-048 |
+| FR-096 | Bug alerts are subject to configurable retention, off by default: an alert may be removed only when it is dismissed, older than the configured age, **and** carries no note. A noted alert is never removed by retention — it is the recurrence corpus (FR-091). Retention never removes an alert awaiting a decision. | US-048 |
+| FR-097 | The recurrence suggestion is fetched per alert on demand, not for every listed alert: rendering the review list performs no similarity lookup. An unknown alert id is reported as unknown by every bug-alert route regardless of whether semantic matching is available, so "no matches" and "no such alert" remain distinct answers. | US-048 |
 
 ## 6. Non-functional requirements
 

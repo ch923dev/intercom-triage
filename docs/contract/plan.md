@@ -1,6 +1,6 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 2.5 · **Implements:** `spec.md` v2.6 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 2.6 · **Implements:** `spec.md` v2.7 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
 
@@ -1314,3 +1314,71 @@ Promoting a note to a playbook (a real follow-up, deliberately not assumed);
 note history / per-author audit; matching across *un*noted alerts (nothing to
 offer); operator-tunable floor or top-N (constants until there is evidence about
 the right values); and any AI-authored note — the note is what a human learned.
+
+---
+
+## §24 — Bug-alert surface hardening (spec v2.7 · US-048 · FR-095..FR-097)
+
+Three defects found reviewing the shipped US-044..047 slices. None is a design
+error in those slices; all three are the cost of shipping them one at a time.
+
+### The list is unbounded and nothing ever deletes a row
+
+`GET /bug-alerts` returns every row ever recorded, deliberately including `low`
+and dismissed ones because it is the calibration surface (FR-079). That is right
+for week one and wrong for month twelve: `bug_alerts` is the only table in the
+schema that grows monotonically with no sweep — `ai_cache` has one, attachments
+have one.
+
+So: a `limit` query parameter with a server default, keeping the worst-first
+ordering, and an interval-gated retention sweep in the mould of
+`_attachment_sweep_loop`.
+
+Retention has one hard rule: **a noted alert is never swept.** The note is the
+recurrence corpus (FR-091), so a sweep that respected only age and dismissal
+would quietly delete the precedent that US-047 exists to surface — the feature
+would keep working and keep getting worse, which is the failure mode nobody
+notices. Retention is therefore `dismissed AND older than N AND note IS NULL`,
+off by default (`0` = never), and it is a hard delete: a soft-deleted alert would
+still have to be excluded from the PK-keyed upsert (invariant #20), and a ticket
+that reports the same defect again should get a fresh alert, not a resurrected
+one.
+
+### The review page pays for matches it did not ask for
+
+`BugAlertsPage` watches its visible rows and requests a recurrence match for
+every one of them, immediately. Server-side each request embeds the query text
+plus **every** noted alert, so one page open costs `rows × noted` encoder passes.
+It is invisible today only because hosted v1 runs embeddings off (FR-094), which
+means the cost arrives on the day the feature starts working.
+
+Fetch on demand instead: the operator opens a row, that row asks. A batch
+endpoint was the alternative and is worse — it computes matches for rows nobody
+looked at, just in fewer round-trips.
+
+### An unknown id answers two different ways
+
+`similar_noted_bugs` returns `[]` when there is no encoder and raises 404 when the
+alert does not exist — but the encoder check runs first, so the same request to
+the same server answers 404 or `[]` depending on configuration. Existence is a
+property of the request; capability is a property of the deployment. Check
+existence first, then capability, so "no such alert" and "no matches" stay
+distinct.
+
+### Shape
+
+| File | Change |
+|---|---|
+| `config.py` | `bug_alert_retention_days` (0 = off), `bug_alert_sweep_interval_seconds`, list-limit default |
+| `services/bug_alerts.py` | `limit` on `list_bug_alerts`; `sweep_bug_alerts`; existence check before `encoder_available()` |
+| `routers/bug_alerts.py` | `limit` query param |
+| `main.py` | retention sweep loop (interval-gated, default off) |
+| webapp | on-demand `loadSimilar` per opened row; drop the visible-rows watch |
+
+### Not in scope
+
+Cursor pagination (a bounded limit is enough for a review surface an operator
+scrolls), archiving swept alerts anywhere, retention for `tickets` / `ai_cache`
+(different lifecycles, different owners), and promoting a note out of a swept
+alert — a noted alert is not swept, which is the same guarantee stated the other
+way round.

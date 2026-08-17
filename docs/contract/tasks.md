@@ -1,6 +1,6 @@
 # Intercom Triage — Tasks
 
-**Status:** ready · **Version:** 2.5 · **Implements:** `spec.md` v2.6, `plan.md` v2.5
+**Status:** ready · **Version:** 2.6 · **Implements:** `spec.md` v2.7, `plan.md` v2.6
 
 Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](../_archive/tasks/).
 
@@ -271,6 +271,16 @@ untouched (inv #6).
 - T189 ✓ — Endpoints + the Slack card: `PUT /bug-alerts/{ticket_id}/note` (set / edit / clear via empty body; stamps `note_by` = authenticated caller as the MOST RECENT author) and `GET /bug-alerts/{ticket_id}/similar`. The alert card gains a "seen before" block naming the earlier ticket and quoting its note — built by the same `_alert_attachments` builder, and kept out of `text`/`fallback` like the evidence quote, because a note may itself quote a customer (NFR-016). Computed at delivery, which already runs outside `SYNC_LOCK` (inv #20), so the embedding work cannot stall ingest. The acknowledgement mirror (T184) re-derives the same block: `chat.update` replaces a message wholesale, so a rebuild without it would erase the precedent from the card at the moment someone takes ownership. FR-091/FR-092, plan §23.
 - T190 ✓ — Webapp: `note`/`note_by`/`note_at` on the `BugAlert` type, `setBugNote` + `getSimilarBugs` on the client, store actions splicing the returned row, an inline note editor per row, and a "seen before" panel showing the matched ticket, its score, and its note. Absent quietly when there is no match — an empty panel would read as a broken feature. FR-089/FR-092, plan §23.
 
+### Phase 26 — Bug-alert surface hardening (US-048 · spec v2.7 · plan §24)
+
+Three findings from reviewing the shipped US-044..047 slices. Independent of each other
+— `[P]` throughout — and none touches detection, dedup, the cache key, or the
+announcement path.
+
+- T191 [P] — Bound the read + retention that cannot eat the recurrence corpus: `limit` query param on `GET /bug-alerts` (server default, worst-first ordering preserved) and `sweep_bug_alerts` behind a sixth interval-gated background loop (`bug_alert_retention_days`, `0` = off — the default). The sweep deletes only `dismissed AND older than N AND note IS NULL`: a noted alert is the corpus `similar_noted_bugs` reads, so sweeping it would silently delete the precedent US-047 exists to surface, and the feature would keep working while getting worse. Hard delete, not soft — a soft-deleted row would still have to be excluded from the PK-keyed upsert (inv #20), and a ticket reporting the same defect again deserves a fresh alert, not a resurrected one. Test: a noted+dismissed+ancient alert survives; an unnoted one at the same age does not; an undismissed one does not; `0` sweeps nothing. FR-095/FR-096, plan §24.
+- T192 [P] — Fix the 404 asymmetry in `similar_noted_bugs`: the `encoder_available()` guard runs before the `session.get` existence check, so the same request answers `[]` or 404 depending on whether embeddings happen to be on. Existence is a property of the request, capability is a property of the deployment — check existence first. Test both orders of (alert missing, encoder off) against one expectation. FR-097, plan §24.
+- T193 [P] — Webapp: drop the visible-rows `watch` in `BugAlertsPage.vue` that requests a recurrence match for every rendered row (server-side that is `rows × noted-alerts` embedding passes per page open, invisible today only because hosted v1 runs embeddings off) and fetch on demand when the operator opens a row instead. The store already caches per ticket id and treats `[]` as a loaded answer, so nothing else changes. FR-097, plan §24.
+
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
@@ -432,3 +442,7 @@ Every requirement maps to at least one task.
 | FR-092 | T189, T190 |
 | FR-093 | T188 |
 | FR-094 | T188 |
+| US-048 | T191, T192, T193 |
+| FR-095 | T191 |
+| FR-096 | T191 |
+| FR-097 | T192, T193 |

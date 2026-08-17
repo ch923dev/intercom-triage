@@ -257,6 +257,9 @@ lookup (US-047, T187–T190). Migrations 0028–0029.
 | ID | Item | Notes |
 |---|---|---|
 | 4.3 / **T100** | Webhook + SSE live updates | `conversation.user.created`/`replied` → push to webapp instead of poll-on-open. Heaviest deferred feature. |
+| US-048 / **T191** | Bound `GET /bug-alerts` + retention sweep | `bug_alerts` is the only monotonically growing table with no sweep. Retention never removes a *noted* alert — the note is the recurrence corpus. Plan §24. |
+| US-048 / **T192** | 404 before capability on `/similar` | The `encoder_available()` guard runs before the existence check, so an unknown id answers `[]` or 404 depending on deployment config. Plan §24. |
+| US-048 / **T193** | Recurrence lookup on demand, not per row | `BugAlertsPage` asks for a match for every rendered row: `rows × noted` embedding passes per page open. Plan §24. |
 
 ---
 
