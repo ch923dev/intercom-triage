@@ -37,6 +37,20 @@ from app.util import naive_utcnow
 class FakeSlack:
     def __init__(self) -> None:
         self.posts: list[dict[str, Any]] = []
+        self.updates: list[dict[str, Any]] = []
+
+    async def update_message(
+        self,
+        *,
+        channel: str,
+        ts: str,
+        text: str,
+        blocks: list[dict[str, Any]] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+        ticket_id: str | None = None,
+    ) -> str:
+        self.updates.append({"text": text, "attachments": attachments, "ticket_id": ticket_id})
+        return ts
 
     async def post_message(
         self,
@@ -453,6 +467,51 @@ async def test_the_prior_note_stays_out_of_the_push_preview(
     assert note not in post["text"]
     assert note not in post["attachments"][0]["fallback"]
     assert note in json.dumps(post["attachments"][0]["blocks"], ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_acknowledging_keeps_the_prior_fix_on_the_card(
+    session: AsyncSession, fake_encoder: None
+) -> None:
+    """`chat.update` replaces the message wholesale, so the ack mirror has to
+    rebuild the "seen before" block — a rebuild without it erases the precedent
+    from the channel at the moment someone takes ownership."""
+    note = "stale cache key — clear session"
+    await _seed(
+        session,
+        "T-old",
+        evidence="the export button does nothing",
+        title="Export button broken",
+        note=note,
+        announced=True,
+    )
+    await _seed(
+        session,
+        "T-new",
+        evidence="export button not working",
+        title="Export button dead",
+        announced=True,
+    )
+    slack = FakeSlack()
+
+    _, mirrored = await ack_bug_alert(
+        session,
+        "T-new",
+        user_id=1,
+        slack=slack,  # type: ignore[arg-type]
+        config=_config(),
+    )
+
+    assert mirrored is True
+    update = slack.updates[0]
+    card = json.dumps(update["attachments"], ensure_ascii=False)
+    assert "Acknowledged by" in card
+    assert "Seen before" in card
+    assert note in card
+    # Same NFR-016 rule as the post path: the note may quote the customer, and
+    # both of these surface in push previews.
+    assert note not in update["text"]
+    assert note not in update["attachments"][0]["fallback"]
 
 
 @pytest.mark.asyncio

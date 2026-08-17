@@ -730,6 +730,10 @@ async def ack_bug_alert(
 
     Acknowledgement is not dismissal. An alert may be acknowledged (someone owns
     it) and later dismissed (it is finished); neither clears the other.
+
+    The mirror rebuilds the WHOLE card, because `chat.update` replaces the message
+    wholesale: anything left out of the rebuild vanishes from the channel. That is
+    why the recurrence block is re-derived below rather than skipped.
     """
     alert = await session.get(BugAlert, ticket_id)
     if alert is None:
@@ -757,12 +761,21 @@ async def ack_bug_alert(
         return read, False
 
     ctx = (await _ticket_contexts(session, [alert.ticket_id])).get(alert.ticket_id, TicketContext())
+    # `chat.update` replaces the ENTIRE attachment set, so the recurrence block
+    # has to be rebuilt here too — omitting it would erase the precedent from the
+    # card at the exact moment someone takes ownership of the bug. Re-derived
+    # rather than remembered: a note written since the announcement should reach
+    # this reader as well (FR-092), which is the same reason the endpoint
+    # recomputes it per request.
+    prior = await _prior_fix_or_none(session, alert.ticket_id)
     try:
         await slack.update_message(
             channel=alert.slack_channel,
             ts=alert.slack_ts,
             text=_fallback_text(alert, ctx),
-            attachments=_alert_attachments(alert, ctx, acker=acker.name if acker else None),
+            attachments=_alert_attachments(
+                alert, ctx, acker=acker.name if acker else None, prior=prior
+            ),
             ticket_id=alert.ticket_id,
         )
     except Exception as exc:

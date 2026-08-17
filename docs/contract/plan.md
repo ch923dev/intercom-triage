@@ -1128,6 +1128,13 @@ between the post path and the update path: the evidence quote stays inside the
 attachment blocks and out of the top-level `text` / `fallback`, which is what
 surfaces in push previews.
 
+`chat.update` replaces the message **wholesale**, so the rebuild must carry
+everything the original post carried — including the §23 recurrence block.
+Leaving it out would erase the precedent from the card at the exact moment
+someone takes ownership of the bug. It is re-derived rather than remembered, so a
+note written since the announcement reaches this reader too (the same reason
+`GET /bug-alerts/{id}/similar` recomputes per request, FR-092).
+
 ### Ordering: record first, mirror second
 
 `acked_at` / `acked_by` are committed **before** Slack is called (FR-087). The
