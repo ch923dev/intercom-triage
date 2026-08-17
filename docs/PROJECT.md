@@ -7,7 +7,7 @@
 >
 > **It points, it does not duplicate.** The contract source of truth stays in
 > `contract/spec.md` (what) / `contract/plan.md` (how) / `contract/tasks.md` (traceability). The
-> per-change rules + the 19 cross-package invariants stay in the `CLAUDE.md`
+> per-change rules + the 20 cross-package invariants stay in the `CLAUDE.md`
 > hierarchy (auto-loaded every session). When this doc and one of those
 > disagree, *they* win — fix this doc.
 
@@ -123,8 +123,9 @@ fallback category until the key is set.
 
 SQLite (Postgres-swappable). Naive-UTC timestamps in the DB, `Z`-suffixed on
 the wire (invariant #5). Migrations are forward-only Alembic revisions
-(`backend/alembic/versions/0001…0025`; auth tables landed 0021–0022,
-attribution/assignment 0023–0025).
+(`backend/alembic/versions/0001…0029`; auth tables landed 0021–0022,
+attribution/assignment 0023–0025, `ai_cache.subject` 0026, bug alerts 0027,
+bug-alert acknowledgement 0028, the bug note 0029).
 
 | Table | Purpose / key constraints |
 |---|---|
@@ -142,14 +143,14 @@ attribution/assignment 0023–0025).
 | `snippets` | Global canned replies; `{{var}}` substitution client-side. |
 | `ticket_embeddings` | 384-dim vectors (sqlite-vec). Separate store — never touches `ai_cache`. |
 | `ticket_clusters` / `ticket_cluster_members` | Offline recurring-issue clustering snapshot. |
-| `bug_alerts` | One AI-detected product-bug report per ticket. `ticket_id` is the PK and that IS the Slack dedup guarantee; `posted_at IS NULL` is the outbox; `posted_severity` (delivery truth) is kept separate from `severity` (model truth) so escalation is comparable. No FK — the id is Intercom-owned (cf. `followups`). |
+| `bug_alerts` | One AI-detected product-bug report per ticket. `ticket_id` is the PK and that IS the Slack dedup guarantee; `posted_at IS NULL` is the outbox; `posted_severity` (delivery truth) is kept separate from `severity` (model truth) so escalation is comparable. `acked_at ⇔ acked_by` XOR pair (who owns it, 0028) and the CHECK-locked `note`/`note_by`/`note_at` trio (the incident record, 0029) are durable — the record pass's explicit `ON CONFLICT` set-clause never touches them. No FK — the id is Intercom-owned (cf. `followups`). |
 | `settings` | Singleton (`CHECK id = 1`). Filter + AI flags; `init_db` inserts it. Team-wide — no per-user settings (inv #18). |
 | `users` | Local mirror of an OnlySales identity (`onlysales_id`/`email`/`name`/`scope`/`is_active`/`last_login_at`). No password column (inv #19). FK target for attribution/assignment. |
 | `sessions` | Refresh-token ledger: `refresh_token_hash` + `prev_refresh_token_hash` (reuse-detection), Fernet-encrypted `onlysales_refresh_encrypted`, `issued_at`/`expires_at`/`revoked_at`/`last_used_at`. Raw tokens never stored (inv #16/#19). |
 
 ---
 
-## 7. The 19 cross-package invariants (index)
+## 7. The 20 cross-package invariants (index)
 
 **Canonical text + rationale: root [`CLAUDE.md`](../CLAUDE.md) "Cross-package
 invariants."** (`scripts/check-invariants.ps1` lingers as a manual checker but is
@@ -174,6 +175,7 @@ no longer wired as a hook — dropped in commit `43792e6`.) One-line index only:
 17. Attribution + assignment (`resolved_by`/`acted_by`/`assigned_to`/`assigned_at` as `UserRef`) are board-state only — never on `HydratedTicket` (#2 untouched).
 18. Per-user follow-ups/notes are DEFERRED (Phase 4 — `note_entries.user_id` absent); `Settings` stays a shared team-wide singleton.
 19. No password is ever stored or logged; only the Fernet-encrypted upstream OnlySales refresh token is persisted.
+20. `bug_alerts.ticket_id` is the PK and that IS the Slack dedup guarantee (insert-or-bump in one `ON CONFLICT DO UPDATE`; `posted_at IS NULL` is the outbox; delivery never runs inside `SYNC_LOCK`; evidence quotes never reach a log line or a push preview). Acknowledgement travels outward only (`chat.update`, no interactivity endpoint); the bug note is durable operator knowledge and its recurrence lookup is deliberately cross-category; evidence provenance is enforced in code, not asked for in the prompt.
 
 ---
 
@@ -200,7 +202,7 @@ Router footprint: `backend/app/routers/`.
 | stats | `GET /stats?window_days=…` |
 | playbooks | `GET /playbooks` · `GET /playbooks/suggested?ticket_id=…` · `POST /playbooks` · `POST /playbooks/draft` · `/draft-reply` · `PATCH /{id}` · `POST /{id}/archive` · `/restore` |
 | clusters | `GET /clusters` · `GET /clusters/gaps` · `POST /clusters/recompute` |
-| bug alerts | `GET /bug-alerts?severity=&delivered=` · `POST /bug-alerts/{ticket_id}/dismiss` |
+| bug alerts | `GET /bug-alerts?severity=&delivered=` · `POST /bug-alerts/{ticket_id}/dismiss` · `/ack` · `PUT /bug-alerts/{ticket_id}/note` · `GET /bug-alerts/{ticket_id}/similar` |
 
 ---
 
@@ -224,8 +226,8 @@ clustering — all reading customer-visible `parts[]` + operator notes only, nev
 
 ## 10. Feature & roadmap status
 
-The project is feature-complete against `contract/spec.md` v2.0 (the MHU charter
-pivot — auth, multi-user, hosted). The 2026-05 roadmap is now an execution log
+The project is feature-complete against `contract/spec.md` v2.6 (the MHU charter
+pivot — auth, multi-user, hosted — plus early bug detection, US-044..047). The 2026-05 roadmap is now an execution log
 (full ledger with commit SHAs + the original phase tables:
 [`docs/_archive/ROADMAP.md`](./_archive/ROADMAP.md)).
 
@@ -242,6 +244,13 @@ outputs, model cascade, needs-review lane, the local embedding layer, few-shot
 categorization, RAG draft replies, recurring-issue clustering, playbook-gap
 detection, playbook auto-match, OnlySales-delegated login, rotating sessions
 with reuse-detection, per-ticket + bulk assignment, and operator attribution.
+Plus **early bug detection → Slack** (US-044, T173–T180: bug verdict as a fifth
+categorization facet, dedup-by-PK alerts, outbox delivery, code-enforced evidence
+provenance) and its **review surface** (US-045, T181/T182, PR #12).
+
+**In flight** on `feat/bug-alert-ack`: bug-alert acknowledgement mirrored into
+Slack (US-046, T183–T186) + the durable bug note with cross-category recurrence
+lookup (US-047, T187–T190). Migrations 0028–0029.
 
 **Open backlog** (the only live forward items):
 
@@ -258,8 +267,8 @@ with reuse-detection, per-ticket + bulk assignment, and operator attribution.
 | backend | `ruff check app tests && ruff format --check app tests && mypy app && pytest -q` | `/qa-backend` |
 | webapp | `npm run lint && npm run format:check && npm run typecheck && npm test && npm run build` | `/qa-webapp` |
 
-`/qa-all` runs backend + webapp back-to-back. Last full run (2026-06-08, PR #10
-merge): backend 518 tests, webapp 248 tests — all green.
+`/qa-all` runs backend + webapp back-to-back. Last full run (2026-08-17, on
+`feat/bug-alert-ack`): backend 683 tests, webapp 293 tests — all green.
 
 ---
 
@@ -279,6 +288,9 @@ merge): backend 518 tests, webapp 248 tests — all green.
 - **session** — OnlySales-delegated login state: a stateless HS256 access JWT (~30 min, verified offline) + a DB-backed refresh token that rotates on every `/auth/refresh`; replaying a rotated token trips reuse-detection and revokes the session (inv #16).
 - **attribution** — the operator stamped on a manual action: `resolved_by` (who resolved), `acted_by` (who overrode the category), `assigned_to` (assignee). Board-state only, composed via a `users` join (inv #17).
 - **My Queue** — the board lane filtered to tickets assigned to the signed-in operator.
+- **bug alert** — an AI-detected product-defect report on one ticket (`bug_alerts`, PK = `ticket_id`), delivered to Slack once by its own background loop; `posted_at IS NULL` is the outbox (invariant #20).
+- **acknowledgement** — "someone owns this alert" (`acked_at`/`acked_by`), set from the board and mirrored into the already-posted Slack message with `chat.update`. Distinct from dismissal ("this is finished"); a row may carry both.
+- **bug note** — the incident record on an alert (what the defect turned out to be). Durable operator knowledge like a playbook; feeds the cross-category **recurrence lookup** ("seen before"), which matches symptom-to-symptom by embedding + cosine, never by category.
 
 ---
 
@@ -291,7 +303,7 @@ Where knowledge lives now, and the boundary this handbook respects:
 | **`docs/PROJECT.md`** (this) | System orientation: architecture, data-flow, stack, data model, API surface, feature status, glossary. | Canonical living handbook. |
 | **`docs/FEATURES.md`** | Exhaustive feature catalog by capability area, with code anchors + surfaces. | Canonical feature reference. |
 | `CLAUDE.md` (+ `backend/`, `webapp/`) | Per-change rules + the 20 invariants. Auto-loaded every session. | Canonical, authoritative. **Not folded here.** |
-| `contract/spec.md` / `contract/plan.md` / `contract/tasks.md` | Requirements (US/FR/NFR, US-001..043) · architecture decisions (§1–§19) · traceability matrix (T001–T171). | Contract source of truth. **Not folded here** (charter-protected). |
+| `contract/spec.md` / `contract/plan.md` / `contract/tasks.md` | Requirements (US/FR/NFR, US-001..047) · architecture decisions (§1–§23) · traceability matrix (T001–T190). | Contract source of truth. **Not folded here** (charter-protected). |
 | `docs/principles.md` | The four engineering principles. | Live; referenced by every sub-package CLAUDE.md. |
 | `webapp/DESIGN.md` | Design-system source of truth (tokens/palette/components). | Live. |
 | `*/README.md`, `SECURITY.md` | Per-package quickstart + secrets/threat model. | Live reference. |

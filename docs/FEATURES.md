@@ -152,7 +152,7 @@ Shipped via PR #10 (charter pivot). Auth + multi-user are IN scope; multi-tenanc
 
 - **Naive-UTC-in-DB / Z-on-wire** — Pydantic `UTCDatetime`/`NaiveUTCDatetime` enforce the timestamp contract JS clients depend on. (backend · `schemas.py` · inv #5)
 - **Singleton settings** — one `Settings` row, `CHECK (id = 1)`, inserted on first boot. (backend · `models.py` · inv #12)
-- **Forward-only migrations** — Alembic chain `0001…0027` (auth tables 0021–0022, attribution/assignment 0023–0025, ai_cache subject 0026, bug alerts 0027). (backend · `alembic/versions/`)
+- **Forward-only migrations** — Alembic chain `0001…0029` (auth tables 0021–0022, attribution/assignment 0023–0025, ai_cache subject 0026, bug alerts 0027, bug-alert acknowledgement 0028, bug note 0029). (backend · `alembic/versions/`)
 - **Secret-scan guard** — pre-commit file-name + content scan (gitleaks or regex fallback); allowlists `docs/_archive/` + test/fixture paths. (ops · `.githooks/pre-commit`, `.gitleaks.toml`)
 - **One-command dev launcher** — `scripts/dev.ps1` boots backend + webapp in a Windows Terminal split-pane. (ops · `scripts/dev.ps1`)
 - **Invariant checker (manual)** — `scripts/check-invariants.ps1` greps for cross-package invariant violations; **no longer wired as a hook** (PreToolUse hook dropped in commit `43792e6`) — run it by hand. (ops)
