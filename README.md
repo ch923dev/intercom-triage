@@ -96,6 +96,9 @@ the category-management and proposal-review pages plus the filter drawer.
 | `POST /attachments` · `GET /attachments?ticket_id=...` | Multipart upload / list by ticket. `owner_kind` = `entry`\|`ticket` |
 | `GET /attachments/{id}/raw` · `GET /attachments/{id}/thumb` | Stream bytes inline / 256px WebP thumbnail for images |
 | `DELETE /attachments/{id}` | Soft-delete; nightly sweep removes orphaned bytes after `ATTACHMENT_GC_DAYS` (default 7) |
+| `GET /bug-alerts?severity=&delivered=` | AI-detected product-bug alerts, worst first (includes `low` + dismissed — it is the calibration surface) |
+| `POST /bug-alerts/{id}/dismiss` · `/ack` | Not-a-bug / handled · acknowledge (mirrored into the alert's Slack message) |
+| `PUT /bug-alerts/{id}/note` · `GET /bug-alerts/{id}/similar` | The incident record (empty body clears) · earlier noted bugs with a similar symptom |
 
 Interactive docs at <http://localhost:4000/docs> while the backend runs.
 

@@ -1,6 +1,6 @@
 # Intercom Triage — Tasks
 
-**Status:** ready · **Version:** 2.3 · **Implements:** `spec.md` v2.4, `plan.md` v2.3
+**Status:** ready · **Version:** 2.6 · **Implements:** `spec.md` v2.7, `plan.md` v2.6
 
 Index of tasks. Each task is a single PR; full bodies (acceptance criteria, dependencies, descriptions) live in [`docs/_archive/tasks/`](../_archive/tasks/).
 
@@ -245,8 +245,41 @@ Pure webapp over the endpoints Phase 22 already shipped. No backend task, becaus
 no backend change: `GET /bug-alerts` and `POST /bug-alerts/{ticket_id}/dismiss` (T178) are
 already authenticated and already return everything the surface needs.
 
-- T181 — Webapp data layer: `BugSeverity` + `BugAlert` in `types/api.ts` mirroring `BugAlertRead` field-for-field (hand-mirrored, as every type here is — no codegen step, invariant #2 untouched because an alert is board-state, not conversation shape); `listBugAlerts` / `dismissBugAlert` on `api/client.ts`; `stores/bugAlerts.ts` with `load()` and `dismiss()`. `dismiss` splices in the single row the endpoint returns rather than refetching the list — a refetch would flicker and would let a detection landing between the two calls clobber the view. `pendingCount` (recorded, not dismissed) for the nav badge. FR-081/FR-083, US-045, plan §21.
-- T182 — `components/BugAlertsPage.vue` + nav wiring: worst-first list with severity colour + label, title linked to the conversation, the evidence quote, confidence, occurrences, first/last detection, and delivery state (announced / waiting / dismissed); per-row Dismiss; severity + state filters applied client-side over the loaded list; Slack deep link built from `slack_channel` + `slack_ts` (`.` stripped), rendered only when both are present so a never-announced alert gets no broken link. `'bugs'` joins the `View` union, `App.vue` renders it, `Topbar.vue` gains the entry + pending badge. Loaded on first open, not in `loadAll()` — the board does not need it and bootstrap is already four round-trips. FR-080/FR-082/FR-083, US-045, plan §21.
+- T181 ✓ — Webapp data layer: `BugSeverity` + `BugAlert` in `types/api.ts` mirroring `BugAlertRead` field-for-field (hand-mirrored, as every type here is — no codegen step, invariant #2 untouched because an alert is board-state, not conversation shape); `listBugAlerts` / `dismissBugAlert` on `api/client.ts`; `stores/bugAlerts.ts` with `load()` and `dismiss()`. `dismiss` splices in the single row the endpoint returns rather than refetching the list — a refetch would flicker and would let a detection landing between the two calls clobber the view. `pendingCount` (recorded, not dismissed) for the nav badge. FR-081/FR-083, US-045, plan §21.
+- T182 ✓ — `components/BugAlertsPage.vue` + nav wiring: worst-first list with severity colour + label, title linked to the conversation, the evidence quote, confidence, occurrences, first/last detection, and delivery state (announced / waiting / dismissed); per-row Dismiss; severity + state filters applied client-side over the loaded list; Slack deep link built from `slack_channel` + `slack_ts` (`.` stripped), rendered only when both are present so a never-announced alert gets no broken link. `'bugs'` joins the `View` union, `App.vue` renders it, `Topbar.vue` gains the entry + pending badge. Loaded on first open, not in `loadAll()` — the board does not need it and bootstrap is already four round-trips. FR-080/FR-082/FR-083, US-045, plan §21.
+
+### Phase 24 — Bug-alert acknowledgement (US-046 · spec v2.5 · plan §22)
+
+Cross-package: a migration, a new Slack verb, an endpoint, and the webapp control.
+Acknowledgement travels outward only — the product is never made reachable *from* Slack
+(FR-088), so there is no interactivity endpoint, no signing secret, and no allowlist change.
+
+- T183 ✓ — Migration `0028` + state: `bug_alerts.acked_at` (naive UTC) + `bug_alerts.acked_by` (`users.id`, `ON DELETE SET NULL`) plus a CHECK making the pair XOR-locked (`acked_at IS NULL` ⇔ `acked_by IS NULL`), mirroring invariant #10 / #14. Written with `batch_alter_table` because SQLite rebuilds the table to gain a table-level constraint. `BugAlertRead` gains `acked_at` + `acked_by: UserRef | None`, composed through a `users` join in `list_bug_alerts` exactly like `resolved_by` (invariant #17) — attribution stays board-state and never reaches `HydratedTicket` (invariant #2). Assert in a test that `record_bug_alerts` leaves both columns alone across a re-detection AND across an escalation. FR-084/FR-085, plan §22.
+- T184 ✓ — `chat.update` + ack service: generalize the retry/verdict loop in `clients/slack.py` over the endpoint so `update_message` inherits the body-not-status check, the per-attempt `outcome=error` logging, and the auth-error classification rather than reimplementing them; keep identifiers-only logging (NFR-016). `ack_bug_alert` commits `acked_at`/`acked_by` FIRST, then best-effort rebuilds the card through the SAME attachment builder as the original post (so the evidence quote cannot leak into `text`/`fallback` on this path either) and calls `chat.update` with the stored `slack_channel` + `slack_ts`. Idempotent — a second ack keeps the first operator and makes no Slack call. No Slack coordinates → local ack, no outward call. A Slack failure is logged and surfaced as partial success, never a rollback. FR-086/FR-087, plan §22.
+- T185 ✓ — `POST /bug-alerts/{ticket_id}/ack`: authenticated (the acknowledger IS `get_current_user`, so identity is never client-supplied), 404 on an unknown alert, returns the updated `BugAlertRead` plus whether the channel was updated. `get_slack` joins `deps.py` alongside `get_openrouter` / `get_intercom`, returning `None` when Slack is unconfigured. FR-084/FR-086/FR-088, plan §22.
+- T186 ✓ — Webapp ack: `acked_at` + `acked_by` on the `BugAlert` type, `ackBugAlert` on the client, `ack()` on the store splicing in the returned row (same reasoning as `dismiss`), and an Ack button on `BugAlertsPage.vue`. The row shows acknowledged-by-whom alongside dismissal rather than instead of it, and the state filter gains `acknowledged`. A mirror failure is reported on the row without implying the ack was lost. FR-084/FR-087, plan §22.
+
+### Phase 25 — Bug notes + recurrence suggestion (US-047 · spec v2.6 · plan §23)
+
+The incident record for a defect, and the retrieval that makes writing one worthwhile.
+Deliberately NOT playbooks: `suggest_playbooks` is category-scoped and bugs are not
+(plan §23). No AI call — embedding + cosine only, so the categorization cache key is
+untouched (inv #6).
+
+- T187 ✓ — Migration `0029` + state: `bug_alerts.note` (≤2000), `note_by` (`users.id`, `ON DELETE SET NULL`), `note_at`, CHECK-locked as a trio (all set or all null) like the parked fields (inv #14). `BugAlertRead` gains all three (`note_by` as `UserRef`, composed through the same `_user_refs` join as `acked_by`). Assert the trio survives re-detection, escalation, ack, and dismissal — it is absent from `record_bug_alerts`'s explicit `ON CONFLICT` set-clause, and a test pins that rather than trusting it. FR-089/FR-090, plan §23.
+- T188 ✓ — `similar_noted_bugs(session, ticket_id, top_n)`: candidates are every OTHER alert carrying a note, across all categories. Query text is the alert's evidence + its ticket's customer-visible text (parts + title, never `internal_notes` — inv #4); each candidate embeds from *its own* evidence + title, so the match is symptom-to-symptom and the note is only the payload. Cosine, sorted, cut at a similarity floor — unlike `suggest_playbooks`, which needs no floor because category filtering bounds it (plan §23). Returns `[]` when `encoder_available()` is false, when there are no noted alerts, or when there is nothing to embed; never raises. FR-091/FR-093/FR-094, plan §23.
+- T189 ✓ — Endpoints + the Slack card: `PUT /bug-alerts/{ticket_id}/note` (set / edit / clear via empty body; stamps `note_by` = authenticated caller as the MOST RECENT author) and `GET /bug-alerts/{ticket_id}/similar`. The alert card gains a "seen before" block naming the earlier ticket and quoting its note — built by the same `_alert_attachments` builder, and kept out of `text`/`fallback` like the evidence quote, because a note may itself quote a customer (NFR-016). Computed at delivery, which already runs outside `SYNC_LOCK` (inv #20), so the embedding work cannot stall ingest. The acknowledgement mirror (T184) re-derives the same block: `chat.update` replaces a message wholesale, so a rebuild without it would erase the precedent from the card at the moment someone takes ownership. FR-091/FR-092, plan §23.
+- T190 ✓ — Webapp: `note`/`note_by`/`note_at` on the `BugAlert` type, `setBugNote` + `getSimilarBugs` on the client, store actions splicing the returned row, an inline note editor per row, and a "seen before" panel showing the matched ticket, its score, and its note. Absent quietly when there is no match — an empty panel would read as a broken feature. FR-089/FR-092, plan §23.
+
+### Phase 26 — Bug-alert surface hardening (US-048 · spec v2.7 · plan §24)
+
+Three findings from reviewing the shipped US-044..047 slices. Independent of each other
+— `[P]` throughout — and none touches detection, dedup, the cache key, or the
+announcement path.
+
+- T191 [P] — Bound the read + retention that cannot eat the recurrence corpus: `limit` query param on `GET /bug-alerts` (server default, worst-first ordering preserved) and `sweep_bug_alerts` behind a sixth interval-gated background loop (`bug_alert_retention_days`, `0` = off — the default). The sweep deletes only `dismissed AND older than N AND note IS NULL`: a noted alert is the corpus `similar_noted_bugs` reads, so sweeping it would silently delete the precedent US-047 exists to surface, and the feature would keep working while getting worse. Hard delete, not soft — a soft-deleted row would still have to be excluded from the PK-keyed upsert (inv #20), and a ticket reporting the same defect again deserves a fresh alert, not a resurrected one. Test: a noted+dismissed+ancient alert survives; an unnoted one at the same age does not; an undismissed one does not; `0` sweeps nothing. FR-095/FR-096, plan §24.
+- T192 [P] — Fix the 404 asymmetry in `similar_noted_bugs`: the `encoder_available()` guard runs before the `session.get` existence check, so the same request answers `[]` or 404 depending on whether embeddings happen to be on. Existence is a property of the request, capability is a property of the deployment — check existence first. Test both orders of (alert missing, encoder off) against one expectation. FR-097, plan §24.
+- T193 [P] — Webapp: drop the visible-rows `watch` in `BugAlertsPage.vue` that requests a recurrence match for every rendered row (server-side that is `rows × noted-alerts` embedding passes per page open, invisible today only because hosted v1 runs embeddings off) and fetch on demand when the operator opens a row instead. The store already caches per ticket id and treats `[]` as a loaded answer, so nothing else changes. FR-097, plan §24.
 
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
@@ -396,3 +429,20 @@ Every requirement maps to at least one task.
 | FR-081 | T181, T182 |
 | FR-082 | T182 |
 | FR-083 | T181, T182 |
+| US-046 | T183, T184, T185, T186 |
+| FR-084 | T183, T185, T186 |
+| FR-085 | T183 |
+| FR-086 | T184, T185 |
+| FR-087 | T184, T186 |
+| FR-088 | T185 |
+| US-047 | T187, T188, T189, T190 |
+| FR-089 | T187, T189, T190 |
+| FR-090 | T187 |
+| FR-091 | T188, T189 |
+| FR-092 | T189, T190 |
+| FR-093 | T188 |
+| FR-094 | T188 |
+| US-048 | T191, T192, T193 |
+| FR-095 | T191 |
+| FR-096 | T191 |
+| FR-097 | T192, T193 |

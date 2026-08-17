@@ -6,7 +6,9 @@
 
 import type {
   BugAlert,
+  BugAlertAckResult,
   BugSeverity,
+  SimilarBug,
   BulkResult,
   CategoriesResponse,
   Category,
@@ -471,6 +473,27 @@ export const api = {
    *  re-detection — the backend never clears `dismissed_at`. */
   dismissBugAlert: (ticketId: string): Promise<BugAlert> =>
     request(`/bug-alerts/${encodeURIComponent(ticketId)}/dismiss`, { method: 'POST' }),
+
+  /** Acknowledge an alert — "someone owns this" — and mirror it into the Slack
+   *  message that announced it. The acknowledger is the authenticated user, so
+   *  no id is sent. Idempotent. Returns the alert plus whether the Slack message
+   *  was updated; `slack_updated: false` is a normal outcome, not a failure. */
+  ackBugAlert: (ticketId: string): Promise<BugAlertAckResult> =>
+    request(`/bug-alerts/${encodeURIComponent(ticketId)}/ack`, { method: 'POST' }),
+
+  /** Write the incident record — root cause, workaround, what was done. An empty
+   *  string clears it. The caller becomes the note's most recent author. */
+  setBugNote: (ticketId: string, note: string): Promise<BugAlert> =>
+    request(`/bug-alerts/${encodeURIComponent(ticketId)}/note`, {
+      method: 'PUT',
+      body: JSON.stringify({ note }),
+    }),
+
+  /** Earlier noted bugs resembling this one, best first. Empty when semantic
+   *  matching is off or nothing clears the server's similarity floor — that is a
+   *  normal answer, not a failure. */
+  getSimilarBugs: (ticketId: string): Promise<SimilarBug[]> =>
+    request(`/bug-alerts/${encodeURIComponent(ticketId)}/similar`),
 
   // ── metrics (roadmap 1.4 — token / cost meter) ────────────────────────────
   /** Process-lifetime counters + per-day OpenRouter spend. */

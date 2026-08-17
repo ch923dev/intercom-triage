@@ -1,8 +1,14 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 2.4 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 2.7 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v2.6:** the bug-alert surface is made to survive its own success. Added US-048 and FR-095..FR-097, all from a review of the shipped US-044..047 slices. Three facts drove it: the alert list is unbounded and nothing ever removes a row, so the calibration surface grows monotonically; the review page asks for a recurrence match for every row it renders, which costs rows × noted-alerts embedding work on one page open; and an unknown alert id answers 404 or an empty list depending on whether semantic matching happens to be available. Retention deliberately cannot touch a noted alert — the note is the recurrence corpus, so sweeping it would delete the knowledge US-047 exists to keep. No change to detection, dedup, the cache key, or the announcement path.
+
+**Changes from v2.5:** a bug alert can carry what was learned about it, and that knowledge comes back. Added US-047 and FR-089..FR-094. An operator writes a note on an alert — root cause, workaround, what was actually done — and when a *similar* bug is detected later, the system surfaces the earlier bug and its note, both in the Slack announcement and on the review page. Matching is on the bug's symptom, not on the note, and is deliberately **not** limited to one category: the same defect arrives worded differently and filed differently. Distinct from playbooks (US-020), which stay category-scoped response recipes; a bug note is the incident record for one defect. No new AI call and no change to the categorization cache.
+
+**Changes from v2.4:** a bug alert can be acknowledged, and the acknowledgement reaches the channel. Added US-046 and FR-084..FR-088. Acknowledgement is a state of its own, distinct from dismissal: acknowledged means *someone owns this*, dismissed means *this is closed out or was never a bug*. The operator acknowledges on the board and the already-posted Slack message rewrites itself in place to name them — so the channel learns it without anyone typing there, and without the product accepting inbound traffic from Slack. Detection, dedup, the cache key, and the announcement path are untouched.
 
 **Changes from v2.3:** bug alerts become reviewable in the product. Added US-045 and FR-080..FR-083 — the alerts recorded by US-044 are readable and dismissible from the webapp, closing the gap where dismissing a false positive required calling the API by hand. No backend behavior changes: the read and dismiss endpoints already exist (FR-079) and detection, dedup, and announcement are untouched.
 
@@ -538,6 +544,45 @@ Acceptance:
 - The navigation shows how many alerts still await a decision.
 - The page never creates or edits an alert beyond dismissing it — detection stays the AI's job.
 
+### US-046 — Acknowledging an alert, visible in the channel
+As an operator, I want to acknowledge a bug alert and have the Slack message say so, because right now the channel cannot tell an alert somebody owns from one nobody has read — so two engineers investigate the same bug, or none do.
+
+Acceptance:
+- An operator can acknowledge an alert from the board in one action, and the alert records who acknowledged it and when.
+- Acknowledgement is its own state, not a synonym for dismissal. An acknowledged alert is still open — someone owns it. A dismissed alert is finished. An alert can be acknowledged and later dismissed; the acknowledgement is not erased by the dismissal.
+- The Slack message that announced the alert is updated in place to name the acknowledger, so the channel learns of it without a second message and without anyone posting there.
+- Acknowledging never requires Slack to reach the product. Nothing is exposed for Slack to call back into.
+- An alert that was never announced can still be acknowledged; there is simply no message to update.
+- If updating Slack fails, the acknowledgement still stands. The board is the record; the channel is a mirror of it, and a mirror that fails must not lose the fact.
+- Acknowledgement survives re-detection: a model that keeps re-reporting the same bug cannot un-acknowledge it, and cannot overwrite who acknowledged it.
+- Acknowledging twice changes nothing — the original acknowledger and time stand, and Slack is not re-poked.
+- A severity escalation does not clear the acknowledgement. Ownership is not revoked by the bug getting worse; the escalation is already announced under the original message, where the acknowledger sees it.
+
+### US-047 — What we learned about a bug, offered back when it recurs
+As an operator, I want to write down what a bug turned out to be and what fixed it, so that the next time the same defect walks in, whoever picks it up is told what we already know instead of investigating it from scratch.
+
+Acceptance:
+- An operator can write, edit, and clear a note on a bug alert — root cause, workaround, what was done — and the note records who last wrote it and when.
+- The note is durable operator knowledge: re-detection, escalation, acknowledgement, and dismissal all leave it untouched. Only an operator changes it.
+- When a new bug alert is announced, if an earlier *noted* bug is sufficiently similar, the announcement carries that earlier bug's identity and its note, so the fix is visible where triage starts.
+- The review page shows the same thing for any alert, recomputed when opened — so an alert announced before anyone wrote the note still benefits from it later.
+- Similarity is judged on what the customer reported, not on the note text: the symptom is what recurs, the note is the answer being retrieved.
+- Matching is not confined to a category. The same defect is routinely categorized differently depending on how the customer phrased it, and a match that respected category boundaries would miss exactly the recurrence this exists to catch.
+- A weak match is not offered. Below a confidence floor the system says nothing rather than proposing an unrelated bug's fix, because a wrong prior fix costs more than no suggestion.
+- An alert never matches itself, and only alerts that actually carry a note are ever offered.
+- Where semantic matching is unavailable, notes remain writable and readable and no suggestion is offered. The feature degrades to silence, never to an error.
+- The note is team-wide, like the rest of the board: any operator may edit it, and the record shows the most recent author.
+
+### US-048 — The bug surface stays bounded and cheap as alerts pile up
+As an operator, I want the bug review surface to stay fast and finite after months of detection, so that the calibration list does not become a page that loads everything ever detected and re-derives every similarity match to render itself — and so that housekeeping never eats what we learned.
+
+Acceptance:
+- The alert list is bounded per request, with the worst-first ordering preserved, so a client cannot be handed an unbounded page as detection accumulates.
+- Alerts are subject to retention: a dismissed alert older than a configurable age may be removed. An alert carrying a note is **never** removed by retention regardless of age or dismissal — the note is the recurrence corpus, and deleting it would destroy exactly the knowledge the note exists to preserve.
+- Retention is off by default, and it never removes an alert that is still awaiting a decision or is still the most recent detection on its ticket.
+- Opening the review page performs no per-row similarity lookup. A recurrence match is fetched for an alert the operator actually opens, so page cost does not scale with the number of rows on screen.
+- An unknown alert id is reported as unknown by every bug-alert route, whether or not semantic matching is available. "No matches" and "no such alert" stay distinguishable answers.
+
 ## 5. Functional requirements
 
 | ID | Requirement | Stories |
@@ -627,6 +672,20 @@ Acceptance:
 | FR-081 | Dismissal is available per entry and drives the existing dismiss endpoint. The entry updates in place without reloading the page, and a failed dismissal reports the failure and leaves the entry unchanged. Dismissal is the only mutation this surface performs. | US-045 |
 | FR-082 | An announced entry offers a direct link to its Slack message, derived from the stored channel and message identity. An entry without both offers no link rather than a broken one. | US-045 |
 | FR-083 | The navigation carries a count of alerts awaiting a decision — recorded and not dismissed — so an operator sees pending bug review without opening the page. | US-045 |
+| FR-084 | An alert can be acknowledged, recording the acknowledging operator's identity and the time. Acknowledgement is idempotent: a second acknowledgement keeps the first operator and timestamp, and performs no further outward action. Acknowledgement and dismissal are independent states — an alert may be acknowledged, dismissed, both, or neither, and dismissing does not clear an acknowledgement. | US-046 |
+| FR-085 | The acknowledging operator and the acknowledgement time are set together or not at all, and are never written by the detection/recording pass. Re-detection and severity escalation leave both untouched. | US-046 |
+| FR-086 | Acknowledging an announced alert updates that alert's existing Slack message in place, so the announcement itself shows who acknowledged it and when. No second message is posted. An alert that was never announced is acknowledged with no outward call. | US-046 |
+| FR-087 | The acknowledgement is recorded before Slack is contacted, and a Slack failure neither reverses it nor fails the operator's request. The failure is logged and reported as a partial success — acknowledged, channel not updated. | US-046 |
+| FR-088 | Acknowledgement is initiated only from the product. The system exposes no endpoint for Slack (or any third party) to acknowledge an alert, and requires no publicly reachable address. | US-046 |
+| FR-089 | A bug alert carries an optional operator note (root cause / workaround / what was done), with the identity of its most recent author and the time it was written. The three move together or not at all. Setting an empty note clears all three. | US-047 |
+| FR-090 | The note is never written or cleared by detection, delivery, acknowledgement, or dismissal — only by an operator editing it. | US-047 |
+| FR-091 | On announcing a bug alert, the system offers the most similar earlier alert that carries a note, together with that note, inside the announcement. Similarity is computed over what the customer reported (the alert's evidence and the ticket's customer-visible text), never over note text, and never over team-only internal notes. | US-047 |
+| FR-092 | The same suggestion is available per alert on demand and is recomputed at that moment, so notes written after an announcement still reach an operator reviewing the alert. | US-047 |
+| FR-093 | Candidate matches exclude the alert itself and any alert without a note, span all categories, and are rejected below a similarity floor — no suggestion is preferable to an unrelated one. | US-047 |
+| FR-094 | Where semantic matching is unavailable or there is nothing to compare against, notes stay fully readable and writable and no suggestion is produced. This is not an error state. | US-047 |
+| FR-095 | The bug-alert list is bounded per request by a caller-supplied limit with a server default, preserving the worst-first ordering, so the calibration surface cannot return an unbounded page. | US-048 |
+| FR-096 | Bug alerts are subject to configurable retention, off by default: an alert may be removed only when it is dismissed, older than the configured age, **and** carries no note. A noted alert is never removed by retention — it is the recurrence corpus (FR-091). Retention never removes an alert awaiting a decision. | US-048 |
+| FR-097 | The recurrence suggestion is fetched per alert on demand, not for every listed alert: rendering the review list performs no similarity lookup. An unknown alert id is reported as unknown by every bug-alert route regardless of whether semantic matching is available, so "no matches" and "no such alert" remain distinct answers. | US-048 |
 
 ## 6. Non-functional requirements
 

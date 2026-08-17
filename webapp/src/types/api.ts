@@ -162,8 +162,41 @@ export interface BugAlert {
   slack_channel: string | null;
   slack_ts: string | null;
   dismissed_at: string | null;
+  // Acknowledged = someone owns this. Independent of `dismissed_at` (finished),
+  // so a row can carry both — an alert that was picked up and then closed out.
+  acked_at: string | null;
+  acked_by: UserRef | null;
+  // The incident record: what this defect turned out to be. `note_by` is the
+  // MOST RECENT author — the board is team-wide, so anyone may correct a note.
+  note: string | null;
+  note_by: UserRef | null;
+  note_at: string | null;
   title: string | null;
   url: string | null;
+}
+
+// An earlier noted bug whose SYMPTOM resembles this one's. Derived server-side
+// per request, never stored — so a note written after an alert was announced
+// still reaches whoever opens it. `score` is cosine similarity in [-1, 1];
+// matches below the server's floor are not returned at all.
+export interface SimilarBug {
+  ticket_id: string;
+  severity: BugSeverity;
+  score: number;
+  note: string;
+  note_by: UserRef | null;
+  note_at: string | null;
+  title: string | null;
+  url: string | null;
+}
+
+// `POST /bug-alerts/{id}/ack`. `slack_updated: false` next to a set `acked_at`
+// is a success, not a failure: the alert was never announced, Slack is off, or
+// the edit failed. The acknowledgement is recorded either way (FR-087), so the
+// UI must not present this as "the ack did not happen".
+export interface BugAlertAckResult {
+  alert: BugAlert;
+  slack_updated: boolean;
 }
 
 // A semantically-ranked playbook suggestion for a ticket (roadmap 3.3). `score`

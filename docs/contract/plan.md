@@ -1,6 +1,6 @@
 # Intercom Triage — Technical Plan
 
-**Status:** ready · **Version:** 2.3 · **Implements:** `spec.md` v2.4 · **Sibling docs:** `spec.md`, `tasks.md`
+**Status:** ready · **Version:** 2.6 · **Implements:** `spec.md` v2.7 · **Sibling docs:** `spec.md`, `tasks.md`
 
 This document defines **how** the system is built. Each section maps back to one or more spec requirements. Tasks in `tasks.md` reference both spec IDs and plan sections.
 
@@ -1080,3 +1080,305 @@ re-detection), editing severity or evidence by hand (they are AI output; an
 operator-edited "detection" is not a detection), a per-card board marker, and
 anything that posts to Slack from the client (invariant: the backend owns
 delivery, NFR-015 keeps the token server-side).
+
+---
+
+## §22 — Bug-alert acknowledgement (spec v2.5 · US-046 · FR-084..FR-088)
+
+The channel could not distinguish an alert somebody owns from one nobody has
+read. Two engineers investigate the same bug, or none do. Acknowledgement fixes
+that, and it has to be visible **in Slack**, because Slack is where the alert was
+seen.
+
+### Why the acknowledgement travels outward, not inward
+
+The obvious design is a Block Kit **Acknowledge** button on the alert. It was
+rejected, and the reason is structural rather than aesthetic:
+
+* Slack delivers an interaction by **POSTing to a public HTTPS Request URL**. Our
+  backend answers on `127.0.0.1`, and this repo ships no hosting config on
+  purpose. A button therefore needs a tunnel in dev and real infrastructure
+  later — infrastructure we have explicitly deferred to the operator.
+* That endpoint could not be protected by our session (Slack has no bearer
+  token of ours). It would need HMAC request-signature verification plus a
+  replay window, and it would have to join the auth allowlist — which invariant
+  #15 defines as a security regression unless argued for deliberately.
+* It needs a Slack-user → `users` mapping we do not have.
+
+So acknowledgement is **outbound only**: the operator acts on the board, the
+backend rewrites the Slack message. Slack never calls us (FR-088). The cost of
+this choice is that acknowledgement cannot originate in Slack; the benefit is no
+public surface, no signing secret, no allowlist change, and no new Slack scope.
+Should hosting arrive, the button becomes an additive second entry point — the
+state it would write already exists.
+
+### `chat.update`, not a threaded reply
+
+We already store `slack_channel` + `slack_ts` per alert (they were stored so the
+review page could deep-link, §21). Those are exactly the coordinates
+`chat.update` needs, so the acknowledgement can be **folded into the original
+card**. A threaded reply was the alternative and is worse here: the question
+being answered is "is this one handled?", which should be legible from the
+message itself, not from opening a thread. Escalations stay threaded replies —
+those are events in time, and the thread is the right shape for a sequence.
+
+The updated card is rebuilt by the same attachment builder as the original post,
+with an acknowledgement line appended. One builder, so NFR-016 cannot drift
+between the post path and the update path: the evidence quote stays inside the
+attachment blocks and out of the top-level `text` / `fallback`, which is what
+surfaces in push previews.
+
+`chat.update` replaces the message **wholesale**, so the rebuild must carry
+everything the original post carried — including the §23 recurrence block.
+Leaving it out would erase the precedent from the card at the exact moment
+someone takes ownership of the bug. It is re-derived rather than remembered, so a
+note written since the announcement reaches this reader too (the same reason
+`GET /bug-alerts/{id}/similar` recomputes per request, FR-092).
+
+### Ordering: record first, mirror second
+
+`acked_at` / `acked_by` are committed **before** Slack is called (FR-087). The
+board is the record and the channel is a projection of it. A Slack failure is
+logged and reported to the caller as a partial success — acknowledged, channel
+not updated — rather than rolled back. The reverse order would let a Slack
+outage refuse acknowledgements, which is precisely backwards: the fact is local.
+
+There is deliberately **no retry queue** for the mirror. `posted_at IS NULL` is
+an outbox because losing an announcement loses information nobody has seen;
+losing an acknowledgement mirror only loses a line on a message whose owner is
+already recorded and visible on the board. A second acknowledgement is a no-op
+(FR-084), so a failed mirror is not repaired by re-clicking — accepted, and
+called out here so it is not read as an oversight.
+
+### State shape
+
+Two nullable columns on `bug_alerts`, XOR-locked as a pair by CHECK
+(`acked_at IS NULL` ⇔ `acked_by IS NULL`) — the same pattern as
+`resolved_at`/`resolved_source` (invariant #10) and the parked trio (#14).
+`acked_by` is `users.id` with `ON DELETE SET NULL`, and is exposed as
+`UserRef {id, name}` composed via a join at read time, exactly like
+`resolved_by` (invariant #17). Migration `0028`.
+
+`record_bug_alerts` must not write either column. Its `ON CONFLICT DO UPDATE`
+already enumerates its set-clause explicitly, so ack durability across
+re-detection holds by construction rather than by a guard — the same way
+`posted_*` and `dismissed_at` are protected today (FR-085).
+
+**Acknowledgement and dismissal are independent.** Ack means *owned*; dismiss
+means *finished*. Dismissing does not clear an ack, so "who picked this up" is
+not destroyed by closing it out. The review page therefore reads four states:
+awaiting announcement → announced → acknowledged → dismissed, and ack is
+displayed alongside dismissal rather than replaced by it.
+
+**Escalation does not clear the ack.** Considered and rejected: forcing re-ack
+on escalation would delete attribution (there is no undo, and no history table
+for alerts), and the escalation is already announced as a threaded reply under
+the card the acknowledger is subscribed to. The cost is that nobody is *forced*
+to re-acknowledge a bug that got worse. That is a policy question, not a missing
+mechanism — if the operator wants re-ack on escalation, it is a follow-up that
+clears the pair inside the escalation branch.
+
+### Shape
+
+| File | Change |
+|---|---|
+| `alembic/versions/0028_*.py` | `acked_at` + `acked_by` + the XOR CHECK (batch mode — SQLite rebuilds for a table constraint) |
+| `models.py` | the two columns + CheckConstraint on `BugAlert` |
+| `schemas.py` | `BugAlertRead.acked_at` + `.acked_by: UserRef | None` |
+| `clients/slack.py` | `update_message` (`chat.update`); the retry/verdict loop generalized over the endpoint so both calls log per-attempt truth |
+| `services/bug_alerts.py` | `ack_bug_alert`; ack line in the attachment builder |
+| `routers/bug_alerts.py` | `POST /bug-alerts/{ticket_id}/ack` |
+| `deps.py` | `get_slack` (matches `get_openrouter` / `get_intercom`) |
+| webapp | `BugAlert.acked_*`, `ackBugAlert`, store `ack()`, an Ack button + acked state |
+
+### Not in scope
+
+A Slack-side button (above), un-acknowledging (ack is cheap to grant and
+attribution should not be erasable), re-ack on escalation (above), per-alert
+assignment to a *different* user than the acknowledger (the board already has
+ticket assignment — inventing a second owner field here would compete with it),
+and any retry/outbox for the mirror (above).
+
+---
+
+## §23 — Bug notes + recurrence suggestion (spec v2.6 · US-047 · FR-089..FR-094)
+
+A bug alert said what was wrong and never what it turned out to be. So the same
+defect gets investigated twice. This adds the incident record — and, more
+importantly, gets it back out when the defect recurs.
+
+### Why not playbooks
+
+Playbooks are the existing durable-knowledge primitive (invariant #13), and this
+was the obvious place to put it. It does not fit, for one structural reason:
+`suggest_playbooks` draws its candidates from `list_for_ticket`, i.e. the
+ticket's **effective category**. Bugs do not respect category. "Export button
+does nothing" arrives as Technical Issue, as Billing (they were exporting an
+invoice), and as How-To (they think they are doing it wrong) — the same defect,
+three categories. A category-scoped match misses precisely the recurrence this
+exists to catch.
+
+So bug notes are a second, deliberately narrow store: one note per alert, keyed
+by the alert, searched across all categories. Playbooks keep their job (a
+category's response recipe); a bug note is one defect's incident record.
+Promoting a note into a playbook is left as a follow-up rather than assumed.
+
+### Matching on the symptom, returning the answer
+
+The comparison is between **symptoms**, not between remedies: the query is the
+new alert's evidence quote plus its ticket's customer-visible text, and each
+candidate is embedded from *its* evidence plus title. The note is the payload
+that gets returned, never part of what is matched. Embedding the note would rank
+by remedy language ("clear the cache") and match a cache-clearing fix to any
+other cache-clearing fix, which is not the question being asked.
+
+Consequences worth stating:
+
+* **Only customer-visible text is embedded** — parts and title, never
+  `internal_notes` (invariant #4). Same rule the AI prompt follows, for the same
+  reason.
+* **No AI call.** This is embedding + cosine, so the categorization cache key is
+  untouched (invariant #6) and a suggestion costs no tokens.
+* **A similarity floor, unlike playbooks.** `suggest_playbooks` has no floor
+  because category filtering already bounds its candidates; a weak same-category
+  match is still same-category. Cross-category matching has no such backstop, so
+  a floor is required — below it we say nothing. A confidently-wrong prior fix is
+  worse than silence, because it will be followed.
+
+  **The floor was measured, and the first guess was wrong.** 0.55 was picked by
+  intuition; against the dev corpus (18 alerts, one noted) the two hand-confirmed
+  same-defect reports scored **0.504** and **0.532**, so 0.55 rejected both — the
+  feature would have shipped looking complete and never fired. An unmistakably
+  unrelated report scored 0.047. The floor is now **0.50**, under both confirmed
+  matches and ~1.5x above the middle band (0.30–0.33).
+
+  Two caveats recorded rather than smoothed over: the corpus is a single product,
+  whose support vocabulary overlaps heavily ("messages", "sending", "workflow"),
+  which inflates absolute similarity; and it is calibrated on ONE note. This
+  needs re-measuring once several notes exist. The lesson generalises — a
+  threshold on model output is not knowable by reasoning, only by looking at the
+  distribution.
+* **Candidates are the noted alerts, scored directly**, rather than a
+  `nearest_neighbours` sweep over `ticket_embeddings` intersected with noted
+  alerts. The k-NN route needs an arbitrary over-fetch (a match at rank 60 is
+  invisible at k=50) and matches whole-ticket text rather than the bug symptom.
+  Noted alerts are few by nature — an operator writes one per real defect — so
+  scoring them all is exact and bounded. This mirrors `suggest_playbooks`.
+
+### Where it is computed
+
+At **delivery**, not detection: the card is built in
+`deliver_pending_bug_alerts`, which already runs outside `SYNC_LOCK`, so the
+embedding work cannot stall ingest (invariant #20). The Bugs page recomputes on
+demand through the same function, which is what makes a note written *after* an
+announcement still reach the next reader (FR-092). Nothing about the match is
+stored: it is derived, like "ready to resume" (#14) and `SuggestedPlaybook`.
+
+### Degradation
+
+`embeddings.encoder_available()` false, no noted alerts, or no customer-visible
+text to embed → no suggestion, and the note itself stays fully readable and
+writable (FR-094). Hosted v1 runs embeddings off by scope, so **this is the
+normal hosted path, not an edge case** — the note is the durable half of the
+feature and must not depend on the suggestion half.
+
+### State shape
+
+`note` (TEXT, ≤2000), `note_by` (`users.id`, `ON DELETE SET NULL`), `note_at`,
+all on `bug_alerts`, CHECK-locked as a trio like the parked fields (#14): all
+set or all null. An empty note clears the trio. Migration `0029`.
+
+`note_by` is the **most recent** author, not the original — the board is
+team-wide (guardrail: no per-user data), so any operator may correct a note, and
+recording only the last editor is the honest thing a single column can say. No
+history table; if an audit trail is ever wanted, that is a deliberate addition,
+not something to fake with a second column.
+
+Like `acked_*`, the trio is absent from `record_bug_alerts`'s explicit
+`ON CONFLICT` set-clause, which is what makes FR-090 hold by construction.
+
+### Shape
+
+| File | Change |
+|---|---|
+| `alembic/versions/0029_*.py` | the trio + CHECK (batch mode) |
+| `models.py` | three columns + CheckConstraint |
+| `schemas.py` | `BugAlertRead.note/note_by/note_at`, `BugNoteRequest`, `SimilarBug` |
+| `services/bug_alerts.py` | `set_bug_note`, `similar_noted_bugs`, "seen before" block on the card |
+| `routers/bug_alerts.py` | `PUT /bug-alerts/{id}/note`, `GET /bug-alerts/{id}/similar` |
+| webapp | note editor + "seen before" panel on the row, store actions |
+
+### Not in scope
+
+Promoting a note to a playbook (a real follow-up, deliberately not assumed);
+note history / per-author audit; matching across *un*noted alerts (nothing to
+offer); operator-tunable floor or top-N (constants until there is evidence about
+the right values); and any AI-authored note — the note is what a human learned.
+
+---
+
+## §24 — Bug-alert surface hardening (spec v2.7 · US-048 · FR-095..FR-097)
+
+Three defects found reviewing the shipped US-044..047 slices. None is a design
+error in those slices; all three are the cost of shipping them one at a time.
+
+### The list is unbounded and nothing ever deletes a row
+
+`GET /bug-alerts` returns every row ever recorded, deliberately including `low`
+and dismissed ones because it is the calibration surface (FR-079). That is right
+for week one and wrong for month twelve: `bug_alerts` is the only table in the
+schema that grows monotonically with no sweep — `ai_cache` has one, attachments
+have one.
+
+So: a `limit` query parameter with a server default, keeping the worst-first
+ordering, and an interval-gated retention sweep in the mould of
+`_attachment_sweep_loop`.
+
+Retention has one hard rule: **a noted alert is never swept.** The note is the
+recurrence corpus (FR-091), so a sweep that respected only age and dismissal
+would quietly delete the precedent that US-047 exists to surface — the feature
+would keep working and keep getting worse, which is the failure mode nobody
+notices. Retention is therefore `dismissed AND older than N AND note IS NULL`,
+off by default (`0` = never), and it is a hard delete: a soft-deleted alert would
+still have to be excluded from the PK-keyed upsert (invariant #20), and a ticket
+that reports the same defect again should get a fresh alert, not a resurrected
+one.
+
+### The review page pays for matches it did not ask for
+
+`BugAlertsPage` watches its visible rows and requests a recurrence match for
+every one of them, immediately. Server-side each request embeds the query text
+plus **every** noted alert, so one page open costs `rows × noted` encoder passes.
+It is invisible today only because hosted v1 runs embeddings off (FR-094), which
+means the cost arrives on the day the feature starts working.
+
+Fetch on demand instead: the operator opens a row, that row asks. A batch
+endpoint was the alternative and is worse — it computes matches for rows nobody
+looked at, just in fewer round-trips.
+
+### An unknown id answers two different ways
+
+`similar_noted_bugs` returns `[]` when there is no encoder and raises 404 when the
+alert does not exist — but the encoder check runs first, so the same request to
+the same server answers 404 or `[]` depending on configuration. Existence is a
+property of the request; capability is a property of the deployment. Check
+existence first, then capability, so "no such alert" and "no matches" stay
+distinct.
+
+### Shape
+
+| File | Change |
+|---|---|
+| `config.py` | `bug_alert_retention_days` (0 = off), `bug_alert_sweep_interval_seconds`, list-limit default |
+| `services/bug_alerts.py` | `limit` on `list_bug_alerts`; `sweep_bug_alerts`; existence check before `encoder_available()` |
+| `routers/bug_alerts.py` | `limit` query param |
+| `main.py` | retention sweep loop (interval-gated, default off) |
+| webapp | on-demand `loadSimilar` per opened row; drop the visible-rows watch |
+
+### Not in scope
+
+Cursor pagination (a bounded limit is enough for a review surface an operator
+scrolls), archiving swept alerts anywhere, retention for `tickets` / `ai_cache`
+(different lifecycles, different owners), and promoting a note out of a swept
+alert — a noted alert is not swept, which is the same guarantee stated the other
+way round.

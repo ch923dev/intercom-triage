@@ -1,9 +1,11 @@
-<!-- Bug-alert review page. Reference: tasks.md T182 — US-045, FR-080..FR-083.
+<!-- Bug-alert review page. Reference: tasks.md T182/T186 — US-045, US-046,
+     FR-080..FR-083, FR-084/FR-087.
      Lists AI-detected product bugs worst-first, with the customer's own words as
-     evidence, and lets an operator dismiss a false positive. Dismissal is the
-     only mutation here: detection is the AI's job, and the backend owns Slack. -->
+     evidence. Two mutations: acknowledge ("I own this", which also rewrites the
+     Slack announcement) and dismiss ("this is finished"). Detection stays the
+     AI's job, and the backend owns every Slack call. -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import Mono from './Mono.vue';
 import { useBugAlertsStore } from '@/stores/bugAlerts';
 import { formatAgoFromDate, formatShortDateTime } from '@/utils/time';
@@ -11,7 +13,7 @@ import type { BugAlert, BugSeverity } from '@/types/api';
 
 const store = useBugAlertsStore();
 
-type StateFilter = 'all' | 'pending' | 'announced' | 'dismissed';
+type StateFilter = 'all' | 'pending' | 'announced' | 'acknowledged' | 'dismissed';
 const severityFilter = ref<BugSeverity | 'all'>('all');
 const stateFilter = ref<StateFilter>('all');
 
@@ -19,10 +21,14 @@ onMounted(() => {
   void store.load().catch(() => undefined); // the error surfaces from the store
 });
 
-/** Where an alert sits in its lifecycle. Dismissal outranks delivery: a
- *  dismissed alert is done regardless of whether it was ever announced. */
+/** Where an alert sits in its lifecycle, most-final first. Dismissal outranks
+ *  acknowledgement, which outranks delivery: a dismissed alert is finished
+ *  whether or not it was owned, and an owned alert is past "just announced".
+ *  Backing state is independent (an alert can be both acked and dismissed) —
+ *  this collapses it to the one label worth showing on a row. */
 function stateOf(a: BugAlert): Exclude<StateFilter, 'all'> {
   if (a.dismissed_at) return 'dismissed';
+  if (a.acked_at) return 'acknowledged';
   return a.posted_at ? 'announced' : 'pending';
 }
 
@@ -31,6 +37,23 @@ function stateOf(a: BugAlert): Exclude<StateFilter, 'all'> {
 const RANK: Record<BugSeverity, number> = { low: 1, medium: 2, high: 3 };
 function isEscalating(a: BugAlert): boolean {
   return !!a.posted_severity && RANK[a.severity] > RANK[a.posted_severity];
+}
+
+/** The one-line status shown on a row. In script rather than a template ternary
+ *  because four states nested inline stopped being readable. */
+function stateLabel(a: BugAlert): string {
+  switch (stateOf(a)) {
+    case 'dismissed':
+      return 'dismissed';
+    case 'acknowledged':
+      return `owned by ${a.acked_by?.name ?? 'an operator'}`;
+    case 'announced':
+      return isEscalating(a)
+        ? `announced as ${a.posted_severity} · escalation pending`
+        : 'announced';
+    default:
+      return 'awaiting announcement';
+  }
 }
 
 /** Filtering is client-side: the endpoint already returns the full calibration
@@ -53,6 +76,50 @@ function slackLink(a: BugAlert): string | null {
 function dismiss(ticketId: string) {
   void store.dismiss(ticketId).catch(() => undefined);
 }
+
+function ack(ticketId: string) {
+  void store.ack(ticketId).catch(() => undefined);
+}
+
+/** Ticket ids whose note editor is open. Editing is opt-in per row: a textarea on
+ *  every card would bury the alert content the page exists to show. */
+const editing = ref<Set<string>>(new Set());
+/** Draft note text per ticket, so an unsaved edit is not lost by a list refresh. */
+const drafts = ref<Record<string, string>>({});
+
+function startEditing(a: BugAlert) {
+  drafts.value = { ...drafts.value, [a.ticket_id]: a.note ?? '' };
+  editing.value = new Set(editing.value).add(a.ticket_id);
+}
+
+function stopEditing(ticketId: string) {
+  const next = new Set(editing.value);
+  next.delete(ticketId);
+  editing.value = next;
+}
+
+function saveNote(ticketId: string) {
+  void store
+    .saveNote(ticketId, drafts.value[ticketId] ?? '')
+    .then(() => stopEditing(ticketId))
+    .catch(() => undefined); // stays open so the text is not lost
+}
+
+/** Matches for one alert, or [] while still unfetched. */
+function priors(ticketId: string) {
+  return store.similar[ticketId] ?? [];
+}
+
+/** Fetch "seen before" for whatever is currently on screen. Per-alert and lazy:
+ *  each match is an embedding pass server-side, so it is not worth doing for rows
+ *  a filter has hidden. */
+watch(
+  visible,
+  (rows) => {
+    for (const a of rows) void store.loadSimilar(a.ticket_id);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -71,6 +138,7 @@ function dismiss(ticketId: string) {
           <option value="all">All states</option>
           <option value="pending">Awaiting announcement</option>
           <option value="announced">Announced</option>
+          <option value="acknowledged">Acknowledged</option>
           <option value="dismissed">Dismissed</option>
         </select>
       </div>
@@ -109,15 +177,16 @@ function dismiss(ticketId: string) {
               last {{ formatAgoFromDate(a.last_detected_at) }}
             </Mono>
             <Mono :size="9" class="state" :class="`state-${stateOf(a)}`">
-              {{
-                stateOf(a) === 'dismissed'
-                  ? 'dismissed'
-                  : stateOf(a) === 'announced'
-                    ? isEscalating(a)
-                      ? `announced as ${a.posted_severity} · escalation pending`
-                      : 'announced'
-                    : 'awaiting announcement'
-              }}
+              {{ stateLabel(a) }}
+            </Mono>
+            <!-- Acknowledged AND dismissed is a real combination; the row's
+                 single state label can only show the latter, so name the owner
+                 separately rather than losing it. -->
+            <Mono v-if="a.acked_at && a.dismissed_at" :size="9" class="acked-by">
+              acked by {{ a.acked_by?.name ?? 'an operator' }}
+            </Mono>
+            <Mono v-if="store.mirrorFailed.has(a.ticket_id)" :size="9" class="warn">
+              Slack message not updated
             </Mono>
             <a
               v-if="slackLink(a)"
@@ -129,9 +198,73 @@ function dismiss(ticketId: string) {
             >
             <Mono :size="9" class="tid">{{ a.ticket_id }}</Mono>
           </div>
+
+          <!-- "Seen before": an earlier bug someone already worked out. Rendered
+               only when there is a match — an empty panel on every alert would
+               train people to stop looking at the one that has something. -->
+          <div v-for="p in priors(a.ticket_id)" :key="p.ticket_id" class="prior">
+            <Mono :size="9" class="prior-head">
+              seen before ·
+              <a v-if="p.url" :href="p.url" target="_blank" rel="noopener">{{
+                p.title || p.ticket_id
+              }}</a>
+              <span v-else>{{ p.ticket_id }}</span>
+              · {{ Math.round(p.score * 100) }}% similar
+            </Mono>
+            <p class="prior-note">{{ p.note }}</p>
+            <Mono v-if="p.note_by" :size="9" class="prior-by">— {{ p.note_by.name }}</Mono>
+          </div>
+
+          <!-- The incident record for THIS bug. -->
+          <div class="note-block">
+            <template v-if="editing.has(a.ticket_id)">
+              <textarea
+                v-model="drafts[a.ticket_id]"
+                class="note-input"
+                rows="3"
+                maxlength="2000"
+                placeholder="Root cause, workaround, what was actually done…"
+              ></textarea>
+              <div class="note-actions">
+                <button
+                  class="note-save"
+                  :disabled="store.savingNote.has(a.ticket_id)"
+                  @click="saveNote(a.ticket_id)"
+                >
+                  Save
+                </button>
+                <button class="note-cancel" @click="stopEditing(a.ticket_id)">Cancel</button>
+                <Mono :size="9" class="note-hint">empty saves as no note</Mono>
+              </div>
+            </template>
+            <template v-else-if="a.note">
+              <p class="note-body">{{ a.note }}</p>
+              <div class="note-actions">
+                <Mono :size="9" class="note-by">
+                  noted by {{ a.note_by?.name ?? 'an operator' }}
+                </Mono>
+                <button class="note-edit" @click="startEditing(a)">Edit</button>
+              </div>
+            </template>
+            <button v-else class="note-edit" @click="startEditing(a)">Add note</button>
+          </div>
         </div>
 
         <div class="actions">
+          <!-- Ack stays available on a dismissed row only if it was never acked —
+               claiming something already closed out is not a useful action. -->
+          <button
+            v-if="!a.acked_at && !a.dismissed_at"
+            class="ack"
+            :disabled="store.acking.has(a.ticket_id)"
+            :title="'Mark as owned and update the Slack message'"
+            @click="ack(a.ticket_id)"
+          >
+            Acknowledge
+          </button>
+          <Mono v-else-if="a.acked_at && !a.dismissed_at" :size="9" class="done"
+            >✓ acknowledged</Mono
+          >
           <button
             v-if="!a.dismissed_at"
             class="dismiss"
@@ -292,7 +425,8 @@ a.name:hover {
   align-items: center;
   flex: 0 0 auto;
 }
-.dismiss {
+.dismiss,
+.ack {
   font-family: var(--font-mono);
   font-size: 10.5px;
   text-transform: uppercase;
@@ -304,16 +438,114 @@ a.name:hover {
   color: var(--ink-2);
   cursor: pointer;
 }
-.dismiss:not(:disabled):hover {
+.dismiss:not(:disabled):hover,
+.ack:not(:disabled):hover {
   border-color: var(--accent);
   color: var(--accent);
 }
-.dismiss:disabled {
+.dismiss:disabled,
+.ack:disabled {
   opacity: 0.4;
   cursor: default;
 }
+/* Acknowledge is the more common action of the two — it reads first without
+   becoming a filled button, which would outrank the severity chip. */
+.ack {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
 .done {
   color: var(--ink-3);
+}
+.acked-by {
+  color: var(--ink-3);
+}
+/* Prior-fix panel. Inset and quieter than the alert itself: it is context for
+   the alert, not a competing alert. */
+.prior {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--panel);
+}
+.prior-head {
+  color: var(--ink-3);
+}
+.prior-head a {
+  color: var(--ink-2);
+}
+.prior-note {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+.prior-by {
+  color: var(--ink-3);
+}
+.note-block {
+  margin-top: 8px;
+}
+.note-body {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+.note-input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 8px;
+  color: var(--ink);
+  background: var(--bg);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  resize: vertical;
+}
+.note-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.note-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.note-by,
+.note-hint {
+  color: var(--ink-3);
+}
+.note-edit,
+.note-cancel,
+.note-save {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--bg);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.note-edit:hover,
+.note-cancel:hover,
+.note-save:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.note-save:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* The ack succeeded and only its mirror failed, so this is a caveat, not an
+   error: same weight as the other meta, tinted to be noticed once. */
+.warn {
+  color: var(--accent);
 }
 html[data-theme='dark'] .sev-chip-high {
   color: oklch(0.85 0.13 25);

@@ -214,10 +214,64 @@ class BugAlertRead(BaseModel):
     slack_channel: str | None
     slack_ts: str | None
     dismissed_at: UTCDatetime | None
+    # Acknowledgement (T183). Independent of `dismissed_at`: acked = owned,
+    # dismissed = finished, and a row may carry both. `acked_by` is composed
+    # through a `users` join like `resolved_by` (invariant #17), so the operator
+    # is named rather than reduced to an id the client has to resolve.
+    acked_at: UTCDatetime | None = None
+    acked_by: UserRef | None = None
+    # The incident record (T187). Operator-authored, so unlike `evidence` it is
+    # not customer text — but it may quote some, so it is treated with the same
+    # care in logs and Slack previews. `note_by` is the most recent author.
+    note: str | None = None
+    note_by: UserRef | None = None
+    note_at: UTCDatetime | None = None
     # Composed at read time from the `tickets` row so the list is usable on its
     # own; absent when the ticket has aged out (there is no FK by design).
     title: str | None = None
     url: str | None = None
+
+
+class BugNoteRequest(BaseModel):
+    """`PUT /bug-alerts/{id}/note` body. An empty/whitespace note CLEARS the trio
+    rather than storing a blank one, mirroring `ticket_notes` (an empty body
+    deletes the row) so "no note" has exactly one representation."""
+
+    note: str = Field(max_length=2000)
+
+
+class SimilarBug(BaseModel):
+    """An earlier noted bug that resembles this one (US-047).
+
+    Derived, never stored — recomputed per request like `SuggestedPlaybook`, so a
+    note written after an announcement still reaches the next reader (FR-092).
+    `score` is cosine similarity in [-1, 1] between the two bugs' SYMPTOMS
+    (evidence + ticket text); the note is the payload being retrieved, never part
+    of what was matched.
+    """
+
+    ticket_id: str
+    severity: BugSeverity
+    score: float
+    note: str
+    note_by: UserRef | None = None
+    note_at: UTCDatetime | None = None
+    title: str | None = None
+    url: str | None = None
+
+
+class BugAlertAckResult(BaseModel):
+    """`POST /bug-alerts/{id}/ack` response.
+
+    Carries `slack_updated` because the acknowledgement and its mirror can
+    legitimately disagree: the row is committed first and the Slack update is
+    best-effort (FR-087), so `alert.acked_at` set with `slack_updated=False` is a
+    real, reportable outcome — acknowledged here, channel not updated — and not
+    an error the client should retry.
+    """
+
+    alert: BugAlertRead
+    slack_updated: bool
 
 
 class FollowupSet(BaseModel):

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.intercom import IntercomClient
 from app.clients.onlysales import OnlySalesClient
 from app.clients.openrouter import OpenRouterClient
+from app.clients.slack import SlackClient
 from app.config import AppConfig
 from app.db import get_session
 from app.models import Session as SessionRow
@@ -34,6 +35,13 @@ def get_openrouter(request: Request) -> OpenRouterClient | None:
 
 def get_intercom(request: Request) -> IntercomClient | None:
     client: IntercomClient | None = getattr(request.app.state, "intercom", None)
+    return client
+
+
+def get_slack(request: Request) -> SlackClient | None:
+    """`None` when Slack is unconfigured — a missing token boots the backend
+    degraded rather than failing (FR-014), so every caller handles the None."""
+    client: SlackClient | None = getattr(request.app.state, "slack", None)
     return client
 
 

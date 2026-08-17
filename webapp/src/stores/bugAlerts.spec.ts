@@ -8,6 +8,9 @@ vi.mock('@/api/client', () => ({
   api: {
     listBugAlerts: vi.fn(),
     dismissBugAlert: vi.fn(),
+    ackBugAlert: vi.fn(),
+    setBugNote: vi.fn(),
+    getSimilarBugs: vi.fn(),
   },
 }));
 
@@ -27,6 +30,11 @@ function make(over: Partial<BugAlert> = {}): BugAlert {
     slack_channel: null,
     slack_ts: null,
     dismissed_at: null,
+    acked_at: null,
+    acked_by: null,
+    note: null,
+    note_by: null,
+    note_at: null,
     title: 'Export broken',
     url: 'https://example.com/conv/T1',
     ...over,
@@ -99,6 +107,161 @@ describe('bugAlertsStore', () => {
     expect(s.alerts[0].dismissed_at).toBeNull();
     expect(s.error).toBe('offline');
     expect(s.dismissing.has('a')).toBe(false);
+  });
+
+  it('ack replaces the row and names the acknowledger', async () => {
+    mocked.listBugAlerts.mockResolvedValue([make({ ticket_id: 'a' }), make({ ticket_id: 'b' })]);
+    const s = useBugAlertsStore();
+    await s.load();
+
+    mocked.ackBugAlert.mockResolvedValue({
+      alert: make({
+        ticket_id: 'b',
+        acked_at: '2026-08-15T10:00:00Z',
+        acked_by: { id: 1, name: 'Christian' },
+      }),
+      slack_updated: true,
+    });
+    await s.ack('b');
+
+    const row = s.alerts.find((x) => x.ticket_id === 'b');
+    expect(row?.acked_by?.name).toBe('Christian');
+    expect(s.alerts.find((x) => x.ticket_id === 'a')?.acked_at).toBeNull();
+    expect(mocked.listBugAlerts).toHaveBeenCalledTimes(1); // no refetch
+    expect(s.mirrorFailed.has('b')).toBe(false);
+  });
+
+  it('flags an announced alert whose Slack message could not be updated', async () => {
+    mocked.listBugAlerts.mockResolvedValue([make({ ticket_id: 'a', slack_ts: '123.45' })]);
+    const s = useBugAlertsStore();
+    await s.load();
+
+    mocked.ackBugAlert.mockResolvedValue({
+      alert: make({ ticket_id: 'a', slack_ts: '123.45', acked_at: '2026-08-15T10:00:00Z' }),
+      slack_updated: false,
+    });
+    await s.ack('a');
+
+    // The ack itself succeeded — it must not be reported as an error.
+    expect(s.error).toBeNull();
+    expect(s.alerts[0].acked_at).not.toBeNull();
+    expect(s.mirrorFailed.has('a')).toBe(true);
+  });
+
+  it('does not flag a never-announced alert as a failed mirror', async () => {
+    mocked.listBugAlerts.mockResolvedValue([make({ ticket_id: 'a', slack_ts: null })]);
+    const s = useBugAlertsStore();
+    await s.load();
+
+    mocked.ackBugAlert.mockResolvedValue({
+      alert: make({ ticket_id: 'a', slack_ts: null, acked_at: '2026-08-15T10:00:00Z' }),
+      slack_updated: false,
+    });
+    await s.ack('a');
+
+    // There was no message to update, so nothing is out of date.
+    expect(s.mirrorFailed.has('a')).toBe(false);
+  });
+
+  it('a failed ack leaves the row untouched', async () => {
+    mocked.listBugAlerts.mockResolvedValue([make({ ticket_id: 'a' })]);
+    const s = useBugAlertsStore();
+    await s.load();
+
+    mocked.ackBugAlert.mockRejectedValue(new Error('offline'));
+    await expect(s.ack('a')).rejects.toThrow('offline');
+
+    expect(s.alerts[0].acked_at).toBeNull();
+    expect(s.error).toBe('offline');
+    expect(s.acking.has('a')).toBe(false);
+  });
+
+  it('pendingCount still counts an acknowledged but undismissed alert', async () => {
+    mocked.listBugAlerts.mockResolvedValue([
+      make({ ticket_id: 'a', acked_at: '2026-08-15T10:00:00Z', acked_by: { id: 1, name: 'C' } }),
+      make({ ticket_id: 'b', dismissed_at: '2026-08-15T10:00:00Z' }),
+    ]);
+    const s = useBugAlertsStore();
+    await s.load();
+    // Owned is not finished.
+    expect(s.pendingCount).toBe(1);
+  });
+
+  it('saveNote replaces the row and drops cached matches', async () => {
+    mocked.listBugAlerts.mockResolvedValue([make({ ticket_id: 'a' }), make({ ticket_id: 'b' })]);
+    mocked.getSimilarBugs.mockResolvedValue([]);
+    const s = useBugAlertsStore();
+    await s.load();
+    await s.loadSimilar('b');
+    expect('b' in s.similar).toBe(true);
+
+    mocked.setBugNote.mockResolvedValue(
+      make({
+        ticket_id: 'a',
+        note: 'stale cache key',
+        note_by: { id: 1, name: 'Christian' },
+        note_at: '2026-08-15T10:00:00Z',
+      }),
+    );
+    await s.saveNote('a', 'stale cache key');
+
+    expect(s.alerts.find((x) => x.ticket_id === 'a')?.note).toBe('stale cache key');
+    expect(s.alerts.find((x) => x.ticket_id === 'b')?.note).toBeNull();
+    // A new note changes what OTHER alerts would match, so the cache is dropped.
+    expect(s.similar).toEqual({});
+  });
+
+  it('an empty note is sent through as a clear', async () => {
+    mocked.listBugAlerts.mockResolvedValue([make({ ticket_id: 'a', note: 'old' })]);
+    const s = useBugAlertsStore();
+    await s.load();
+
+    mocked.setBugNote.mockResolvedValue(make({ ticket_id: 'a', note: null }));
+    await s.saveNote('a', '');
+
+    expect(mocked.setBugNote).toHaveBeenCalledWith('a', '');
+    expect(s.alerts[0].note).toBeNull();
+  });
+
+  it('a failed note save leaves the row untouched and rethrows', async () => {
+    mocked.listBugAlerts.mockResolvedValue([make({ ticket_id: 'a' })]);
+    const s = useBugAlertsStore();
+    await s.load();
+
+    mocked.setBugNote.mockRejectedValue(new Error('offline'));
+    await expect(s.saveNote('a', 'x')).rejects.toThrow('offline');
+
+    expect(s.alerts[0].note).toBeNull();
+    expect(s.error).toBe('offline');
+    expect(s.savingNote.has('a')).toBe(false);
+  });
+
+  it('loadSimilar caches an empty result so it stops refetching', async () => {
+    mocked.listBugAlerts.mockResolvedValue([make({ ticket_id: 'a' })]);
+    mocked.getSimilarBugs.mockResolvedValue([]);
+    const s = useBugAlertsStore();
+    await s.load();
+
+    await s.loadSimilar('a');
+    await s.loadSimilar('a');
+
+    // "No precedent" is an answer, not a missing fetch — most alerts have none,
+    // and refetching each of them on every render would hammer the endpoint.
+    expect(mocked.getSimilarBugs).toHaveBeenCalledTimes(1);
+    expect(s.similar.a).toEqual([]);
+  });
+
+  it('a failed similar lookup is not a page error', async () => {
+    mocked.listBugAlerts.mockResolvedValue([make({ ticket_id: 'a' })]);
+    const s = useBugAlertsStore();
+    await s.load();
+
+    mocked.getSimilarBugs.mockRejectedValue(new Error('boom'));
+    await s.loadSimilar('a');
+
+    // The alert is intact; the hint is an enrichment.
+    expect(s.error).toBeNull();
+    expect(s.similar.a).toEqual([]);
   });
 
   it('tracks the in-flight ticket id while dismissing', async () => {
