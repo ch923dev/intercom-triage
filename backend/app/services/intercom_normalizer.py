@@ -16,14 +16,27 @@ Routing replaces the reverse-engineered numeric `renderable_type` codes
                                             assignment event, not a separate
                                             comment — observed live. Empty
                                             assignments fall through the body guard)
+  - part_type=open WITH a body            → parts[]   (a customer replying to a
+                                            CLOSED conversation reopens it, and
+                                            Intercom rides the reply text on the
+                                            `open` event — observed live in 15 of
+                                            50 sampled conversations. Same shape
+                                            for close/snoozed/unsnoozed
+                                            ("reply and close/snooze"))
   - part_type=note                        → internal_notes[]  (invariant #4)
-  - open / close / snoozed / reply-time notice / … → skipped
+  - bodyless state events / reply-time notice / … → skipped
+  - skipped part that DID carry a body    → skipped + logged (WARNING) so the
+                                            next event type that starts carrying
+                                            reply text surfaces instead of
+                                            vanishing (this class has bitten
+                                            twice: assignment, then open)
   - unknown part_type                     → skipped + logged (code + id, no body)
 """
 
 from __future__ import annotations
 
 import html
+import logging
 import re
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -39,33 +52,41 @@ _MAX_BODY_CHARS = 8000
 _ADMIN_AUTHOR_TYPES = frozenset({"admin", "bot", "team"})
 
 # Part types whose body, when present, is a real customer-visible thread message.
-# `comment` is the normal reply; `assignment` carries the admin's text when they
-# use Intercom's "reply and assign" — the reply rides on the assignment event
-# rather than a separate comment (observed live). Both route to parts[]; an empty
-# one is dropped by the body guard, so pure routing assignments don't leak in.
-_COMMENT_PART_TYPES = frozenset({"comment", "assignment"})
+# Intercom rides reply text on the *state event* whenever the reply and the state
+# change happen in one action, so these are message parts, not routing noise:
+#   comment    — the normal reply
+#   assignment — "reply and assign" (observed live)
+#   open       — a customer replying to a closed conversation reopens it and the
+#                reply text lands on the `open` event (observed live: 15 of 50
+#                sampled conversations, author.type='user')
+#   close / snoozed / unsnoozed — the "reply and close/snooze" counterparts
+# All route to parts[]; a bodyless one is dropped by the body guard, so pure
+# state transitions still don't leak in.
+_COMMENT_PART_TYPES = frozenset({"comment", "assignment", "open", "close", "snoozed", "unsnoozed"})
 
 # Customer-visible message parts go to parts[]; team notes to internal_notes[].
-# Everything else (routing / state events, auto channel notices) is skipped —
-# they carry no real reply text. Listing the auto reply-time/channel notice here
-# keeps it out of both parts[] and the unknown-type log.
+# Everything else (routing events, auto channel notices) is skipped — they carry
+# no real reply text. Listing the auto reply-time/channel notice here keeps it out
+# of both parts[] and the unknown-type log.
 _SKIP_PART_TYPES = frozenset(
     {
         "default_assignment",
         "away_mode_assignment",
         "message_strategy_assignment",
-        "open",
-        "close",
-        "snoozed",
-        "unsnoozed",
         "participant",
         "participant_added",
         "participant_removed",
+        "priority_changed",
         "language_detection_details",
         "conversation_attribute_updated_by_admin",
         "channel_and_reply_time_expectation",
     }
 )
+
+# Skipped part types that legitimately carry a body — Intercom boilerplate, not a
+# reply. Excluded from the `skipped_part_with_body` warning below so the warning
+# stays a real signal instead of firing on every sync.
+_EXPECTED_BODIED_SKIP_TYPES = frozenset({"channel_and_reply_time_expectation"})
 
 _BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _BLOCK_CLOSE_RE = re.compile(r"</(p|div|li|h[1-6]|tr|blockquote)>", re.IGNORECASE)
@@ -311,7 +332,20 @@ def normalize_conversation(
                     is_admin=True,
                 )
             )
-        elif part_type not in _SKIP_PART_TYPES:
+        elif part_type in _SKIP_PART_TYPES:
+            # A skip-listed event that arrived WITH text is how this mapping has
+            # broken twice (assignment, then open): Intercom starts riding reply
+            # text on an event we treat as routing noise and the message silently
+            # disappears from the board and the AI prompt. Log it (type + id only,
+            # never the body) instead of dropping it in silence.
+            if (body or images) and part_type not in _EXPECTED_BODIED_SKIP_TYPES:
+                log_event(
+                    "intercom.skipped_part_with_body",
+                    level=logging.WARNING,
+                    part_type=str(part_type),
+                    conversation_id=convo_id,
+                )
+        else:
             # Unknown code — Intercom may have introduced a part kind we'd drop.
             # Surface it (type + id only, never the body) so it can be mapped.
             log_event(

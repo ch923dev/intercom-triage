@@ -314,8 +314,10 @@ workspace Access Token (`INTERCOM_ACCESS_TOKEN` in `.env`; cross-package
 invariant #1). `app/clients/intercom.py` is a thin async client (search / detail
 / contact, retry + rate-limit aware); `app/services/intercom_normalizer.py`
 maps the official payload to `HydratedTicket` — `part_type` (`comment` →
-`parts[]`, `note` → `internal_notes[]`, events skipped), `source` as the first
-part, customer panel fields from a TTL-cached `GET /contacts/{id}`.
+`parts[]`, `note` → `internal_notes[]`, routing events skipped, bodied state
+events `assignment`/`open`/`close`/`snoozed` → `parts[]` since Intercom rides
+reply text on them), `source` as the first part, customer panel fields from a
+TTL-cached `GET /contacts/{id}`.
 `app/services/sync.py:run_sync_cycle` orchestrates one pass: `get_sync_state`
 (internal) for server-side skip-known → `POST /conversations/search` for active
 states → detail+contact fetch for changed/new → a closure pass (tracked-open

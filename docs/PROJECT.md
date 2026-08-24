@@ -158,7 +158,7 @@ no longer wired as a hook — dropped in commit `43792e6`.) One-line index only:
 
 1. Backend owns Intercom ingestion via an Access Token (`api.intercom.io`); the backend client is the only ingestion path.
 2. `HydratedTicket` spans two packages (backend schema ↔ webapp type), produced by the backend normalizer — edit together or break the board.
-3. `part_type` mapping (official API): `comment`→`parts[]`, `note`→`internal_notes[]`, events skipped, `source` first.
+3. `part_type` mapping (official API): `comment`→`parts[]`, `note`→`internal_notes[]`, routing events skipped, bodied state events (`assignment`/`open`/`close`/`snoozed`/`unsnoozed`) →`parts[]`, `source` first.
 4. `parts[]` is customer-visible (fed to AI); `internal_notes[]` is team-only (never fed to AI).
 5. Naive UTC in DB; `Z`-suffixed ISO on the wire.
 6. AI cache key = content signature (last customer-visible part timestamp), not Intercom `updated_at`.
@@ -278,7 +278,7 @@ lookup (US-047, T187–T190). Migrations 0028–0029.
 ## 12. Glossary
 
 - **HydratedTicket** — the normalized conversation shape the backend normalizer produces and stores; spans backend schema ↔ webapp type (invariant #2).
-- **part_type** — Intercom's official conversation-part type: `comment`→`parts[]` (customer or admin), `note`→`internal_notes[]`, events skipped; the opening `source` message is the first part (invariant #3). Replaced the old reverse-engineered numeric `renderable_type` codes.
+- **part_type** — Intercom's official conversation-part type: `comment`→`parts[]` (customer or admin), `note`→`internal_notes[]`, routing events skipped; a *bodied* state event (`assignment`, `open`, `close`, `snoozed`, `unsnoozed`) is a reply riding on the event and also →`parts[]`; the opening `source` message is the first part (invariant #3). A skipped part that carries a body logs `intercom.skipped_part_with_body` (WARNING). Replaced the old reverse-engineered numeric `renderable_type` codes.
 - **content signature** — the last customer-visible part timestamp; the AI cache key (invariant #6). Teammate notes/assignments advance Intercom `updated_at` but must not bust cache.
 - **override beats AI** — a manual category override wins while `tickets.updated_at ≤ override.set_at`.
 - **proposal** — an AI-suggested new category, pending operator approve/merge/reject.

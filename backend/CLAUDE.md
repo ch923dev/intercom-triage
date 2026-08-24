@@ -11,7 +11,7 @@ Guidance for Claude Code when working in `backend/`.
 - `AppConfig` (config.py) is the runtime config; `Settings` (models.py) is the singleton DB row. They are different. Don't confuse / rename.
 - `_content_signature` (last customer-visible part timestamp) is the AI cache key — NOT Intercom's `updated_at`. Internal teammate notes / assignments / snoozes advance `updated_at` but must not bust cache. Touching this invalidates the FR-008 invariant; flag it.
 - `parts[]` is what the AI sees (customer-visible thread). `internal_notes[]` is the team-only side channel and is never fed to the prompt. Don't merge them.
-- Intercom `part_type` mapping lives in `services/intercom_normalizer.py`: `comment` → `parts[]` (customer or admin author), `note` → `internal_notes[]`, events skipped, `source` is the first part. Official + documented (not the old reverse-engineered numeric codes). Pin `INTERCOM_API_VERSION`; re-verify a live payload before changing the mapping.
+- Intercom `part_type` mapping lives in `services/intercom_normalizer.py`: `comment` → `parts[]` (customer or admin author), `note` → `internal_notes[]`, `source` is the first part, routing events skipped — but a **state event with a body is a reply**, not routing (`assignment`/`open`/`close`/`snoozed`/`unsnoozed` → `parts[]` when bodied; `open` is a customer reply to a closed conversation). A skip-listed part arriving with a body logs `intercom.skipped_part_with_body` (WARNING) — that is the tripwire for the next repeat, don't silence it. Official + documented (not the old reverse-engineered numeric codes). Pin `INTERCOM_API_VERSION`; re-verify a live payload before changing the mapping.
 
 ## 2. Simplicity First (in this repo)
 

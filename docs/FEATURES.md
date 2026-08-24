@@ -128,7 +128,7 @@ All enforce inv #4 (never feed/embed `internal_notes`) and inv #6 (embeddings li
 ## J. Intercom ingestion (backend)
 
 - **Official API client** — async client over `api.intercom.io` with a workspace Access Token: conversation search (cursor-paginated), detail fetch, TTL-cached contact fetch; retry + rate-limit (`X-RateLimit-Reset`) aware. (backend · `clients/intercom.py` · inv #1)
-- **Normalizer** — maps the official payload to `HydratedTicket`: `part_type` (`comment`→`parts[]`, `note`→`internal_notes[]`, events skipped), `source` as the first part, priority coercion, HTML strip, `[attachment: …]` fallback (R.5), customer panel fields from the contact. (backend · `services/intercom_normalizer.py` · inv #2/#3/#4, R.1/R.5)
+- **Normalizer** — maps the official payload to `HydratedTicket`: `part_type` (`comment`→`parts[]`, `note`→`internal_notes[]`, routing events skipped, bodied state events `assignment`/`open`/`close`/`snoozed`/`unsnoozed`→`parts[]` because Intercom rides reply text on them; a bodied skip-listed part logs `intercom.skipped_part_with_body`), `source` as the first part, priority coercion, HTML strip, `[attachment: …]` fallback (R.5), customer panel fields from the contact. (backend · `services/intercom_normalizer.py` · inv #2/#3/#4, R.1/R.5)
 - **Sync cycle** — `run_sync_cycle`: server-side skip-known (internal `get_sync_state`), search → detail/contact fetch for changed/new, closure pass for open→closed, then the existing cache-aware ingest. (backend · `services/sync.py`)
 - **Poller + manual sync** — background poller (interval-gated, default off) + `POST /tickets/sync` (503 without a token); returns `{received, categorized, skipped_known, closed_detected}`. (backend · `main:_intercom_poll_loop`, `routers/tickets.py`)
 

@@ -6,7 +6,10 @@ in parts[] (cross-package invariant #4 — internal notes never reach the AI).
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+import pytest
 
 from app.services.intercom_normalizer import (
     attachment_fallback,
@@ -127,7 +130,72 @@ def test_assignment_with_body_surfaces_as_admin_reply() -> None:
     assert ticket.internal_notes == []  # never an internal note (invariant #4)
 
 
-def test_reply_time_notice_skipped_not_logged_unknown() -> None:
+def test_open_with_body_surfaces_as_customer_reply() -> None:
+    # A customer replying to an already-CLOSED conversation reopens it, and
+    # Intercom rides the reply text on the `open` event rather than emitting a
+    # separate comment (observed live: 15 of 50 sampled conversations). Treating
+    # `open` as pure routing dropped the customer's last message — which also
+    # froze the AI content signature, so no re-derivation and no auto-resolve.
+    detail = _detail(
+        conversation_parts={
+            "conversation_parts": [
+                _part("assignment", author_type="admin", body="here is the fix", at=_EPOCH + 10),
+                _part("close", author_type="admin", body="", at=_EPOCH + 20),
+                _part(
+                    "open", author_type="user", body="Oh awesome! Thank you so much", at=_EPOCH + 30
+                ),
+            ]
+        }
+    )
+    ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+    bodies = [p.body for p in ticket.parts]
+    assert "Oh awesome! Thank you so much" in bodies
+    reply = next(p for p in ticket.parts if p.body == "Oh awesome! Thank you so much")
+    assert reply.is_admin is False  # customer author, not our agent
+    assert ticket.internal_notes == []  # never an internal note (invariant #4)
+
+
+def test_close_and_snooze_with_body_surface_as_admin_reply() -> None:
+    # "Reply and close" / "reply and snooze" ride the admin's text on the state
+    # event, same shape as "reply and assign". Bodyless ones stay skipped
+    # (test_event_parts_skipped is the canary for that).
+    detail = _detail(
+        conversation_parts={
+            "conversation_parts": [
+                _part("close", author_type="admin", body="closing this out", at=_EPOCH + 10),
+                _part(
+                    "snoozed", author_type="admin", body="checking with the team", at=_EPOCH + 20
+                ),
+            ]
+        }
+    )
+    ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+    bodies = [p.body for p in ticket.parts]
+    assert "closing this out" in bodies
+    assert "checking with the team" in bodies
+    assert all(p.is_admin for p in ticket.parts if p.body != "Hello there")
+
+
+def test_skipped_part_with_body_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    # The guard against the next repeat of this class: a routing event that
+    # starts carrying reply text must warn, not vanish. Body is never logged.
+    detail = _detail(
+        conversation_parts={
+            "conversation_parts": [
+                _part("participant_added", author_type="user", body="surprise reply text"),
+            ]
+        }
+    )
+    with caplog.at_level(logging.WARNING):
+        ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+
+    assert all("surprise reply text" not in p.body for p in ticket.parts)
+    assert "intercom.skipped_part_with_body" in caplog.text
+    assert "part_type=participant_added" in caplog.text
+    assert "surprise reply text" not in caplog.text
+
+
+def test_reply_time_notice_skipped_not_logged_unknown(caplog: pytest.LogCaptureFixture) -> None:
     # The auto "you'll get replies here · reply time 1 day" channel notice
     # (part_type=channel_and_reply_time_expectation, bot author) is boilerplate —
     # kept out of parts[] AND out of the unknown-part_type log.
@@ -139,11 +207,18 @@ def test_reply_time_notice_skipped_not_logged_unknown() -> None:
                     author_type="bot",
                     body="You'll get replies here and in your email",
                 ),
+                _part("priority_changed", author_type="admin", body=""),
             ]
         }
     )
-    ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+    with caplog.at_level(logging.WARNING):
+        ticket = normalize_conversation(detail, workspace_app_id="ws", customer_contact=None)
+
     assert all("replies here" not in p.body for p in ticket.parts)
+    # It carries a body by design, so it must NOT trip the skipped-with-body
+    # warning — otherwise the warning fires on every sync and stops being a signal.
+    assert "intercom.skipped_part_with_body" not in caplog.text
+    assert "intercom.unknown_part_type" not in caplog.text
 
 
 def test_unknown_part_type_skipped_without_crash() -> None:
