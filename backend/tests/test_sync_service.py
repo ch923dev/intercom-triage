@@ -10,8 +10,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients.intercom import IntercomAuthError
 from app.config import AppConfig
 from app.models import Ticket
 from app.schemas import ConversationPartSchema, HydratedTicket, TicketAuthorSchema
@@ -188,3 +190,46 @@ async def test_new_conversation_is_ingested(session: AsyncSession, test_config: 
     row = await session.get(Ticket, "N1")
     assert row is not None
     assert row.resolved_at is None
+
+
+class _AuthFailingIntercom(FakeIntercom):
+    """Raises IntercomAuthError for the ids in `bad`, serves `details` otherwise."""
+
+    def __init__(self, *, bad: set[str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._bad = bad
+
+    async def get_conversation(self, conversation_id: str) -> dict[str, Any]:
+        self.detail_calls.append(conversation_id)
+        if conversation_id in self._bad:
+            raise IntercomAuthError("401 Unauthorized")
+        return self._details[conversation_id]
+
+
+async def test_auth_error_aborts_cycle_and_retrieves_sibling_results(
+    session: AsyncSession, test_config: AppConfig
+) -> None:
+    # A revoked token must abort the whole cycle (`_hydrate_one` re-raises on
+    # purpose) rather than ingest a partial board. Two ids fail so the gather has
+    # a sibling exception to settle: with a bare gather that sibling's exception
+    # is never retrieved and surfaces as "Task exception was never retrieved" at
+    # GC, burying the real failure. T197.
+    fake = _AuthFailingIntercom(
+        bad={"BAD1", "BAD2"},
+        summaries=[
+            {"id": "BAD1", "updated_at": _epoch(_DT)},
+            {"id": "OK1", "updated_at": _epoch(_DT)},
+            {"id": "BAD2", "updated_at": _epoch(_DT)},
+        ],
+        details={"OK1": _detail("OK1", state="open", updated=_epoch(_DT))},
+    )
+
+    with pytest.raises(IntercomAuthError):
+        await run_sync_cycle(session=session, openrouter=None, intercom=fake, config=test_config)
+
+    # Every candidate was attempted — the cycle settled all of them instead of
+    # bailing at the first failure with siblings still in flight.
+    assert set(fake.detail_calls) == {"BAD1", "BAD2", "OK1"}
+    # And nothing was written: an aborted cycle ingests nothing, not "whatever
+    # happened to succeed before the token died".
+    assert await session.get(Ticket, "OK1") is None

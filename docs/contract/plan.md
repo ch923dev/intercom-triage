@@ -38,13 +38,13 @@ This document defines **how** the system is built. Each section maps back to one
 | AI gateway | OpenRouter | Single contract for Anthropic models |
 | AI model (default) | `anthropic/claude-sonnet-4.5` | Quality default |
 | AI model (cost mode) | `anthropic/claude-haiku-4.5` | Configurable via `.env` |
-| Deploy | `uvicorn main:app` on localhost; webapp via `npm run dev` or static build | No cloud, no Docker required |
+| Deploy | `uvicorn app.main:app` (port 4000); webapp via `npm run dev` or static build. Hosted + TLS-terminated in v1 — see §10, §19 | We ship no infra config; hosting is the operator's concern |
 | Secrets | `.env` file (gitignored) | NFR-005 |
 | Bulk request cap | `MAX_BULK_IDS` (default 200) | Caps memory + transaction size per bulk call (FR-036) |
 
 ## 2. Architecture
 
-Two components. All run locally; backend listens on `localhost` only.
+Two components. ~~All run locally; backend listens on `localhost` only.~~ **(superseded — see §19)** The service is hosted and networked: multiple operators sign in with OnlySales credentials against one shared board, so the backend is reachable beyond `127.0.0.1` and every route is auth-gated. `localhost` remains the *development* topology only.
 
 The **backend** is a FastAPI service. It owns the Intercom integration, the AI integration, the SQLite persistence layer, and the public API surface. Reads its OpenRouter key + Intercom Access Token from `.env`. It polls Intercom's official `api.intercom.io` REST API directly (`app/clients/intercom.py`) — there is no browser involvement in ingestion.
 
@@ -143,7 +143,12 @@ BulkResult {                                # universal bulk response envelope
 
 ## 4. API contract
 
-No auth header. Backend listens on `127.0.0.1` only.
+~~No auth header. Backend listens on `127.0.0.1` only.~~ **(superseded — see §19)**
+Every route below carries `Depends(get_current_user)` and answers `401` without a
+`Authorization: Bearer …` access JWT. The allowlist is exactly `/health`,
+`POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`; the attachment
+image `GET`s additionally accept the session cookie. The service is hosted and
+TLS-terminated, not `localhost`-only (spec.md §Deployment).
 
 | Method | Path | Body | Response | Implements |
 |---|---|---|---|---|
@@ -157,7 +162,7 @@ No auth header. Backend listens on `127.0.0.1` only.
 | POST | `/proposals/{id}/approve` | optional `{color, sort_order}` | resulting Category | FR-016 |
 | POST | `/proposals/{id}/merge-into/{category_id}` | — | `{ok, moved_count}` | FR-016 |
 | POST | `/proposals/{id}/reject` | — | `{ok}` | FR-016 |
-| POST | `/tickets/sync` | — | `{received, categorized, skipped_known, closed_detected}` | FR-001, FR-031 |
+| POST | `/tickets/sync` | `?lookback_hours` | `{received, categorized, skipped_known, closed_detected}` · `503` unconfigured · `409` cycle running · `502` Intercom refused | FR-001, FR-028, FR-031 |
 | POST | `/tickets/ingest` | `HydratedTicket[]` (internal) | `{received, categorized}` | FR-004, FR-005, FR-006, FR-008, FR-011, FR-013 |
 | PATCH | `/tickets/{id}/category` | `CategoryUpdate` | `{ok, category_id}` | FR-009 |
 | PATCH | `/tickets/{id}` | `TicketEdit` | `{ok}` | FR-009 |
@@ -197,7 +202,7 @@ No auth header. Backend listens on `127.0.0.1` only.
 > endpoints are documented in their own plan sections (§13, §14) and the README
 > API table. `GET /health` also exposes `review_confidence_threshold` (FR-055).
 
-Error contract: `502` on upstream AI failure, `422` on schema violation (including bulk requests over `MAX_BULK_IDS`), `404` on unknown id, `409` on archive of fallback or other invalid state transition. Bulk endpoints never abort the batch on a per-id failure — they record `{id, reason}` in `failed[]` and return 200.
+Error contract: `502` on upstream failure — AI, or Intercom refusing a sync (revoked token, or a search that exhausted its retries: upstream failed, the request did not) — `422` on schema violation (including bulk requests over `MAX_BULK_IDS`), `404` on unknown id, `409` on archive of fallback or other invalid state transition. Bulk endpoints never abort the batch on a per-id failure — they record `{id, reason}` in `failed[]` and return 200.
 
 ## 5. Data model
 
@@ -315,8 +320,8 @@ invariant #1). `app/clients/intercom.py` is a thin async client (search / detail
 / contact, retry + rate-limit aware); `app/services/intercom_normalizer.py`
 maps the official payload to `HydratedTicket` — `part_type` (`comment` →
 `parts[]`, `note` → `internal_notes[]`, routing events skipped, bodied state
-events `assignment`/`open`/`close`/`snoozed` → `parts[]` since Intercom rides
-reply text on them), `source` as the first part, customer panel fields from a
+events `assignment`/`open`/`close`/`snoozed`/`unsnoozed` → `parts[]` since
+Intercom rides reply text on them), `source` as the first part, customer panel fields from a
 TTL-cached `GET /contacts/{id}`.
 `app/services/sync.py:run_sync_cycle` orchestrates one pass: `get_sync_state`
 (internal) for server-side skip-known → `POST /conversations/search` for active
@@ -558,12 +563,17 @@ Singleton row in the `settings` table. The webapp `GET /settings` on open and `P
 
 ## 10. Deployment
 
-Local-only. To run:
+~~Local-only.~~ **(superseded — see §19)** Hosted, TLS-terminated, multi-operator.
+We ship no infra config (no Dockerfile, no CI/CD, no production config) — hosting
+is the operator's concern. To run in development:
 
 ```
-cd backend && uvicorn main:app --port 8000              # backend on localhost
-cd webapp && npm run dev                                  # webapp on localhost:5173
+cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 4000
+cd webapp && npm run dev                                  # webapp on 127.0.0.1:5173
 ```
+
+`SESSION_JWT_SECRET` must be set or the backend hard-fails at boot
+(`app/main.py` lifespan). See `backend/.env.example`.
 
 SQLite file lives at `backend/data/triage.db` (configurable via `DATABASE_URL`). Backups are a single file copy.
 
@@ -572,6 +582,8 @@ Postgres swap: change `DATABASE_URL` in `.env` to a `postgresql+asyncpg://…` U
 ## 11. Observability
 
 Structured logging via Python's standard `logging` (stdlib only — no structlog). `observability.log_event` / `logged_call` emit per external call: `op`, `duration_ms`, `outcome`, `ticket_id` where applicable. No ticket bodies in logs.
+
+That last sentence is enforced at the engine, not by convention: `db.make_engine` passes `hide_parameters=True`, because every SQLAlchemy `StatementError` stringifies its bound parameters and those parameters are customer text — `tickets.parts` (the whole thread) on the ingest commit, `evidence` (a verbatim customer sentence) on the `bug_alerts` upsert. Two call sites stringify such an exception into a log line: `main._intercom_poll_loop` (`error=str(exc)`) and `bug_alerts.record_bug_alerts` (`exc_info=True`). Both are correct as written only because of that flag (NFR-006 / NFR-016, invariant #20). The trade is that a genuine bind/constraint failure hides its values and must be reproduced with the flag temporarily off.
 
 Lightweight counters in process memory (`tickets_fetched_total`, `ai_calls_total{result}`, `cache_hits_total`, `overrides_set_total`, `proposals_created_total`, `proposals_resolved_total{resolution}`, `bulk_actions_total{op,result}`, …), plus two additions surfaced via `GET /metrics`:
 
@@ -586,7 +598,7 @@ Promote to OpenTelemetry / Logfire only if you start running this against a real
 |---|---|---|
 | SQLite default with portable schema | Postgres from day one | Local single-user tool; zero setup. Postgres remains a one-line swap. |
 | ~~No Alembic for v1~~ **(superseded)** | Alembic from day one | Originally `create_all` + seed for simplicity, "add Alembic when the first schema change happens." That happened — the project now runs **forward-only Alembic migrations** (see §1, §5). `create_all` is retained only for tests / schema smoke. |
-| No authentication | Shared header secret, OAuth, JWT | Backend listens on `localhost`; threat model is a single trusted user on their own machine. |
+| ~~No authentication~~ **(superseded)** | Shared header secret, OAuth, JWT | Originally: backend listens on `localhost`, threat model is a single trusted user on their own machine. The MHU charter pivot made this a hosted, authenticated, shared-team board — identity is delegated to OnlySales and every route is gated. See §19. |
 | Integer PKs instead of UUIDs | UUIDs everywhere | No multi-system uniqueness requirement. Integers are smaller, faster, easier to read in dev. |
 | Reverted from multi-tenant | Keep multi-tenant from v1.1 | YAGNI for current scope. Reintroducing tenants later means adding a `tenant_id` column and a resolution layer; no other architectural rework. |
 | Reverted Identity Platform | Roll JWT verification | Auth dropped entirely. |

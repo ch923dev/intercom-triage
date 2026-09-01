@@ -183,8 +183,24 @@ async def _run_sync_cycle(
         async with sem:
             return await _hydrate_one(intercom, config, cid)
 
-    fetched = await asyncio.gather(*(guarded(cid) for cid in to_fetch))
-    hydrated = [h for h in fetched if h is not None]
+    # `return_exceptions=True` so every sibling result is retrieved. A bare
+    # gather returns at the first exception and leaves the in-flight siblings'
+    # exceptions unretrieved, which surfaces as "Task exception was never
+    # retrieved" at GC time — noise that buries the real failure. The auth abort
+    # is preserved deliberately (see `_hydrate_one`): a dead token must fail the
+    # cycle loudly rather than ingest a partial board.
+    settled = await asyncio.gather(*(guarded(cid) for cid in to_fetch), return_exceptions=True)
+    hydrated: list[HydratedTicket] = []
+    auth_error: IntercomAuthError | None = None
+    for item in settled:
+        if isinstance(item, IntercomAuthError):
+            auth_error = item
+        elif isinstance(item, BaseException):
+            raise item
+        elif item is not None:
+            hydrated.append(item)
+    if auth_error is not None:
+        raise auth_error
 
     # A tracked-open ticket that came back closed is an intercom_closed transition
     # (`_upsert_ticket` does the stamping; this is just the count for the caller).

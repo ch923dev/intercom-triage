@@ -1,8 +1,10 @@
 # Intercom Triage
 
-Local single-operator tool that pre-categorizes and summarizes recent Intercom
-conversations so you can scan and route in one Kanban view instead of opening
-each ticket. Backend + webapp, all on `localhost`.
+Hosted, authenticated team board that pre-categorizes and summarizes recent
+Intercom conversations so you can scan and route in one Kanban view instead of
+opening each ticket. Backend + webapp. Multiple operators sign in with OnlySales
+credentials against one shared ticket pool, one taxonomy, one settings row — no
+multi-tenancy. `localhost` below is the development topology.
 
 Start at the **[docs hub](./docs/)**. The contract:
 [`spec.md`](./docs/contract/spec.md) for what it does,
@@ -15,7 +17,8 @@ Start at the **[docs hub](./docs/)**. The contract:
 .
 ├── backend/        FastAPI service + SQLite store + Intercom/AI integration
 ├── webapp/         Vue 3 + Vite SPA — the Kanban board, admin pages, settings
-├── snippets/       Reference implementations referenced by task docs
+├── scripts/        dev.ps1 (single-command launcher), seed-db, invariant checks
+├── design_bundle/  Static design assets referenced by DESIGN.md
 └── docs/           📚 Docs hub (README.md) — handbook, features, contract/{spec,plan,tasks}.md
 ```
 
@@ -26,6 +29,8 @@ Start at the **[docs hub](./docs/)**. The contract:
 - OpenRouter API key
 - Intercom workspace **Access Token** — the backend polls `api.intercom.io` with
   it (Intercom → Settings → Integrations → Developer Hub → your app)
+- OnlySales credentials — login is proxied upstream; the backend never stores a
+  password
 
 ## Quickstart
 
@@ -36,15 +41,21 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1          # PowerShell  (bash: source .venv/bin/activate)
 pip install -r requirements.txt
-copy .env.example .env                # then fill in OPENROUTER_API_KEY,
-                                      # INTERCOM_ACCESS_TOKEN + INTERCOM_WORKSPACE_APP_ID
+copy .env.example .env                # then fill in SESSION_JWT_SECRET (REQUIRED),
+                                      # OPENROUTER_API_KEY, INTERCOM_ACCESS_TOKEN
+                                      # + INTERCOM_WORKSPACE_APP_ID
 uvicorn app.main:app --reload --host 127.0.0.1 --port 4000
 ```
 
-First boot creates `backend/data/triage.db` and seeds seven categories
-(Urgent, Bug, Feature Request, Question, Billing, Complaint, Other) plus the
-default filter settings. Missing secrets do **not** block startup — the backend
-runs in a degraded mode and `/health` reports what is missing.
+**`SESSION_JWT_SECRET` is the one secret that is not optional** — the lifespan
+hook refuses to boot without it, because a missing signing key means every
+access token is forgeable. Everything else is degrade-not-fail: missing
+OpenRouter / Intercom / Slack secrets do **not** block startup, the backend runs
+degraded, and `/health` reports `missing_secrets`.
+
+First boot creates `backend/data/triage.db`, runs the Alembic chain to head, and
+seeds seven categories (Urgent, Bug, Feature Request, Question, Billing,
+Complaint, Other) plus the singleton settings row.
 
 To ingest, the backend polls Intercom directly. Trigger one cycle manually with
 `curl -X POST http://localhost:4000/tickets/sync`, or set
@@ -69,8 +80,17 @@ the category-management and proposal-review pages plus the filter drawer.
 
 ## API surface
 
+**Every route below requires `Authorization: Bearer <access JWT>` and answers
+`401` without one.** The allowlist is exactly `GET /health`, `POST /auth/login`,
+`POST /auth/refresh`, `POST /auth/logout`; the attachment image `GET`s
+additionally accept the session cookie.
+
 | Method + path | Purpose |
 |---|---|
+| `POST /auth/login` | Proxies credentials to OnlySales; returns an access JWT + sets the httpOnly refresh cookie. No password is stored or logged |
+| `POST /auth/refresh` | Rotates the refresh token and mints a new access JWT. Replaying a rotated-away token revokes the session (reuse detection) |
+| `POST /auth/logout` | Revokes the session. Cookie-driven, so it works after the access JWT has expired |
+| `GET /auth/me` · `GET /users` | Current identity · the team roster (`UserRef` targets for assignment/attribution) |
 | `GET /health` | Startup smoke + which secrets are missing |
 | `GET /metrics` | Process-lifetime counters (JSON) |
 | `GET /categories` | Active categories + pending proposals |
@@ -80,7 +100,7 @@ the category-management and proposal-review pages plus the filter drawer.
 | `GET /proposals` | Pending AI category proposals + example tickets |
 | `POST /proposals/{id}/approve` · `/merge-into/{cat}` · `/reject` | Resolve a proposal |
 | `GET /tickets` | The stored board — backend-polled + categorized tickets |
-| `POST /tickets/sync` | Run one Intercom fetch+ingest cycle now (503 if no token); the background poller runs the same cycle |
+| `POST /tickets/sync` | Run one Intercom fetch+ingest cycle now — `503` if no token, `409` if a cycle is running, `502` if Intercom refuses. The background poller runs the same cycle |
 | `POST /tickets/ingest` | Direct ingest of `HydratedTicket[]` (categorize + store) — used internally by the sync cycle |
 | `POST /tickets/{id}/resolve` · `/reopen` · `/dismiss-chip` · `PATCH /ai-resolve` | Manual + AI resolution |
 | `PATCH /tickets/{id}/category` | Manually override a ticket's category |

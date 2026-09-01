@@ -281,6 +281,21 @@ announcement path.
 - T192 [P] — Fix the 404 asymmetry in `similar_noted_bugs`: the `encoder_available()` guard runs before the `session.get` existence check, so the same request answers `[]` or 404 depending on whether embeddings happen to be on. Existence is a property of the request, capability is a property of the deployment — check existence first. Test both orders of (alert missing, encoder off) against one expectation. FR-097, plan §24.
 - T193 [P] — Webapp: drop the visible-rows `watch` in `BugAlertsPage.vue` that requests a recurrence match for every rendered row (server-side that is `rows × noted-alerts` embedding passes per page open, invisible today only because hosted v1 runs embeddings off) and fetch on demand when the operator opens a row instead. The store already caches per ticket id and treats `[]` as a loaded answer, so nothing else changes. FR-097, plan §24.
 
+### Phase 27 — Review hardening (in-depth review, 2026-09-01)
+
+Seven confirmed defects from a full-repo review — verified by reading the code, not
+inferred. Three classes: customer text reachable from the logs, failure states that are
+silent, and one unbounded cost path. `[P]` except the T194/T197 pair, which edit adjacent
+regions of `sync.py` and must serialize.
+
+- T194 — `db.make_engine` passes `hide_parameters=True`. Every SQLAlchemy `StatementError` stringifies its bound parameters, and those parameters are customer text: `tickets.parts` (the whole thread) on the ingest commit, `evidence` (a verbatim customer sentence) on the `bug_alerts` upsert. Two call sites print that text — `main._intercom_poll_loop` (`error=str(exc)`) and `bug_alerts.record_bug_alerts` (`exc_info=True`) — so the flag, not the call sites, is the control. One kwarg at the single choke point rather than a redacting log filter (regex over log text, must track SQLAlchemy's formatting) or dropping `exc_info` (loses the traceback and misses the poller). Test asserts a bound quote is absent from `str(exc)` plus a structural `hide_parameters is True` guard. NFR-006/NFR-016, invariant #20, plan §11.
+- T197 — `POST /tickets/sync` reports upstream refusal honestly. `asyncio.gather` gains `return_exceptions=True` plus an explicit triage loop, so every sibling result is retrieved (a bare gather returns at the first exception and the in-flight siblings surface as "Task exception was never retrieved" at GC, burying the real failure) while the deliberate `IntercomAuthError` abort in `_hydrate_one` is preserved — a dead token must fail the cycle loudly, not degrade into a per-conversation skip that ingests a partial board. Router maps `IntercomAuthError`/`IntercomError` → `502`; the poller path is untouched (its broad `except` is intentional). Tests: auth abort attempts every candidate and writes nothing; 502 for both a dead token and an exhausted-retry search. FR-028, plan §4/§6.
+- T196 [P] — Bound the sync fan-out with the `max_tickets_per_fetch` that already exists, is already defaulted to 100, and is documented in two places while being consumed nowhere. The poller runs with `updated_after=None`, which also puts the closure pass on its unbounded branch, so a cold DB against a large workspace is one unbounded burst of paid Intercom + OpenRouter calls. Truncate `to_fetch` at the fan-out point and log `intercom.fetch_capped`. Explicitly NOT by breaking out of the search cursor — a short `seen_ids` makes the closure pass treat every unreached open ticket as a closure candidate, i.e. more fetches — and NOT by adding a `SyncResponse` field, which would make a one-package fix cross-package. Tests pin both the cap and that the cursor is still drained. plan §6.
+- T195 [P] — `_chip_state`: delete the `not ai_on` guard from the `new_reply` branch. The three branches were meant to be a priority chain and the third carried a redundant mutual-exclusion condition, so with AI-resolve on, a resolved ticket whose verdict is `resolved` (or `not_resolved` below threshold) matched nothing and the customer's reply was invisible — 19 of 34 live resolved-with-new-activity tickets rendered no chip at all. `ai_reopened` keeps precedence by branch order, which a new test pins. Deferred as its own item: keying `new_activity` on the content signature instead of `tickets.updated_at`, so an internal note or assignment stops raising "new reply". FR-027.
+- T198 [P] — The webapp must never PUT settings it did not read. `stores/settings.ts` gains `loaded`/`loadError`: `load()` records the failure instead of resetting to `DEFAULTS`, and `update()` refuses to write when the server row was never read — otherwise one transient `GET /settings` failure plus one later toggle overwrites the *team-wide* singleton (invariant #18) with client defaults. Same silent-wipe shape removed from `followups`/`notes`/`noteEntries` (no write-back there, so the damage is a blank panel — but `followups.load()` is re-called mid-session, so a transient failure really can clear live alarms). Invariant #18.
+- T200 [P] — `App.vue` boots once. `onMounted` and the `auth.isAuthenticated` watcher both called `loadAll()`, so every page load issued 14 requests instead of 7 and raced two `tickets.refresh()` calls. The watcher becomes the single owner (it is registered at setup, so a restored session and a fresh login take the same path). The R.2 generation guard already made the doubled refresh benign for board *data*, but not for `loading`, which the first finisher clears while the second is still in flight.
+- T199 [P] — Resolved and Non-actionable are terminal lanes. Both columns joined the drag group with `put: true`, and both drop handlers act on the open list only, so the drop was accepted, changed nothing, triggered no re-render, and left Sortable's moved DOM node showing a state the store did not hold. The move is unexecutable anyway — the backend 409s on re-sourcing a resolved row — so the refusal belongs at the drop predicate, the only place that can stop the DOM move. Category columns keep accepting drops, so drag-out reopen is unaffected. Direct Resolved→Non-actionable re-sourcing is deferred as a feature, not smuggled in as a bugfix. Invariant #10.
+
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
@@ -325,7 +340,7 @@ Every requirement maps to at least one task.
 | NFR-003 | T010, T016 |
 | NFR-004 | T006 |
 | NFR-005 | T004 |
-| NFR-006 | T028, T043 |
+| NFR-006 | T028, T043, T194 |
 | NFR-007 | T036 |
 | NFR-008 | T005 (single `uvicorn` command) |
 | US-001..US-011 | covered transitively above |
@@ -334,8 +349,8 @@ Every requirement maps to at least one task.
 | US-017 | T059, T070, T071 |
 | FR-025 | T054, T059, T060, T061, T062, T064, T065, T066 |
 | FR-026 | T055, T059, T060 |
-| FR-027 | T054, T055, T056, T057, T058, T062, T067 |
-| FR-028 | T055, T061, T062, T064 |
+| FR-027 | T054, T055, T056, T057, T058, T062, T067, T195 |
+| FR-028 | T055, T061, T062, T064, T197 |
 | FR-029 | T054, T055, T060, T064, T065, T068 |
 | FR-030 | T054, T055, T063, T064, T069 |
 | FR-031 | T070, T163 |
@@ -423,7 +438,7 @@ Every requirement maps to at least one task.
 | FR-078 | T175, T177 |
 | FR-079 | T178 |
 | NFR-015 | T176 |
-| NFR-016 | T176, T180 |
+| NFR-016 | T176, T180, T194 |
 | US-045 | T181, T182 |
 | FR-080 | T182 |
 | FR-081 | T181, T182 |

@@ -174,7 +174,7 @@ Tests bypass the OpenRouter network entirely (`pytest-httpx` mocks where AI call
 - Services own commits — routers don't call `session.commit()`. The `bulk_*` services intentionally commit once at the end of the loop, not per id.
 - Module docstrings cite the spec: `Reference: plan.md §X, tasks.md TXXX`. Keep this convention.
 - Section dividers use en-dash banners (`# ── Section ─────`). Ruff's RUF001/002/003 are silenced for this reason.
-- Never log conversation bodies. `logged_call` accepts identifiers only (`ticket_id`).
+- Never log conversation bodies. `logged_call` accepts identifiers only (`ticket_id`). This is enforced at the engine, not by discipline: `db.make_engine` passes `hide_parameters=True`, because a SQLAlchemy `StatementError` stringifies its bound parameters — which are `tickets.parts` on the ingest commit and `evidence` on the `bug_alerts` upsert — and two call sites print that text (`main._intercom_poll_loop`'s `error=str(exc)`, `bug_alerts.record_bug_alerts`'s `exc_info=True`). Don't remove the flag to debug a bind error; flip it temporarily and locally.
 
 ## Configuration
 

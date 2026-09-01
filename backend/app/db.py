@@ -33,9 +33,19 @@ def _ensure_sqlite_parent_dir(database_url: str) -> None:
 
 
 def make_engine(database_url: str) -> AsyncEngine:
-    """Create the async engine. Works for SQLite (default) and Postgres."""
+    """Create the async engine. Works for SQLite (default) and Postgres.
+
+    `hide_parameters=True` is a privacy control, not a tuning knob. Every
+    SQLAlchemy `StatementError` stringifies its bound parameters, and the bound
+    parameters of the ingest commit and the `bug_alerts` upsert are customer
+    conversation text: `tickets.parts` (the whole thread) and `evidence` (a
+    verbatim customer sentence). Two call sites stringify such an exception —
+    `main._intercom_poll_loop` (`error=str(exc)`) and
+    `bug_alerts.record_bug_alerts` (`exc_info=True`) — and both are correct as
+    written only because of this flag. NFR-006 / NFR-016, invariant #20.
+    """
     _ensure_sqlite_parent_dir(database_url)
-    return create_async_engine(database_url, future=True)
+    return create_async_engine(database_url, future=True, hide_parameters=True)
 
 
 def make_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

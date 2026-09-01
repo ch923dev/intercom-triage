@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.intercom import IntercomClient
+from app.clients.intercom import IntercomAuthError, IntercomClient, IntercomError
 from app.clients.openrouter import OpenRouterClient
 from app.config import MAX_INGEST_TICKETS, AppConfig
 from app.db import get_session
@@ -75,7 +75,8 @@ async def sync_now(
     503 when no Access Token is configured — there's nothing to poll. 409 when
     a cycle is already running (poller tick or another operator's click) — the
     in-flight cycle's rows land on the next board refresh, so the caller treats
-    it as benign.
+    it as benign. 502 when Intercom itself refuses (revoked token, or a search
+    that exhausted its retries) — upstream failed, the request did not.
 
     `lookback_hours` optionally bounds the fetch to a recent window (server-side
     Intercom `updated_at >` filter); omitted = unbounded (all active)."""
@@ -85,13 +86,23 @@ async def sync_now(
         )
     if sync_svc.SYNC_LOCK.locked():
         raise HTTPException(status_code=409, detail="Sync already in progress")
-    return await sync_svc.run_sync_cycle(
-        session=session,
-        openrouter=openrouter,
-        intercom=intercom,
-        config=config,
-        lookback_hours=lookback_hours,
-    )
+    try:
+        return await sync_svc.run_sync_cycle(
+            session=session,
+            openrouter=openrouter,
+            intercom=intercom,
+            config=config,
+            lookback_hours=lookback_hours,
+        )
+    except IntercomAuthError as exc:
+        # The poller swallows this (broad except, keeps ticking) but the operator
+        # clicked a button and has to be told the token is dead.
+        raise HTTPException(
+            status_code=502,
+            detail="Intercom rejected the access token (check INTERCOM_ACCESS_TOKEN)",
+        ) from exc
+    except IntercomError as exc:
+        raise HTTPException(status_code=502, detail=f"Intercom request failed: {exc}") from exc
 
 
 @router.post("/ingest", response_model=IngestResponse)

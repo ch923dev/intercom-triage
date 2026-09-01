@@ -13,7 +13,7 @@ Repo-wide guidance for Claude Code. Top-level entry point — read first, then d
 - [`docs/FEATURES.md`](./docs/FEATURES.md) — exhaustive feature catalog by capability area (what the product does, with code anchors + surfaces).
 - [`docs/README.md`](./docs/README.md) — the docs hub (navigable index of everything below).
 - [`docs/contract/spec.md`](./docs/contract/spec.md) — requirements (`US-*`, `FR-*`, `NFR-*`).
-- [`docs/contract/plan.md`](./docs/contract/plan.md) — architecture decisions (§1..§12).
+- [`docs/contract/plan.md`](./docs/contract/plan.md) — architecture decisions (§1..§24; §19 is auth/multi-user, §20..§23 the bug-alert chain).
 - [`docs/contract/tasks.md`](./docs/contract/tasks.md) — task breakdown + traceability matrix (`T001..`).
 
 ## Repo map
@@ -69,7 +69,10 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     cleared with the trio.
 15. **Auth required on every route except the allowlist.** `get_current_user` is
     applied to every router. The explicit allowlist is: `/health`, `/auth/login`,
-    `/auth/refresh`. Attachment image `GET` endpoints also accept the session
+    `/auth/refresh`, `/auth/logout`. Logout is on it because it is driven by the
+    refresh cookie, not the access token — a session whose access JWT already
+    expired must still be able to end itself (it is `_check_origin`-guarded
+    instead). Attachment image `GET` endpoints also accept the session
     cookie in lieu of a Bearer token; all mutation endpoints accept Bearer only.
     Adding a new router without the dependency is a security regression.
 16. **Session = stateless access JWT + DB-backed rotating refresh token with
