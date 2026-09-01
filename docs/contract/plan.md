@@ -340,6 +340,18 @@ turn, while the manual endpoint fast-fails 409 when a cycle is already running
 Deep-link URLs use `INTERCOM_WORKSPACE_APP_ID` (the public workspace slug, not a
 secret). Ingestion is entirely backend-side.
 
+**Closed-on-arrival tickets skip the AI (FR-007a).** In `ingest_tickets`, a
+ticket with no cache hit and `state == "closed"` goes straight to `_fallback`
+and increments `closed_ai_skipped_total` — it is on its way to Resolved, so a
+categorization call would be spent on a ticket nobody triages. This is where the
+closure pass's out-of-band closes land. The stored title falls back to the
+Intercom subject (`_resolve_title`), and since a fallback is never cached
+(invariant #7), a later reopen with new customer content categorizes normally; a
+ticket categorized *while open* keeps its category through the cache-hit branch.
+The deliberate cost: the bug verdict is a facet of the categorization pass (§20),
+so a defect reported in a conversation that closes before its first sync is never
+bug-judged. The alternative is paying for a judgement on every historical close.
+
 **Per-cycle fetch cap.** One cycle's detail+contact fetch — and therefore the AI
 fan-out that follows from it — is capped at `MAX_TICKETS_PER_FETCH` (default
 100). Without it the poller, which runs unbounded (`updated_after is None`, which

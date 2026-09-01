@@ -296,6 +296,8 @@ regions of `sync.py` and must serialize.
 - T200 ✓ [P] — `App.vue` boots once. `onMounted` and the `auth.isAuthenticated` watcher both called `loadAll()`, so every page load issued 14 requests instead of 7 and raced two `tickets.refresh()` calls. The watcher becomes the single owner (it is registered at setup, so a restored session and a fresh login take the same path). The R.2 generation guard already made the doubled refresh benign for board *data*, but not for `loading`, which the first finisher clears while the second is still in flight.
 - T199 ✓ [P] — Resolved and Non-actionable are terminal lanes. Both columns joined the drag group with `put: true`, and both drop handlers act on the open list only, so the drop was accepted, changed nothing, triggered no re-render, and left Sortable's moved DOM node showing a state the store did not hold. The move is unexecutable anyway — the backend 409s on re-sourcing a resolved row — so the refusal belongs at the drop predicate, the only place that can stop the DOM move. Category columns keep accepting drops, so drag-out reopen is unaffected. Direct Resolved→Non-actionable re-sourcing is deferred as a feature, not smuggled in as a bugfix. Invariant #10.
 
+- T201 ✓ [P] — Retro-document the closed-on-arrival AI skip (`services/tickets.py`, shipped in `e6315c3` with no spec, plan, or task entry). Behavior unchanged; this is the contract catching up. It is not a variant of FR-007's AI-failure degradation — it is a deliberate cost decision with a consequence FR-007 does not have: the bug verdict rides the categorization pass (§20), so a defect reported in a conversation that closes before its first sync is never bug-judged. Written down as FR-007a so the next person weighing "why did this ticket never alert?" finds the answer instead of the code. Test coverage already exists via the fallback path; no new test.
+
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
@@ -318,6 +320,7 @@ Every requirement maps to at least one task.
 | FR-005 | T014, T025 |
 | FR-006 | T014, T025 |
 | FR-007 | T016 |
+| FR-007a | T201 |
 | FR-008 | T017, T025 |
 | FR-009 | T026, T034 |
 | FR-010 | T011 |

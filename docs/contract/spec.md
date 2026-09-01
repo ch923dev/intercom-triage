@@ -594,6 +594,7 @@ Acceptance:
 | FR-005 | Every ticket returned to a client carries a summary string. | US-003 |
 | FR-006 | Every ticket returned to a client carries a confidence score in [0.0, 1.0]. | US-003 |
 | FR-007 | AI failures degrade to `category = fallback`, `summary = title-or-fallback`, `confidence = 0`. The batch always completes. | US-002, US-003 |
+| FR-007a | A conversation that arrives already `closed` and has no cached categorization is **not** sent to the AI: it is leaving the board for Resolved, so the call would be spent on a ticket nobody triages. It takes the same shape as FR-007 (fallback category, confidence 0), and because a fallback is never cached (FR-008), a later reopen carrying new customer content categorizes normally. A closed conversation that *was* categorized while open keeps its category via the cache. **Consequence, deliberate:** no categorization means no bug verdict (FR-075 rides on that pass), so a defect reported in a conversation that closes before its first sync is never bug-judged. The closure pass is where such tickets land. Accepted: the alternative is paying for a judgement on every historical close. | US-002 |
 | FR-008 | Re-fetching a ticket whose `updated_at` has not advanced reuses the prior AI result. | NFR-002 |
 | FR-009 | A user override on a ticket is persisted and supersedes AI categorization until the ticket's `updated_at` advances past the override time. | US-004 |
 | FR-010 | The system exposes a per-ticket deep-link URL to the Intercom conversation. | US-005 |
