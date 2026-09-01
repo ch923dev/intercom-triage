@@ -67,7 +67,14 @@ def _chip_state(
         return "ai_resolved"
     if resolved_at is not None and new_activity and high_conf and verdict == "not_resolved":
         return "ai_reopened"
-    if resolved_at is not None and new_activity and not ai_on:
+    # Fallthrough for a resolved ticket with activity the AI branch above did not
+    # claim: AI off, no verdict, a below-threshold verdict, or a high-confidence
+    # `resolved` verdict. The reply exists either way and the operator has to see
+    # it (FR-027) — the AI's opinion is not a reason to hide a customer message.
+    # This branch used to carry `and not ai_on`, which made it unreachable
+    # whenever auto-resolve was on: 19 of 34 live resolved-with-new-activity
+    # tickets rendered no chip at all.
+    if resolved_at is not None and new_activity:
         return "new_reply"
     return None
 

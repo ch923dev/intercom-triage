@@ -121,6 +121,39 @@ describe('ticketsStore.markNonActionable', () => {
     expect(s.tickets.find((t) => t.id === 'b')).toBeDefined();
     expect(s.resolvedTickets.find((t) => t.id === 'b')).toBeUndefined();
   });
+
+  it('is a deliberate no-op for a ticket that is already resolved (T199)', async () => {
+    // Resolved → Non-actionable is not a legal transition (invariant #10): the
+    // endpoint 409s, and this handler walks the OPEN list only. The early return
+    // is intentional, but it is also silent — which is exactly why the board
+    // used to lie, since no state change means no re-render to undo the drag.
+    // The drag layer refuses that drop up front (utils/dragLanes.ts); this pins
+    // the store half so nobody "fixes" the no-op into a broken write path.
+    const { api } = await import('@/api/client');
+    const s = useTicketsStore();
+    s.resolvedTickets.push(fakeTicket('r', { resolved_at: NOW, resolved_source: 'manual' }));
+
+    await s.markNonActionable('r');
+
+    expect(api.markNonActionable).not.toHaveBeenCalled();
+    expect(s.tickets).toHaveLength(0);
+    expect(s.resolvedTickets).toHaveLength(1);
+    expect(s.resolvedTickets[0]!.resolved_source).toBe('manual');
+  });
+
+  it('markResolved is a deliberate no-op for an already-resolved ticket (T199)', async () => {
+    const { api } = await import('@/api/client');
+    const s = useTicketsStore();
+    s.resolvedTickets.push(
+      fakeTicket('n', { resolved_at: NOW, resolved_source: 'non_actionable' }),
+    );
+
+    await s.markResolved('n');
+
+    expect(api.resolveTicket).not.toHaveBeenCalled();
+    expect(s.resolvedTickets).toHaveLength(1);
+    expect(s.resolvedTickets[0]!.resolved_source).toBe('non_actionable');
+  });
 });
 
 describe('ticketsStore.resolved getters', () => {

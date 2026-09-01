@@ -505,7 +505,15 @@ export const useTicketsStore = defineStore('tickets', () => {
     }
   }
 
-  /** Optimistically move ticket to resolvedTickets; rolls back on server failure. */
+  /** Optimistically move ticket to resolvedTickets; rolls back on server failure.
+   *
+   *  Deliberate no-op for an id that is not in the OPEN list: resolving an
+   *  already-resolved ticket is not a legal transition (the backend 409s), and
+   *  Resolved/Non-actionable are two views of one storage state rather than a
+   *  transition pair (invariant #10). The drag layer refuses that drop up front
+   *  — see `utils/dragLanes.ts` — because a guard here runs only after Sortable
+   *  has already moved the DOM node. Throwing instead would surface as an
+   *  unhandled rejection from the `void tickets.markResolved(id)` call sites. */
   async function markResolved(id: string) {
     const idx = state.value.tickets.findIndex((t) => t.id === id);
     if (idx === -1) return;
@@ -531,7 +539,8 @@ export const useTicketsStore = defineStore('tickets', () => {
     }
   }
 
-  /** Optimistically move ticket to resolvedTickets with non-actionable source. */
+  /** Optimistically move ticket to resolvedTickets with non-actionable source.
+   *  Same deliberate open-list-only no-op as `markResolved` — see there. */
   async function markNonActionable(id: string) {
     const idx = state.value.tickets.findIndex((t) => t.id === id);
     if (idx === -1) return;

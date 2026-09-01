@@ -520,8 +520,9 @@ async def test_chip_state_new_reply_when_resolved_with_new_activity_and_ai_off(
     """_chip_state returns 'new_reply' when a resolved ticket has new activity
     (updated_at > resolved_at) and AI resolution is disabled (use_ai=False).
 
-    This covers the third return branch in _chip_state:
-        if resolved_at is not None and new_activity and not ai_on: return 'new_reply'
+    This is the simplest path into the fallthrough branch:
+        if resolved_at is not None and new_activity: return 'new_reply'
+    The AI-on paths into the same branch are covered below (T195).
     """
     settings = await session.get(Settings, 1)
     assert settings is not None
@@ -553,3 +554,146 @@ async def test_chip_state_new_reply_when_resolved_with_new_activity_and_ai_off(
     assert r.status_code == 200
     payload = next(t for t in r.json() if t["id"] == "new-reply-1")
     assert payload["resolution_chip_state"] == "new_reply"
+
+
+# ── T195 — new_reply must survive AI-resolve being on ─────────────────────────
+
+
+async def _seed_resolved_with_activity(
+    session: AsyncSession,
+    ticket_id: str,
+    *,
+    verdict: str,
+    verdict_confidence: float,
+) -> None:
+    """A resolved ticket that has been updated since, carrying a cached verdict.
+
+    Settings are pinned to AI-resolve ON at threshold 0.7 — the configuration in
+    which the `new_reply` branch used to be unreachable.
+    """
+    from app.models import AICacheEntry, Settings
+
+    settings = await session.get(Settings, 1)
+    assert settings is not None
+    settings.use_ai = True
+    settings.ai_resolve_default = True
+    settings.ai_resolve_confidence_threshold = 0.7
+
+    resolved_at = naive_utcnow() - timedelta(seconds=30)
+    updated_at = naive_utcnow()  # strictly after → new_activity=True
+
+    session.add(
+        AICacheEntry(
+            ticket_id=ticket_id,
+            category_id=1,
+            summary="s",
+            confidence=0.9,
+            ticket_updated_at=updated_at,
+            ai_resolution_verdict=verdict,
+            ai_resolution_confidence=verdict_confidence,
+        )
+    )
+    session.add(
+        Ticket(
+            id=ticket_id,
+            title="x",
+            state="open",
+            author={},
+            parts=[],
+            internal_notes=[],
+            created_at=resolved_at,
+            updated_at=updated_at,
+            category_id=1,
+            summary="",
+            ai_confidence=0.9,
+            resolved_at=resolved_at,
+            resolved_source="manual",
+        )
+    )
+    await session.commit()
+
+
+async def _chip_of(client: AsyncClient, ticket_id: str) -> str | None:
+    r = await client.get("/tickets?resolved=true")
+    assert r.status_code == 200
+    payload = next(t for t in r.json() if t["id"] == ticket_id)
+    chip: str | None = payload["resolution_chip_state"]
+    return chip
+
+
+@pytest.mark.asyncio
+async def test_chip_state_new_reply_when_ai_on_and_verdict_still_resolved(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """The 19-ticket cohort: AI auto-resolved it, then the customer replied.
+
+    The AI's high-confidence 'resolved' verdict predates the reply, so it says
+    nothing about it — but the old `and not ai_on` guard made this fall through
+    every branch and render no chip at all. The reply was invisible: the ticket
+    is out of the open board (resolved_at is set) and silent in Resolved.
+    """
+    await _seed_resolved_with_activity(
+        session, "ai-reply-1", verdict="resolved", verdict_confidence=0.9
+    )
+    assert await _chip_of(client, "ai-reply-1") == "new_reply"
+
+
+@pytest.mark.asyncio
+async def test_chip_state_new_reply_when_verdict_below_threshold(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """A 'not_resolved' verdict under the threshold isn't trustworthy enough to
+    say 'ai_reopened' — but the activity that produced it is still real."""
+    await _seed_resolved_with_activity(
+        session, "ai-reply-2", verdict="not_resolved", verdict_confidence=0.3
+    )
+    assert await _chip_of(client, "ai-reply-2") == "new_reply"
+
+
+@pytest.mark.asyncio
+async def test_chip_state_ai_reopened_beats_new_reply(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Branch order is load-bearing: with the `not ai_on` guard gone, the only
+    thing keeping a high-confidence 'not_resolved' from degrading to the weaker
+    'new_reply' chip is that `ai_reopened` is tested first."""
+    await _seed_resolved_with_activity(
+        session, "ai-reply-3", verdict="not_resolved", verdict_confidence=0.95
+    )
+    assert await _chip_of(client, "ai-reply-3") == "ai_reopened"
+
+
+@pytest.mark.asyncio
+async def test_chip_state_none_when_resolved_without_new_activity(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """The fallthrough must stay gated on new_activity — a quietly resolved
+    ticket with nothing since must not grow a 'new reply' chip."""
+    from app.models import Settings
+
+    settings = await session.get(Settings, 1)
+    assert settings is not None
+    settings.use_ai = True
+    settings.ai_resolve_default = True
+
+    stamp = naive_utcnow()
+    session.add(
+        Ticket(
+            id="quiet-1",
+            title="x",
+            state="open",
+            author={},
+            parts=[],
+            internal_notes=[],
+            created_at=stamp,
+            updated_at=stamp,  # == resolved_at → no new activity
+            category_id=1,
+            summary="",
+            ai_confidence=0.0,
+            resolved_at=stamp,
+            resolved_source="manual",
+        )
+    )
+    await session.commit()
+
+    assert await _chip_of(client, "quiet-1") is None

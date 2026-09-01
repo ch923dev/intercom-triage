@@ -10,6 +10,7 @@ import { useSelectionStore } from '@/stores/selection';
 import { useTicketsStore } from '@/stores/tickets';
 import { useViewStore } from '@/stores/view';
 import type { Ticket } from '@/types/api';
+import { TERMINAL_LANE, acceptsDropFromOpenLane } from '@/utils/dragLanes';
 
 const tickets = useTicketsStore();
 const view = useViewStore();
@@ -66,9 +67,10 @@ function onCardClick(t: Ticket, e: MouseEvent) {
 
     <draggable
       :model-value="items"
-      :group="{ name: 'tickets', pull: true, put: true }"
+      :group="{ name: 'tickets', pull: true, put: acceptsDropFromOpenLane }"
       item-key="id"
       class="cards"
+      :data-lane="TERMINAL_LANE"
       ghost-class="card-ghost"
       drag-class="card-dragging"
       @change="onChange"
