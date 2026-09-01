@@ -3,6 +3,7 @@
      is a focused child component under ./settings/. -->
 <script setup lang="ts">
 import Mono from './Mono.vue';
+import { useSettingsStore } from '@/stores/settings';
 import { useViewStore } from '@/stores/view';
 import DrawerAiSection from './settings/DrawerAiSection.vue';
 import DrawerCostSection from './settings/DrawerCostSection.vue';
@@ -13,6 +14,7 @@ import DrawerSavedViewsSection from './settings/DrawerSavedViewsSection.vue';
 import DrawerSyncSection from './settings/DrawerSyncSection.vue';
 
 const view = useViewStore();
+const settings = useSettingsStore();
 </script>
 
 <template>
@@ -24,6 +26,13 @@ const view = useViewStore();
       </header>
 
       <div class="body">
+        <!-- These settings are team-wide (invariant #18). If the row was never
+             read, a toggle would PUT client defaults over everyone's filters,
+             so `update()` refuses — say why rather than failing silently. -->
+        <p v-if="!settings.loaded" class="load-error" role="status">
+          Settings couldn't be loaded, so the values below are defaults, not yours. Changes are
+          disabled until the backend answers — reload to retry.
+        </p>
         <DrawerDisplaySection />
         <DrawerFiltersSection />
         <DrawerSavedViewsSection />
@@ -44,6 +53,16 @@ const view = useViewStore();
   display: flex;
   justify-content: flex-end;
   z-index: 50;
+}
+.load-error {
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  background: var(--accent-soft-2);
+  border: var(--hairline) solid var(--accent);
+  border-radius: var(--radius-card);
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
 }
 .drawer {
   width: 320px;

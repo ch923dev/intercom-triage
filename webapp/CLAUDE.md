@@ -76,7 +76,9 @@ Consequences:
 
 ### State: Pinia stores (`src/stores/`)
 
-`App.vue:onMounted` first runs `auth.bootstrap()` (silent refresh); only an authenticated session loads the rest in order: `settings` → `categories` → (`followups`, `notes`, `noteEntries` parallel) → `tickets`. Components import stores directly; no prop drilling.
+`App.vue:onMounted` runs `auth.bootstrap()` (silent refresh). The `auth.isAuthenticated` watcher is the **single owner** of the initial load — a restored session and a fresh login take the same path — and loads the rest in order: `settings` → `categories` → (`followups`, `notes`, `noteEntries` parallel) → `tickets`. Don't also call `loadAll()` from `onMounted`; both fired for a while and every boot ran the bootstrap twice. The watcher only covers the restore case because `watch()` runs at setup, before `onMounted` flips the flag — `App.spec.ts` pins both directions. Components import stores directly; no prop drilling.
+
+**A store's `load()` failure must not look like empty data.** `settings`, `followups`, `notes` and `noteEntries` all used to `catch` into an empty map/defaults, which read as "you have no follow-ups" rather than "the backend is down" — and in `settings` it armed a write-back that would clobber the team-wide row. They now keep the last good state and record `loadError`. Match that when adding a store.
 
 - `auth` — login state + current `user`. `bootstrap()` silently restores the session on mount; `handleAuthLost()` is invoked by the HTTP layer when a refresh fails.
 - `tickets` — board source of truth. Two parallel lists (`tickets` = open, `resolvedTickets`) + `pendingOverrides`. `visibleTickets` filters by `query`; `byCategory`/`byProposal` derive from filtered list (search narrows columns); `byId` walks raw list (flyouts resolve filtered-out rows).

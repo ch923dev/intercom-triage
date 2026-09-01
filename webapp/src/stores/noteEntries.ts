@@ -20,6 +20,9 @@ export const useNoteEntriesStore = defineStore('noteEntries', () => {
   /** Monotonically decreasing temp id for optimistic rows; replaced on save. */
   let nextTempId = -1;
 
+  /** Last load failure, if any — see `load`. */
+  const loadError = ref<string | null>(null);
+
   function entriesOf(ticketId: string): NoteEntry[] {
     return map.value[ticketId] ?? [];
   }
@@ -28,6 +31,8 @@ export const useNoteEntriesStore = defineStore('noteEntries', () => {
     return entriesOf(ticketId).length;
   }
 
+  /** A failure keeps whatever we already hold — blanking every ticket's
+   *  investigation log on a transient error reads as data loss. T198. */
   async function load() {
     try {
       const rows = await api.listNoteEntries();
@@ -36,8 +41,9 @@ export const useNoteEntriesStore = defineStore('noteEntries', () => {
         (grouped[r.ticket_id] ??= []).push(r);
       }
       map.value = grouped;
-    } catch {
-      map.value = {};
+      loadError.value = null;
+    } catch (e) {
+      loadError.value = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -102,5 +108,5 @@ export const useNoteEntriesStore = defineStore('noteEntries', () => {
     }
   }
 
-  return { entriesOf, countOf, load, addEntry, deleteEntry };
+  return { entriesOf, countOf, loadError, load, addEntry, deleteEntry };
 });

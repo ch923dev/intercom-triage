@@ -78,6 +78,8 @@ export const useFollowupsStore = defineStore('followups', () => {
   const banners = ref<AlarmBanner[]>([]);
   /** Epoch ms, refreshed every tick so chips + sorters stay reactive. */
   const now = ref(Date.now());
+  /** Last load failure, if any — see `load`. */
+  const loadError = ref<string | null>(null);
 
   /** Pending count for the top-bar status pill. */
   const pendingCount = computed(() => Object.keys(map.value).length);
@@ -117,13 +119,17 @@ export const useFollowupsStore = defineStore('followups', () => {
     return f !== undefined && Date.parse(f.due_at) <= now.value;
   }
 
-  /** Load every active follow-up. Falls back to empty on a backend error. */
+  /** Load every active follow-up. A failure keeps whatever we already hold —
+   *  `TicketEntryForm` re-calls this mid-session, so wiping the map on a
+   *  transient error silently cleared live alarms and left `alarmTick` with
+   *  nothing to fire for the rest of the session. T198. */
   async function load() {
     try {
       const rows = await api.listFollowups();
       map.value = Object.fromEntries(rows.map((r) => [r.ticket_id, r]));
-    } catch {
-      map.value = {};
+      loadError.value = null;
+    } catch (e) {
+      loadError.value = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -344,6 +350,7 @@ export const useFollowupsStore = defineStore('followups', () => {
   return {
     banners,
     now,
+    loadError,
     pendingCount,
     firing,
     buckets,

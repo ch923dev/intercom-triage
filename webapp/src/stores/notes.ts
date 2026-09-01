@@ -21,13 +21,17 @@ export const useNotesStore = defineStore('notes', () => {
     return map.value[ticketId]?.body ?? '';
   }
 
-  /** Load every stored note. Falls back to empty on a backend error. */
+  /** Load every stored note. A failure keeps whatever we already hold rather
+   *  than blanking every note chip on the board with no explanation. T198. */
+  const loadError = ref<string | null>(null);
+
   async function load() {
     try {
       const rows = await api.listNotes();
       map.value = Object.fromEntries(rows.map((r) => [r.ticket_id, r]));
-    } catch {
-      map.value = {};
+      loadError.value = null;
+    } catch (e) {
+      loadError.value = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -43,5 +47,5 @@ export const useNotesStore = defineStore('notes', () => {
     }
   }
 
-  return { bodyOf, load, setNote };
+  return { bodyOf, loadError, load, setNote };
 });

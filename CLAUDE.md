@@ -105,6 +105,13 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
     singleton row (`CHECK (id = 1)`) is team-wide — every operator reads and
     writes the same settings. Do not add per-user settings or per-user follow-up
     filtering until Phase 4 is explicitly designed and tasks.md is updated.
+    **Because the row is shared, the webapp must never PUT settings it did not
+    read from the server.** `PUT /settings` takes the whole row, so a client that
+    falls back to its own defaults on a failed `GET` and then writes on the next
+    toggle resets *everyone's* lookback, state filter, category include-list and
+    AI threshold. `stores/settings.ts` tracks `loaded` and refuses to write until
+    the server row has actually been read; the DEFAULTS are a rendering fallback
+    only, never a write source.
 19. **No password is ever stored or logged.** Login proxies straight to OnlySales;
     our backend only persists the Fernet-encrypted upstream OnlySales refresh
     token (`sessions.onlysales_refresh_encrypted`). No password field exists on

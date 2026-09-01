@@ -52,11 +52,29 @@ describe('noteEntriesStore', () => {
     expect(s.countOf('missing')).toBe(0);
   });
 
-  it('load() falls back to empty on backend error', async () => {
+  it('load() keeps what it already holds when a reload fails (T198)', async () => {
+    // Wiping to {} on error read as data loss: every ticket's investigation log
+    // vanished with no explanation. Keep the last good map, record the failure.
+    mocked.listNoteEntries.mockResolvedValue([makeEntry({ id: 1, body: 'first' })]);
+    const s = useNoteEntriesStore();
+    await s.load();
+
+    mocked.listNoteEntries.mockRejectedValue(new Error('boom'));
+    await s.load();
+
+    expect(s.entriesOf('T1').map((e) => e.body)).toEqual(['first']);
+    expect(s.loadError).toBe('boom');
+  });
+
+  it('load() clears a previous loadError once the backend recovers', async () => {
     mocked.listNoteEntries.mockRejectedValue(new Error('boom'));
     const s = useNoteEntriesStore();
     await s.load();
-    expect(s.entriesOf('T1')).toEqual([]);
+    expect(s.loadError).toBe('boom');
+
+    mocked.listNoteEntries.mockResolvedValue([makeEntry({ id: 1, body: 'first' })]);
+    await s.load();
+    expect(s.loadError).toBeNull();
   });
 
   it('addEntry() optimistically appends then replaces with server row', async () => {

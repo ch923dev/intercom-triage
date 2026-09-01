@@ -22,6 +22,14 @@ const DEFAULTS: FilterSettings = {
 export const useSettingsStore = defineStore('settings', () => {
   const state = ref<FilterSettings>({ ...DEFAULTS });
   const saving = ref(false);
+  /** True once the server's row has actually been read. `state` starts — and,
+   *  on a failed load, stays — at DEFAULTS purely so the board can render. Those
+   *  values must never be written back: `update()` PUTs the whole row, and the
+   *  row is team-wide (invariant #18), so one transient GET failure plus one
+   *  later toggle would silently reset every operator's lookback, state filter,
+   *  category include-list and AI threshold. T198. */
+  const loaded = ref(false);
+  const loadError = ref<string | null>(null);
 
   const lookbackValue = computed(() => state.value.lookback_value);
   const lookbackUnit = computed(() => state.value.lookback_unit);
@@ -33,17 +41,30 @@ export const useSettingsStore = defineStore('settings', () => {
   const aiResolveConfidenceThreshold = computed(() => state.value.ai_resolve_confidence_threshold);
   const hideEmptyCategories = computed(() => state.value.hide_empty_categories);
 
-  /** Load the stored filter. Falls back to defaults if the backend is down. */
+  /** Load the stored filter. Renders defaults if the backend is down, but records
+   *  the failure — `App.loadAll` awaits this first, so throwing here would abort
+   *  the categories/tickets bootstrap too. */
   async function load() {
     try {
       state.value = await api.getSettings();
-    } catch {
-      state.value = { ...DEFAULTS };
+      loaded.value = true;
+      loadError.value = null;
+    } catch (e) {
+      loadError.value = e instanceof Error ? e.message : String(e);
     }
   }
 
-  /** Persist a partial change and adopt the server's canonical response. */
+  /** Persist a partial change and adopt the server's canonical response.
+   *  Refuses to write when the server row was never read — see `loaded`. */
   async function update(patch: Partial<FilterSettings>) {
+    if (!loaded.value) {
+      await load(); // the backend may simply have come back since bootstrap
+      if (!loaded.value) {
+        throw new Error(
+          'Settings could not be loaded — refusing to overwrite the shared settings row',
+        );
+      }
+    }
     const next = { ...state.value, ...patch };
     saving.value = true;
     try {
@@ -97,6 +118,8 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     saving,
+    loaded,
+    loadError,
     lookbackValue,
     lookbackUnit,
     states,

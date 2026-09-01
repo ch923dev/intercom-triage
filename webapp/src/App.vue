@@ -51,8 +51,6 @@ const COLUMN_STEP = 296; // column width (280) + gutter
 onMounted(async () => {
   await auth.bootstrap();
   authReady.value = true;
-  if (!auth.isAuthenticated) return;
-  await loadAll();
 });
 
 async function loadAll() {
@@ -65,6 +63,14 @@ async function loadAll() {
   await tickets.refresh().catch(() => undefined);
 }
 
+// The single owner of the initial load. Registered at setup — i.e. before
+// onMounted — so a session restored by `bootstrap()` flips isAuthenticated
+// through this watcher exactly like a fresh login does. Do NOT also call
+// loadAll() from onMounted: both paths fired on every boot, so the bootstrap
+// issued 14 requests instead of 7 and raced two `tickets.refresh()` calls. The
+// R.2 generation guard made the doubled refresh benign for board *data*, but
+// not for `loading`, which the first finisher cleared while the second was
+// still in flight — un-gating the auto-sync tick. T200.
 watch(
   () => auth.isAuthenticated,
   (now, before) => {

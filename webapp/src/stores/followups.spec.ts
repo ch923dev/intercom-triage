@@ -141,3 +141,43 @@ describe('followupsStore.snooze rollback (C2)', () => {
     expect(s.get('t1')!.due_at).toBe(snoozed.due_at);
   });
 });
+
+describe('followupsStore.load', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('keeps the previous map when a reload fails (T198)', async () => {
+    // TicketEntryForm re-calls load() mid-session, so wiping to {} on a
+    // transient error cleared live alarms: every chip vanished, pendingCount
+    // read 0, and App.alarmTick then early-returned for the rest of the
+    // session — no alarm fired again for follow-ups that were genuinely due.
+    const { api } = await import('@/api/client');
+    const listFollowups = api.listFollowups as ReturnType<typeof vi.fn>;
+    listFollowups.mockResolvedValue([fakeFollowup('t1')]);
+    const s = useFollowupsStore();
+    await s.load();
+    expect(s.pendingCount).toBe(1);
+
+    listFollowups.mockRejectedValue(new Error('503'));
+    await s.load();
+
+    expect(s.pendingCount).toBe(1);
+    expect(s.get('t1')).toBeDefined();
+    expect(s.loadError).toBe('503');
+  });
+
+  it('clears loadError once the backend recovers', async () => {
+    const { api } = await import('@/api/client');
+    const listFollowups = api.listFollowups as ReturnType<typeof vi.fn>;
+    listFollowups.mockRejectedValue(new Error('503'));
+    const s = useFollowupsStore();
+    await s.load();
+    expect(s.loadError).toBe('503');
+
+    listFollowups.mockResolvedValue([fakeFollowup('t1')]);
+    await s.load();
+    expect(s.loadError).toBeNull();
+  });
+});
