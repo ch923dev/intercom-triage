@@ -233,3 +233,76 @@ async def test_auth_error_aborts_cycle_and_retrieves_sibling_results(
     # And nothing was written: an aborted cycle ingests nothing, not "whatever
     # happened to succeed before the token died".
     assert await session.get(Ticket, "OK1") is None
+
+
+# ── T196 — per-cycle fetch cap ────────────────────────────────────────────────
+
+
+def _capped_config(test_config: AppConfig, cap: int) -> AppConfig:
+    return test_config.model_copy(update={"max_tickets_per_fetch": cap})
+
+
+async def test_fetch_is_capped_at_max_tickets_per_fetch(
+    session: AsyncSession, test_config: AppConfig
+) -> None:
+    # The search sorts updated_at descending, so the cap must keep the NEWEST
+    # candidates and drop the tail — not an arbitrary slice. Asserting which two
+    # were fetched (not just how many) is what pins that.
+    base = _epoch(_DT)
+    summaries = [{"id": f"S{i}", "updated_at": base + (10 - i)} for i in range(5)]
+    details = {f"S{i}": _detail(f"S{i}", state="open", updated=base + (10 - i)) for i in range(5)}
+    fake = FakeIntercom(summaries=summaries, details=details)
+
+    resp = await run_sync_cycle(
+        session=session, openrouter=None, intercom=fake, config=_capped_config(test_config, 2)
+    )
+
+    assert fake.detail_calls == ["S0", "S1"]
+    assert resp.received == 2
+
+
+async def test_cap_does_not_shorten_the_search_scan(
+    session: AsyncSession, test_config: AppConfig
+) -> None:
+    # The cap slices the fetch list, never the search cursor. Breaking out of the
+    # cursor early would leave `seen_ids` short, and the closure pass would then
+    # treat every unreached open ticket as a closure candidate — MORE fetches,
+    # not fewer. Two stored-and-unchanged tickets must still be counted as
+    # skipped-known even though the cap is below the candidate count.
+    base = _epoch(_DT)
+    await _seed_ticket(session, test_config, _seed("K1"))
+    await _seed_ticket(session, test_config, _seed("K2"))
+    summaries = [
+        {"id": "N1", "updated_at": base + 5},
+        {"id": "N2", "updated_at": base + 4},
+        {"id": "K1", "updated_at": base},
+        {"id": "K2", "updated_at": base},
+    ]
+    details = {
+        "N1": _detail("N1", state="open", updated=base + 5),
+        "N2": _detail("N2", state="open", updated=base + 4),
+    }
+    fake = FakeIntercom(summaries=summaries, details=details)
+
+    resp = await run_sync_cycle(
+        session=session, openrouter=None, intercom=fake, config=_capped_config(test_config, 1)
+    )
+
+    assert resp.skipped_known == 2
+    assert fake.detail_calls == ["N1"]
+
+
+async def test_cap_above_candidate_count_changes_nothing(
+    session: AsyncSession, test_config: AppConfig
+) -> None:
+    base = _epoch(_DT)
+    fake = FakeIntercom(
+        summaries=[{"id": "N1", "updated_at": base}],
+        details={"N1": _detail("N1", state="open", updated=base)},
+    )
+
+    resp = await run_sync_cycle(
+        session=session, openrouter=None, intercom=fake, config=_capped_config(test_config, 100)
+    )
+
+    assert resp.received == 1

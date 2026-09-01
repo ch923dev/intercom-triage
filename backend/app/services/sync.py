@@ -177,6 +177,30 @@ async def _run_sync_cycle(
             if tid not in seen_ids and known_epoch.get(tid, 0) >= closure_after
         )
 
+    # `max_tickets_per_fetch` bounds ONE cycle's detail+contact fetches and the
+    # OpenRouter fan-out that follows from them. The poller runs unbounded
+    # (`updated_after is None`, which also puts the closure pass on its unbounded
+    # branch above), so a cold DB against a large workspace is otherwise a single
+    # burst of N detail + N contact + N categorization calls, all paid.
+    #
+    # The search sorts `updated_at descending`, so `to_fetch` is newest-first and
+    # the truncation drops the least-recently-updated candidates; they are still
+    # un-ingested and are re-selected next cycle. A saturated cycle can therefore
+    # starve the tail — raise the cap or shorten the poll interval, and the
+    # WARNING below is how the operator finds out.
+    #
+    # NOT applied by breaking out of the search cursor: a short `seen_ids` would
+    # make the closure pass treat every unreached open ticket as a closure
+    # candidate, producing MORE fetches, not fewer.
+    if len(to_fetch) > config.max_tickets_per_fetch:
+        log_event(
+            "intercom.fetch_capped",
+            level=logging.WARNING,
+            candidates=len(to_fetch),
+            cap=config.max_tickets_per_fetch,
+        )
+        to_fetch = to_fetch[: config.max_tickets_per_fetch]
+
     sem = asyncio.Semaphore(config.intercom_poll_concurrency)
 
     async def guarded(cid: str) -> HydratedTicket | None:

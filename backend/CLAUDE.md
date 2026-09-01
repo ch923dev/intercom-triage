@@ -183,7 +183,7 @@ Tests bypass the OpenRouter network entirely (`pytest-httpx` mocks where AI call
 - `OPENROUTER_API_KEY` — empty → backend boots degraded; ingest writes every ticket to fallback. `/health.openrouter_configured = false`, `missing_secrets` includes `OPENROUTER_API_KEY`.
 - `OPENROUTER_MODEL` — default `anthropic/claude-sonnet-4.5`.
 - `DATABASE_URL` — default SQLite. Swap to `postgresql+asyncpg://...` for Postgres (uncomment `asyncpg` in `requirements.txt`). No dialect-specific types are used.
-- `AI_CONCURRENCY` (default 4), `CACHE_TTL_SECONDS` (300), `MAX_TICKETS_PER_FETCH` (100).
+- `AI_CONCURRENCY` (default 4), `CACHE_TTL_SECONDS` (300), `MAX_TICKETS_PER_FETCH` (100) — per-cycle detail-fetch cap applied in `run_sync_cycle` after the closure pass, bounding the AI fan-out too. The search cursor is still drained in full; don't "optimize" it into an early `break` (see plan §6).
 - `ATTACHMENT_GC_DAYS` (7), `ATTACHMENT_SWEEP_INTERVAL_SECONDS` (86400).
 - `LOG_LEVEL` (INFO).
 

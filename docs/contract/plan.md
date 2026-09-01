@@ -340,6 +340,23 @@ turn, while the manual endpoint fast-fails 409 when a cycle is already running
 Deep-link URLs use `INTERCOM_WORKSPACE_APP_ID` (the public workspace slug, not a
 secret). Ingestion is entirely backend-side.
 
+**Per-cycle fetch cap.** One cycle's detail+contact fetch — and therefore the AI
+fan-out that follows from it — is capped at `MAX_TICKETS_PER_FETCH` (default
+100). Without it the poller, which runs unbounded (`updated_after is None`, which
+also selects the closure pass's unbounded branch), turns a cold DB against a
+large workspace into a single burst of N detail + N contact + N categorization
+calls. The search cursor is still **drained in full** so the closure pass sees a
+complete `seen_ids`; capping by breaking out of the cursor early would leave
+`seen_ids` short and make every unreached open ticket look like a closure
+candidate, producing more fetches rather than fewer. Search results arrive
+`updated_at descending`, so truncation drops the least-recently-updated
+candidates; they remain un-ingested and are re-selected next cycle. Overflow logs
+`intercom.fetch_capped` (WARNING, counts only). The tradeoff is that a
+permanently saturated cycle starves its tail — and detects no closures, since
+closure candidates are appended last — which is acceptable against a 7-day
+closure window and repeating cycles; the fix is a higher cap or a shorter poll
+interval, and the WARNING is how the operator learns they need one.
+
 ## 7. AI specification
 
 OpenRouter `/chat/completions`, OpenAI-compatible. Headers: `Authorization`, `HTTP-Referer`, `X-Title`. Model from `OPENROUTER_MODEL` env.
