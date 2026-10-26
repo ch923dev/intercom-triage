@@ -9,6 +9,7 @@
 #      otherwise falls back to a built-in regex sweep so the hook ALWAYS guards.
 #
 # Enable (once per clone):  git config core.hooksPath .githooks
+#                           (scripts/dev.ps1 does this for you on every launch)
 # Bypass for a known-safe commit:  git commit --no-verify   (use sparingly)
 
 set -eu
@@ -55,10 +56,21 @@ else
   hits=$(printf '%s\n' "$diff" | grep -E \
     'sk-or-v1-[0-9a-f]{16,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|AIza[0-9A-Za-z_-]{30,}' \
     || true)
+  # The Intercom token has no fixed prefix, so key off the variable name — the
+  # same rule .gitleaks.toml carries. Separate grep: it needs -i, the rest don't.
+  intercom=$(printf '%s\n' "$diff" | grep -Ei \
+    'intercom_access_token[[:space:]]*[:=][[:space:]]*["'\'']?[A-Za-z0-9+/=_-]{20,}' \
+    | grep -Ev 'test-intercom-token' || true)
+  [ -n "$intercom" ] && hits=$(printf '%s\n%s' "$hits" "$intercom" | sed '/^$/d')
 
   if [ -n "$hits" ]; then
     red "✖ pre-commit: possible secret in staged changes:"
-    printf '%s\n' "$hits" | sed 's/^/    /'
+    # Redact like gitleaks --redact: keep enough to find the line, never the
+    # value — this output lands in terminals, CI logs, and agent transcripts.
+    printf '%s\n' "$hits" | sed -E \
+      -e 's/(sk-or-v1-|sk-|AKIA|ghp_|github_pat_|xox[baprs]-|AIza)[A-Za-z0-9_-]+/\1[REDACTED]/g' \
+      -e 's/([Ii][Nn][Tt][Ee][Rr][Cc][Oo][Mm]_[Aa][Cc][Cc][Ee][Ss][Ss]_[Tt][Oo][Kk][Ee][Nn][[:space:]]*[:=][[:space:]]*["'\'']?)[A-Za-z0-9+/=_-]+/\1[REDACTED]/g' \
+      -e 's/^/    /'
     ylw "  Install gitleaks for accurate scanning, or commit with --no-verify if this is a false positive."
     fail=1
   fi

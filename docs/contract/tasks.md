@@ -298,6 +298,16 @@ regions of `sync.py` and must serialize.
 
 - T201 ✓ [P] — Retro-document the closed-on-arrival AI skip (`services/tickets.py`, shipped in `e6315c3` with no spec, plan, or task entry). Behavior unchanged; this is the contract catching up. It is not a variant of FR-007's AI-failure degradation — it is a deliberate cost decision with a consequence FR-007 does not have: the bug verdict rides the categorization pass (§20), so a defect reported in a conversation that closes before its first sync is never bug-judged. Written down as FR-007a so the next person weighing "why did this ticket never alert?" finds the answer instead of the code. Test coverage already exists via the fallback path; no new test.
 
+### Phase 28 — Stabilize (full-repo audit, 2026-10-26)
+
+Phase 1 of the audit roadmap (AUD-xx ids are the audit register's). The app is still
+local-only, so the dev machine is the only runtime — that is what ranks the secret
+guard and the dev-server advisories here. Embeddings and clustering stay on by owner
+decision, so their event-loop stalls are fixed rather than switched off. T205 → T206
+share one helper and serialize; the rest are `[P]`.
+
+- T202 ✓ [P] — Activate the pre-commit secret guard (AUD-06). `core.hooksPath` pointed at `.git/hooks`, which holds only samples, so `.githooks/pre-commit` had never run in this clone while `backend/.env` holds live keys. `scripts/dev.ps1` now re-asserts `core.hooksPath .githooks` on every launch (local config is what a fresh clone never has, so a once-per-clone instruction is the failure mode, not the fix). Three gaps in the hook itself, found while activating it: gitleaks is not installed, so the regex fallback is what actually runs, and it lacked the Intercom Access Token rule `.gitleaks.toml` carries — added, keyed off the variable name since the token has no fixed prefix; the fallback echoed every match unredacted into the terminal (and so into CI logs and agent transcripts) — now redacted like `gitleaks --redact`; and the file was mode `100644`, which git on Linux silently skips — now `100755`. Verified in a scratch repo: a fake GitHub token and a fake Intercom token assignment are blocked with the value redacted, the `test-intercom-token` dummy passes, a force-added `.env` is refused. NFR-005/NFR-010.
+
 ### [Phase 9 — Backlog](../_archive/tasks/backlog.md)
 - T100 — Webhook subscription on `conversation.user.created`/`conversation.user.replied`; push channel (SSE) to the webapp. *(roadmap 4.3 — open)*
 - T102 ✓ — Token / cost meter surfacing OpenRouter spend per day. *(realized by roadmap 1.4 → T148)*
@@ -342,7 +352,7 @@ Every requirement maps to at least one task.
 | NFR-002 | T017 |
 | NFR-003 | T010, T016 |
 | NFR-004 | T006 |
-| NFR-005 | T004 |
+| NFR-005 | T004, T202 |
 | NFR-006 | T028, T043, T194 |
 | NFR-007 | T036 |
 | NFR-008 | T005 (single `uvicorn` command) |
@@ -411,7 +421,7 @@ Every requirement maps to at least one task.
 | FR-061 | T159 |
 | FR-062 | T107 |
 | NFR-009 | T160 |
-| NFR-010 | T164 |
+| NFR-010 | T164, T202 |
 | US-040 | T168, T169 |
 | US-041 | T171 |
 | US-042 | T170 |

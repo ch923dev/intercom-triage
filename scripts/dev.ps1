@@ -1,5 +1,6 @@
 # Single-command dev launcher.
 #
+# 0. Points git at the .githooks secret guard (core.hooksPath).
 # 1. Ensures backend Python venv + pip deps (handles new/outdated packages).
 # 2. Ensures webapp npm deps (handles new/outdated packages).
 # 3. Opens a Windows Terminal window with backend (:4000) and webapp (:5173)
@@ -15,6 +16,16 @@ $ErrorActionPreference = 'Stop'
 $repoRoot   = Split-Path -Parent $PSScriptRoot
 $backendDir = Join-Path $repoRoot 'backend'
 $webappDir  = Join-Path $repoRoot 'webapp'
+
+# ── Secret guard ─────────────────────────────────────────────────
+# .githooks/pre-commit only runs if git is pointed at it, and that is local
+# config a fresh clone never has — so the guard sat inactive until someone
+# remembered. Re-assert it on every launch (idempotent).
+$hooksPath = git -C $repoRoot config --get core.hooksPath
+if ($hooksPath -ne '.githooks') {
+    Write-Host "[dev] git: enabling .githooks secret guard (was: '$hooksPath')" -ForegroundColor Cyan
+    git -C $repoRoot config core.hooksPath .githooks
+}
 
 # ── Backend deps ─────────────────────────────────────────────────
 Write-Host '[dev] backend: ensuring venv + pip deps' -ForegroundColor Cyan

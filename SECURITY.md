@@ -44,11 +44,16 @@ point).
 secret-shaped strings. It runs `gitleaks` if installed and always falls back to
 a built-in regex sweep, so it guards even without gitleaks.
 
-**Enable once per clone** (the hook path is local git config, not committed):
+**Enable once per clone** (the hook path is local git config, not committed).
+`scripts/dev.ps1` sets it on every launch; outside that script, run:
 
 ```sh
 git config core.hooksPath .githooks
 ```
+
+The fallback sweep covers the same project-specific rules as `.gitleaks.toml`
+(OpenRouter, Intercom Access Token assignment, Slack) and redacts every match
+in its output, like `gitleaks --redact`.
 
 Optional, strengthens scanning — install gitleaks:
 
