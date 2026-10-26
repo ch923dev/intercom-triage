@@ -7,6 +7,12 @@ uvicorn[standard]==0.34.0
 # HTTP client
 httpx==0.28.1
 
+# Worker-thread offload for blocking work (embeddings, clustering — T207).
+# Arrives via starlette anyway; listed because the app imports it directly.
+# A range, not a pin, so it never fights starlette's own bound. >=4.1 for
+# `to_thread.run_sync(abandon_on_cancel=...)`.
+anyio>=4.1,<5
+
 # Config
 pydantic==2.10.4
 pydantic-settings==2.7.0
@@ -33,6 +39,11 @@ torch==2.8.0
 # hdbscan native build): sklearn.cluster.HDBSCAN (since 1.3) flags outliers as
 # label -1, and TfidfVectorizer drives c-TF-IDF cluster labels. PINNED.
 scikit-learn==1.6.1
+# numpy is imported directly (clustering.py), so it gets its own pin rather than
+# floating as sklearn's transitive dep. 2.5's type stubs use the 3.12-only
+# `type` statement, which mypy rejects under our `python_version = "3.11"` —
+# CI's first run caught exactly that drift (T203).
+numpy==2.4.6
 
 # Multipart form parsing for /attachments uploads
 python-multipart==0.0.29
