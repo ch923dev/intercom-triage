@@ -197,6 +197,7 @@ Tests bypass the OpenRouter network entirely (`pytest-httpx` mocks where AI call
 - Don't let `test_config` (tests/conftest.py) inherit Slack from the developer's `.env`. It is pinned off on purpose — a live channel configured for manual testing otherwise fails `/health` assertions on that machine only, and could hand a test app a real channel to post into.
 - Don't use `datetime.utcnow()` (deprecated) or aware UTC datetimes for DB writes — use `naive_utcnow()`.
 - Don't feed `internal_notes` into the AI prompt.
+- Don't call `embeddings.embed_text` (or any other CPU-bound model/sklearn work) from `async` code — it blocks the event loop and every request with it. Use `embeddings.aembed_text`, or `aembed_stable_text` for text re-scored per request (playbooks, noted alerts); wrap new CPU work in `anyio.to_thread.run_sync` (T207).
 - Don't introduce a router that calls another router; share logic via `app/services/*`.
 - Don't import from `tests/` into `app/`. mypy excludes `tests/` for a reason.
 - Don't `Base.metadata.create_all()` in app code; `init_db` runs migrations.

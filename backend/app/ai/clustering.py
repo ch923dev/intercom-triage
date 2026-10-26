@@ -30,6 +30,7 @@ import struct
 from dataclasses import dataclass
 from typing import Any
 
+import anyio
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -273,9 +274,12 @@ async def recompute_clusters(session: AsyncSession, min_tickets: int) -> Cluster
             skipped_reason=f"too few resolved tickets with embeddings ({len(docs)} < {min_tickets})",
         )
 
-    labels = _run_hdbscan(docs)
+    # The HDBSCAN fit and the c-TF-IDF labelling are pure CPU over the whole
+    # resolved corpus — seconds at startup and every 6 h. On the event loop that
+    # froze every request for the duration (T207); a worker thread does not.
+    labels = await anyio.to_thread.run_sync(_run_hdbscan, docs)
     outliers = sum(1 for lbl in labels if lbl < 0)
-    results = _label_clusters(docs, labels)
+    results = await anyio.to_thread.run_sync(_label_clusters, docs, labels)
     await _persist(session, results)
     return ClusteringOutcome(
         clusters=len(results),

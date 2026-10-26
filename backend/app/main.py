@@ -13,6 +13,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import anyio
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -134,6 +135,25 @@ async def _clustering_loop(
                 error=str(exc),
             )
         await asyncio.sleep(config.clustering_interval_seconds)
+
+
+async def _warm_embedding_model() -> None:
+    """Load the embedding model at boot instead of on the first ingest or
+    flyout open (T207). The load runs on a worker thread either way, but its
+    torch imports hold the GIL in bursts (~200 ms measured) — at boot, no
+    request is waiting on them. Best-effort: a failure here only means the first
+    real use loads (or fails) lazily, as before."""
+    from app.ai import embeddings
+
+    try:
+        await anyio.to_thread.run_sync(embeddings.preload, abandon_on_cancel=True)
+    except Exception as exc:
+        log_event(
+            "embedding_warmup_error",
+            level=logging.WARNING,
+            op="startup",
+            error=str(exc),
+        )
 
 
 async def _intercom_poll_loop(
@@ -279,6 +299,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.attachment_sweep_task = attachment_sweep_task
 
+    embedding_warmup_task: asyncio.Task[None] | None = None
+    if config.embeddings_enabled:
+        embedding_warmup_task = asyncio.create_task(_warm_embedding_model())
+    app.state.embedding_warmup_task = embedding_warmup_task
+
     # Roadmap 3.1 — recurring-issue clustering. Only spawned when enabled AND
     # embeddings exist to cluster over.
     clustering_task: asyncio.Task[None] | None = None
@@ -309,6 +334,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        if embedding_warmup_task is not None:
+            # abandon_on_cancel: a --reload restart mid-load must not wait ~9 s.
+            embedding_warmup_task.cancel()
+            try:
+                await embedding_warmup_task
+            except asyncio.CancelledError:
+                pass
         sweep_task.cancel()
         try:
             await sweep_task

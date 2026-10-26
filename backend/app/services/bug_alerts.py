@@ -917,7 +917,7 @@ async def similar_noted_bugs(
     if not query_text:
         return []
 
-    query_vec = embeddings.embed_text(query_text)
+    query_vec = await embeddings.aembed_text(query_text)
     users = await _user_refs(session, {c.note_by for c in candidates if c.note_by is not None})
 
     scored: list[SimilarBug] = []
@@ -926,7 +926,7 @@ async def similar_noted_bugs(
         candidate_text = _symptom_text(candidate, ctx)
         if not candidate_text or candidate.note is None:
             continue
-        score = embeddings.cosine(query_vec, embeddings.embed_text(candidate_text))
+        score = embeddings.cosine(query_vec, await embeddings.aembed_stable_text(candidate_text))
         if score < min_score:
             continue
         scored.append(

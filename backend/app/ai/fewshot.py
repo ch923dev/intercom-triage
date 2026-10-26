@@ -115,7 +115,7 @@ async def gather_fewshot_examples(
         query_text = embeddings.build_embedding_text(ticket, notes.get(ticket.id))
         if not query_text:
             continue
-        vector = embeddings.embed_text(query_text)
+        vector = await embeddings.aembed_text(query_text)
         neighbours = await embeddings.nearest_neighbours(session, vector, k=k)
         ordered = [nid for (nid, _dist) in neighbours if nid != ticket.id]
         if ordered:

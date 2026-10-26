@@ -22,9 +22,12 @@ from __future__ import annotations
 import logging
 import math
 import struct
+import threading
 from collections.abc import Iterable
+from functools import lru_cache
 from typing import Protocol
 
+import anyio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +56,7 @@ class Encoder(Protocol):
 
 _encoder_override: Encoder | None = None
 _real_encoder: Encoder | None = None
+_load_lock = threading.Lock()
 
 
 def set_encoder(encoder: Encoder | None) -> None:
@@ -63,6 +67,7 @@ def set_encoder(encoder: Encoder | None) -> None:
     """
     global _encoder_override
     _encoder_override = encoder
+    _embed_stable.cache_clear()
 
 
 class _SentenceTransformerEncoder:
@@ -76,13 +81,18 @@ class _SentenceTransformerEncoder:
         # CPU-only by default; the local single-operator tool has no GPU
         # assumption and the model is tiny.
         self._model = SentenceTransformer(_MODEL_NAME, device="cpu")
+        # Callers encode from worker threads (`aembed_text`). torch already
+        # parallelizes one forward pass across cores, so concurrent passes only
+        # oversubscribe the CPU — serialize them.
+        self._lock = threading.Lock()
 
     def encode_one(self, text: str) -> list[float]:
-        vector = self._model.encode(
-            text,
-            normalize_embeddings=True,
-            convert_to_numpy=True,
-        )
+        with self._lock:
+            vector = self._model.encode(
+                text,
+                normalize_embeddings=True,
+                convert_to_numpy=True,
+            )
         return [float(x) for x in vector.tolist()]
 
 
@@ -105,14 +115,56 @@ def _get_encoder() -> Encoder:
     if _encoder_override is not None:
         return _encoder_override
     if _real_encoder is None:
-        logger.info("loading embedding model %s (first use)", _MODEL_NAME)
-        _real_encoder = _SentenceTransformerEncoder()
+        # Worker threads can race the first use; load the model exactly once.
+        with _load_lock:
+            if _real_encoder is None:
+                logger.info("loading embedding model %s (first use)", _MODEL_NAME)
+                _real_encoder = _SentenceTransformerEncoder()
     return _real_encoder
 
 
+def preload() -> None:
+    """Load the real model now. Blocking — call it on a worker thread."""
+    _get_encoder()
+
+
 def embed_text(text_input: str) -> list[float]:
-    """Encode arbitrary text into a 384-dim embedding using the active encoder."""
+    """Encode arbitrary text into a 384-dim embedding using the active encoder.
+
+    Synchronous and CPU-bound (and the first call loads the model: seconds, maybe
+    a download). Async code must call `aembed_text` / `aembed_stable_text`
+    instead — run on the event loop, this stalls every request in flight, token
+    refresh and board loads included (T207).
+    """
     return _get_encoder().encode_one(text_input)
+
+
+async def aembed_text(text_input: str) -> list[float]:
+    """`embed_text` on a worker thread, so encoding never blocks the event loop."""
+    return await anyio.to_thread.run_sync(embed_text, text_input)
+
+
+# Bounded: ~12 KB per cached vector, so this caps the cache near 6 MB.
+_STABLE_CACHE_SIZE = 512
+
+
+@lru_cache(maxsize=_STABLE_CACHE_SIZE)
+def _embed_stable(text_input: str) -> tuple[float, ...]:
+    return tuple(embed_text(text_input))
+
+
+async def aembed_stable_text(text_input: str) -> list[float]:
+    """`aembed_text` for text that is re-scored on every request but rarely
+    changes — a playbook's label + body, a noted alert's symptom. Without this,
+    each flyout open re-encoded every candidate playbook, and each bug-alert
+    match re-encoded every noted alert.
+
+    Keyed by the text itself, so an edit is simply a new key: there is nothing
+    to invalidate and no id/timestamp to keep in sync. Query text (a ticket's
+    thread) goes through `aembed_text` uncached — it is the part that varies.
+    `set_encoder` clears the cache so a swapped encoder never serves stale vectors.
+    """
+    return list(await anyio.to_thread.run_sync(_embed_stable, text_input))
 
 
 # ── Text extraction (invariant #4) ────────────────────────────────────────────
@@ -211,7 +263,7 @@ async def embed_and_store_ticket(
     body = build_embedding_text(ticket, operator_note)
     if not body:
         return False
-    vector = embed_text(body)
+    vector = await aembed_text(body)
     await store_embedding(session, ticket.id, vector)
     return True
 
@@ -245,4 +297,4 @@ async def nearest_to_text(
     k: int = 5,
 ) -> list[tuple[str, float]]:
     """Convenience: embed `query_text` then run the nearest-neighbour query."""
-    return await nearest_neighbours(session, embed_text(query_text), k=k)
+    return await nearest_neighbours(session, await aembed_text(query_text), k=k)

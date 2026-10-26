@@ -464,13 +464,13 @@ async def suggest_playbooks(
         # No customer-visible content to rank against — nothing to suggest.
         return []
 
-    query_vec = embeddings.embed_text(query_text)
+    query_vec = await embeddings.aembed_text(query_text)
     scored: list[PlaybookSuggestion] = []
     for playbook in candidates:
         text_to_embed = _playbook_embedding_text(playbook)
         if not text_to_embed:
             continue
-        playbook_vec = embeddings.embed_text(text_to_embed)
+        playbook_vec = await embeddings.aembed_stable_text(text_to_embed)
         scored.append(PlaybookSuggestion(playbook, _cosine(query_vec, playbook_vec)))
 
     # Highest similarity first; ties fall back to insertion order (stable sort).
