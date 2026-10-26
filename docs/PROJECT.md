@@ -270,7 +270,9 @@ lookup (US-047, T187–T190). Migrations 0028–0029.
 | backend | `ruff check app tests && ruff format --check app tests && mypy app && pytest -q` | `/qa-backend` |
 | webapp | `npm run lint && npm run format:check && npm run typecheck && npm test && npm run build` | `/qa-webapp` |
 
-`/qa-all` runs backend + webapp back-to-back. Last full run (2026-08-17, on
+`/qa-all` runs backend + webapp back-to-back. CI (`.github/workflows/gates.yml`,
+test-only — no deploy) runs the same gates on every PR and push to `main`, plus
+advisory `pip-audit` / `npm audit` and a blocking gitleaks scan. Last full run (2026-08-17, on
 `feat/bug-alert-ack`): backend 683 tests, webapp 293 tests — all green.
 
 ---

@@ -35,6 +35,8 @@ intercom-ticket-management/
 | backend    | `ruff check app tests && ruff format --check app tests && mypy app && pytest -q`                              |
 | webapp     | `npm run lint && npm run format:check && npm run typecheck && npm test && npm run build`                      |
 
+CI (`.github/workflows/gates.yml`) runs both gates on every PR and every push to `main`, plus `pip-audit` / `npm audit --omit=dev` (advisory for now) and a blocking gitleaks scan of the new commits. Run the gates locally anyway — CI is the backstop, not the loop.
+
 ## Cross-package invariants
 
 The ones a Claude touching multiple packages keeps getting wrong if not flagged:
@@ -193,7 +195,7 @@ The ones a Claude touching multiple packages keeps getting wrong if not flagged:
 
 - Don't add a SECOND Intercom integration. The backend `IntercomClient` (`backend/app/clients/intercom.py`) is the only ingestion path; don't give the webapp Intercom access.
 - Don't introduce a monorepo tool / shared package / codegen step.
-- Don't deploy this anywhere (no Dockerfile, no CI/CD, no production config). *(Hosted deployment is the operator's concern — we ship no infra config.)*
+- Don't deploy this anywhere (no Dockerfile, no deploy pipeline, no production config). *(Hosted deployment is the operator's concern — we ship no infra config.)* The one workflow is `.github/workflows/gates.yml`, and it is **test-only**: the quality gates plus dependency/secret audits. It must never gain a deploy step, publish an artifact, or read a repository secret.
 - Don't add **multi-tenancy** (`tenant_id`, per-tenant data isolation). Auth + multi-user are in scope; tenant isolation is explicitly out. Don't add RBAC enforcement beyond what is already stored in `scope` (captured for a future phase, not enforced in v1).
 - Don't store or log passwords, raw refresh tokens, or the upstream OnlySales token in plaintext. Login proxies to OnlySales; only the Fernet-encrypted upstream refresh token is persisted.
 - Don't extend the surface area without `docs/contract/spec.md` / `docs/contract/plan.md` / `docs/contract/tasks.md` updates first — those three docs are the source of truth and the traceability matrix.

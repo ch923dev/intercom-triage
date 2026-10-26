@@ -1,0 +1,96 @@
+# Test-only CI (T203). Runs the quality gates from the root CLAUDE.md on every
+# pull request and every push to main, plus dependency and secret audits.
+#
+# Boundary: this workflow must never gain a deploy step, publish an artifact,
+# or read a repository secret (the auto-issued, read-scoped GITHUB_TOKEN that
+# gitleaks uses to list PR commits is the only token it touches). Hosting is
+# still the operator's concern (root
+# CLAUDE.md "Don't"); this file exists only so the gates stop depending on
+# someone remembering to run them.
+
+name: gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      # The CPU wheel index keeps torch to ~200 MB instead of pulling the CUDA
+      # stack. `torch==2.8.0` matches `2.8.0+cpu` (PEP 440 local version).
+      # The suite never loads the real model — conftest injects a fake encoder.
+      - name: Install
+        run: pip install -r requirements-dev.txt --extra-index-url https://download.pytorch.org/whl/cpu
+      - run: ruff check app tests
+      - run: ruff format --check app tests
+      - run: mypy app
+      - run: pytest -q
+      # Advisory until AUD-02 bumps the flagged pins; then drop continue-on-error.
+      - name: pip-audit (advisory)
+        continue-on-error: true
+        run: pip install pip-audit && pip-audit
+
+  webapp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: webapp
+    steps:
+      - uses: actions/checkout@v4
+      # Node 22 LTS, not the Node 25 used locally: 25's experimental global
+      # localStorage is what vitest.config.ts has to strip (see the comment
+      # there); CI should not depend on that workaround to be green.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # Advisory until AUD-12 patches vite/vue; then drop continue-on-error.
+      - name: npm audit (advisory)
+        continue-on-error: true
+        run: npm audit --omit=dev
+
+  secrets:
+    # Blocking from day one: it scans only the commits a push or PR adds, so it
+    # cannot trip on history, and a hit is exactly what this job is for.
+    # Rules come from .gitleaks.toml (same file the local pre-commit hook uses).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"

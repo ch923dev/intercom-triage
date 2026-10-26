@@ -593,8 +593,11 @@ Singleton row in the `settings` table. The webapp `GET /settings` on open and `P
 ## 10. Deployment
 
 ~~Local-only.~~ **(superseded — see §19)** Hosted, TLS-terminated, multi-operator.
-We ship no infra config (no Dockerfile, no CI/CD, no production config) — hosting
-is the operator's concern. To run in development:
+We ship no infra config (no Dockerfile, no deploy pipeline, no production config) —
+hosting is the operator's concern. The one workflow, `.github/workflows/gates.yml`
+(T203), is test-only: it runs the quality gates plus dependency and secret audits on
+PRs and pushes to `main`, and never deploys, publishes, or reads a repository secret.
+To run in development:
 
 ```
 cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 4000
