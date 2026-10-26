@@ -1,8 +1,10 @@
 # Intercom Triage — Specification
 
-**Status:** ready · **Version:** 2.7 · **Sibling docs:** `plan.md`, `tasks.md`
+**Status:** ready · **Version:** 2.8 · **Sibling docs:** `plan.md`, `tasks.md`
 
 This document defines **what** the system does. It contains no technology choices, no library names, no code structure — all such decisions live in `plan.md`. Every requirement here is traced by at least one task in `tasks.md`.
+
+**Changes from v2.7:** "the conversation moved" now means the customer-visible thread moved. FR-009 and FR-027 measured activity by the conversation's last-update time, which also advances when a teammate adds an internal note, reassigns, or snoozes. So an internal note silently reverted an operator's manual category, and raised a "new reply" chip on a resolved ticket nobody had written to. Both now measure the last customer-visible message (inbound or a reply the customer can see) — the same moment that re-runs the AI. No new capability; the behavior the two requirements always described ("the customer wrote") is now what they say.
 
 **Changes from v2.6:** the bug-alert surface is made to survive its own success. Added US-048 and FR-095..FR-097, all from a review of the shipped US-044..047 slices. Three facts drove it: the alert list is unbounded and nothing ever removes a row, so the calibration surface grows monotonically; the review page asks for a recurrence match for every row it renders, which costs rows × noted-alerts embedding work on one page open; and an unknown alert id answers 404 or an empty list depending on whether semantic matching happens to be available. Retention deliberately cannot touch a noted alert — the note is the recurrence corpus, so sweeping it would delete the knowledge US-047 exists to keep. No change to detection, dedup, the cache key, or the announcement path.
 
@@ -197,7 +199,7 @@ Acceptance:
 - A chip appears on a card only when the effective AI-resolve flag is on for
   that ticket, the verdict is opposite to current state, confidence ≥
   the configured threshold, and the chip has not been dismissed since the
-  ticket's last update.
+  ticket's last customer-visible update.
 - Clicking the chip applies the suggestion.
 - Dismissing the chip hides it until the ticket has new activity.
 
@@ -596,7 +598,7 @@ Acceptance:
 | FR-007 | AI failures degrade to `category = fallback`, `summary = title-or-fallback`, `confidence = 0`. The batch always completes. | US-002, US-003 |
 | FR-007a | A conversation that arrives already `closed` and has no cached categorization is **not** sent to the AI: it is leaving the board for Resolved, so the call would be spent on a ticket nobody triages. It takes the same shape as FR-007 (fallback category, confidence 0), and because a fallback is never cached (FR-008), a later reopen carrying new customer content categorizes normally. A closed conversation that *was* categorized while open keeps its category via the cache. **Consequence, deliberate:** no categorization means no bug verdict (FR-075 rides on that pass), so a defect reported in a conversation that closes before its first sync is never bug-judged. The closure pass is where such tickets land. Accepted: the alternative is paying for a judgement on every historical close. | US-002 |
 | FR-008 | Re-fetching a ticket whose `updated_at` has not advanced reuses the prior AI result. | NFR-002 |
-| FR-009 | A user override on a ticket is persisted and supersedes AI categorization until the ticket's `updated_at` advances past the override time. | US-004 |
+| FR-009 | A user override on a ticket is persisted and supersedes AI categorization until the conversation's customer-visible thread advances past the override time (a new customer message, or a new reply the customer can see). Internal activity — internal notes, assignment changes, snoozes — does not expire it. | US-004 |
 | FR-010 | The system exposes a per-ticket deep-link URL to the Intercom conversation. | US-005 |
 | FR-011 | The system accepts filter settings per request: recency, states, included categories. | US-001, US-007 |
 | FR-012 | Filter settings are persisted and read by the webapp. | US-007 |
@@ -614,7 +616,7 @@ Acceptance:
 | FR-024 | Settings include a `mute_alarms` boolean; the webapp reads and writes through the existing settings endpoint. | US-013 |
 | FR-025 | Tickets carry `resolved_at` and `resolved_source` as an orthogonal resolution flag, independent of category assignment and Intercom state. | US-015, US-016, US-017 |
 | FR-026 | Resolution source is one of four stored values: `manual` (operator action), `intercom_closed` (sync auto-resolve), `non_actionable` (FR-037), or `ai_resolved` (AI auto-close confirmed under the operator's auto-resolve setting). | US-015, US-016, US-017 |
-| FR-027 | The backend computes `resolution_chip_state` (`ai_resolved` \| `ai_reopened` \| `new_reply` \| `null`) server-side from settings + ticket + AI cache, and includes it in every ticket response. The states are a **precedence chain**, not mutually exclusive conditions: `ai_reopened` wins when the AI is confident the ticket is not resolved, and `new_reply` is the fallthrough for *any* resolved ticket with post-resolution activity — regardless of the AI verdict, whether AI resolution is on, and whether a verdict exists at all. A stale high-confidence `resolved` verdict predates the reply and says nothing about it, so it must not suppress the chip: the customer wrote, and the operator has to be able to see that. | US-016 |
+| FR-027 | The backend computes `resolution_chip_state` (`ai_resolved` \| `ai_reopened` \| `new_reply` \| `null`) server-side from settings + ticket + AI cache, and includes it in every ticket response. The states are a **precedence chain**, not mutually exclusive conditions: `ai_reopened` wins when the AI is confident the ticket is not resolved, and `new_reply` is the fallthrough for *any* resolved ticket with post-resolution activity — regardless of the AI verdict, whether AI resolution is on, and whether a verdict exists at all. A stale high-confidence `resolved` verdict predates the reply and says nothing about it, so it must not suppress the chip: the customer wrote, and the operator has to be able to see that. *Activity* is customer-visible activity: an internal note, a reassignment or a snooze neither raises `new_reply` nor revives a dismissed chip. | US-016 |
 | FR-028 | The system exposes `POST /tickets/{id}/resolve`, `POST /tickets/{id}/reopen`, `PATCH /tickets/{id}/ai-resolve`, and `POST /tickets/{id}/dismiss-chip`. `GET /tickets` accepts `?resolved=true\|false`; default excludes resolved tickets. `POST /tickets/sync` reports upstream refusal as `502` (revoked Intercom token, or a search that exhausted its retries) rather than an opaque `500`, so the operator who clicked Sync is told what failed. | US-015, US-016 |
 | FR-029 | Each ticket carries a per-ticket AI-resolve tri-state override (`true` / `false` / `null`); `null` means inherit `settings.ai_resolve_default`. | US-016 |
 | FR-030 | Settings persist `ai_resolve_default` (bool) and `ai_resolve_confidence_threshold` (float 0..1); both are read and written through the existing settings endpoint. | US-016 |

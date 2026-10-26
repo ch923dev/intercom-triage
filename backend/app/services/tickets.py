@@ -46,7 +46,7 @@ def _chip_state(
     effective_ai_resolve: bool,
     threshold: float,
     resolved_at: datetime | None,
-    updated_at: datetime,
+    content_signature_at: datetime,
     dismissed_at: datetime | None,
     verdict: str | None,
     verdict_confidence: float | None,
@@ -54,10 +54,14 @@ def _chip_state(
     """Compute resolution_chip_state for the front-end.
 
     Returns one of 'ai_resolved' | 'ai_reopened' | 'new_reply' | None.
+
+    "Activity" is customer-visible activity (`content_signature_at`), never
+    Intercom's `updated_at`: an internal note or a reassignment is not a reply,
+    and must neither raise `new_reply` nor revive a dismissed chip (T206).
     """
-    if dismissed_at is not None and dismissed_at >= updated_at:
+    if dismissed_at is not None and dismissed_at >= content_signature_at:
         return None
-    new_activity = resolved_at is None or updated_at > resolved_at
+    new_activity = resolved_at is None or content_signature_at > resolved_at
     ai_on = (
         use_ai and effective_ai_resolve and verdict is not None and verdict_confidence is not None
     )
@@ -242,6 +246,7 @@ async def _upsert_ticket(
             internal_notes=internal_notes,
             created_at=hydrated.created_at,
             updated_at=hydrated.updated_at,
+            content_signature_at=content_signature,
             category_id=result.category_id,
             proposal_id=result.proposal_id,
             summary=result.summary,
@@ -279,6 +284,7 @@ async def _upsert_ticket(
     row.internal_notes = internal_notes
     row.created_at = hydrated.created_at
     row.updated_at = hydrated.updated_at
+    row.content_signature_at = content_signature
     row.category_id = result.category_id
     row.proposal_id = result.proposal_id
     if not row.summary_user_edited:
@@ -642,7 +648,7 @@ async def get_tickets(session: AsyncSession, *, resolved: bool = False) -> list[
             effective_ai_resolve=effective_ai_resolve,
             threshold=filter_settings.ai_resolve_confidence_threshold,
             resolved_at=row.resolved_at,
-            updated_at=row.updated_at,
+            content_signature_at=row.content_signature_at,
             dismissed_at=row.resolution_chip_dismissed_at,
             verdict=verdict,
             verdict_confidence=verdict_confidence,

@@ -1,6 +1,7 @@
-"""The single 'override beats AI' rule (invariant #11), extracted so the board,
-playbooks, clusters, and stats can't drift apart (they had — stats omitted the
-timestamp check entirely)."""
+"""The single 'override beats AI' rule, extracted so the board, playbooks,
+clusters, and stats can't drift apart (they had — stats omitted the timestamp
+check entirely). The timestamp is the customer-visible thread's
+(`content_signature_at`), not Intercom's `updated_at` (T205)."""
 
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ def _ticket(category_id: int | None, proposal_id: int | None = None) -> Ticket:
         internal_notes=[],
         created_at=now,
         updated_at=now,
+        content_signature_at=now,
         category_id=category_id,
         proposal_id=proposal_id,
         summary="",
@@ -37,7 +39,7 @@ def _override(category_id: int, *, newer: bool) -> Override:
     return Override(
         ticket_id="t",
         category_id=category_id,
-        set_at=t.updated_at + delta if newer else t.updated_at - delta,
+        set_at=t.content_signature_at + delta if newer else t.content_signature_at - delta,
     )
 
 
@@ -59,7 +61,7 @@ def test_override_at_least_as_new_wins_and_clears_proposal() -> None:
 
 def test_override_equal_timestamp_wins() -> None:
     t = _ticket(category_id=3)
-    ov = Override(ticket_id="t", category_id=7, set_at=t.updated_at)
+    ov = Override(ticket_id="t", category_id=7, set_at=t.content_signature_at)
     assert effective_category(t, ov) == (7, None, True)
 
 
@@ -67,3 +69,12 @@ def test_stale_override_loses_to_ai() -> None:
     t = _ticket(category_id=3, proposal_id=None)
     ov = _override(7, newer=False)
     assert effective_category(t, ov) == (3, None, False)
+
+
+def test_internal_activity_after_override_does_not_expire_it() -> None:
+    """Intercom's updated_at moved past the override (an internal note, a
+    reassignment) but the customer-visible thread did not: override still wins."""
+    t = _ticket(category_id=3)
+    ov = Override(ticket_id="t", category_id=7, set_at=t.content_signature_at)
+    t.updated_at = ov.set_at + timedelta(minutes=5)
+    assert effective_category(t, ov) == (7, None, True)

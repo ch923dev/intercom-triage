@@ -133,7 +133,7 @@ bug-alert acknowledgement 0028, the bug note 0029).
 | `ai_cache` | Per-ticket categorization cache. `category_id ⊕ proposal_id` XOR. `ticket_updated_at` stores the **content signature** (last customer-visible part timestamp), not Intercom `updated_at`. Fallback results never cached. Carries AI facets + `non_actionable_kind`. |
 | `categories` | `is_active=False`+`archived_at` archives. Unique name among active (partial index). Exactly one `is_fallback=True`. |
 | `category_proposals` | Pending → approved/merged/rejected. Partial-unique name while pending. |
-| `overrides` | PK = ticket_id. Manual category override; beats AI iff `tickets.updated_at ≤ set_at`. `acted_by`→`users` (attribution, inv #17). Drag-out reopen clears resolution atomically here. |
+| `overrides` | PK = ticket_id. Manual category override; beats AI iff `tickets.content_signature_at ≤ set_at` (last customer-visible part — internal notes don't expire it). `acted_by`→`users` (attribution, inv #17). Drag-out reopen clears resolution atomically here. |
 | `rejected_proposal_signatures` | Normalized signatures of rejected names; pipeline raises → fallback on match. |
 | `followups` | PK = ticket_id; PUT upserts. No FK (Intercom ids churn). |
 | `ticket_notes` | Per-ticket free-text note (legacy single-body). Empty body = deleted row. |
@@ -282,7 +282,7 @@ blocking `npm audit --omit=dev` + gitleaks and advisory `pip-audit`. Last full r
 - **HydratedTicket** — the normalized conversation shape the backend normalizer produces and stores; spans backend schema ↔ webapp type (invariant #2).
 - **part_type** — Intercom's official conversation-part type: `comment`→`parts[]` (customer or admin), `note`→`internal_notes[]`, routing events skipped; a *bodied* state event (`assignment`, `open`, `close`, `snoozed`, `unsnoozed`) is a reply riding on the event and also →`parts[]`; the opening `source` message is the first part (invariant #3). A skipped part that carries a body logs `intercom.skipped_part_with_body` (WARNING). Replaced the old reverse-engineered numeric `renderable_type` codes.
 - **content signature** — the last customer-visible part timestamp; the AI cache key (invariant #6). Teammate notes/assignments advance Intercom `updated_at` but must not bust cache.
-- **override beats AI** — a manual category override wins while `tickets.updated_at ≤ override.set_at`.
+- **override beats AI** — a manual category override wins while `tickets.content_signature_at ≤ override.set_at` (the customer-visible thread hasn't moved since the override).
 - **proposal** — an AI-suggested new category, pending operator approve/merge/reject.
 - **fallback** — the catch-all category a ticket lands in when AI is unavailable or returns garbage; fallback results are never cached.
 - **resolved_source** — why a ticket is resolved: `manual` / `intercom_closed` / `non_actionable` / `ai_resolved`.

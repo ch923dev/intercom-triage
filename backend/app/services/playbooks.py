@@ -41,8 +41,8 @@ async def list_for_ticket(session: AsyncSession, ticket_id: str) -> list[Playboo
     """Active playbooks for the ticket's *effective* category.
 
     Effective category = ticket.category_id, unless a manual override is newer
-    than the ticket's last update (override beats AI — mirrors the board's
-    composition rule). Uncategorized tickets return an empty list.
+    than the customer-visible thread (override beats AI — `categorization_rule`,
+    shared with the board). Uncategorized tickets return an empty list.
     """
     ticket = await session.get(Ticket, ticket_id)
     if ticket is None:

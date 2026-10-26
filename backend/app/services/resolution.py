@@ -204,13 +204,14 @@ async def set_ai_resolve(
 
 
 def apply_dismiss_chip(row: Ticket) -> None:
-    """Mutate a Ticket row to suppress its resolution chip until
-    `tickets.updated_at` advances. Does NOT commit."""
-    row.resolution_chip_dismissed_at = row.updated_at
+    """Mutate a Ticket row to suppress its resolution chip until the
+    customer-visible thread advances (`content_signature_at`, not Intercom's
+    `updated_at` — an internal note must not revive it). Does NOT commit."""
+    row.resolution_chip_dismissed_at = row.content_signature_at
 
 
 async def dismiss_chip(session: AsyncSession, ticket_id: str) -> None:
-    """Suppress the resolution chip until `tickets.updated_at` advances."""
+    """Suppress the resolution chip until the customer-visible thread advances."""
     row = await get_or_404(session, ticket_id)
     apply_dismiss_chip(row)
     await session.commit()

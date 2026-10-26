@@ -108,8 +108,8 @@ async def _category_breakdown(
     """Count tickets per effective category in the window.
 
     Effective category = the override's category only when the override is at
-    least as new as the ticket's last update (`ticket.updated_at <=
-    override.set_at`, invariant #11 — mirrors `categorization_rule`), else
+    least as new as the customer-visible thread (`ticket.content_signature_at <=
+    override.set_at` — mirrors `categorization_rule`, T205), else
     `tickets.category_id`. A stale override (older than the last customer
     message) must fall back to the AI category, so a bare coalesce is wrong. We
     LEFT JOIN `overrides`, apply the timestamp-gated CASE, then LEFT JOIN
@@ -117,7 +117,10 @@ async def _category_breakdown(
     """
     effective_id = case(
         (
-            and_(Override.category_id.is_not(None), Ticket.updated_at <= Override.set_at),
+            and_(
+                Override.category_id.is_not(None),
+                Ticket.content_signature_at <= Override.set_at,
+            ),
             Override.category_id,
         ),
         else_=Ticket.category_id,

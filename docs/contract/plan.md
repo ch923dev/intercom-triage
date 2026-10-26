@@ -251,6 +251,7 @@ overrides
   ticket_id    text pk
   category_id  integer not null fk → categories(id) on delete cascade
   set_at       datetime default now
+  -- wins over the AI iff tickets.content_signature_at <= set_at (FR-009, T205)
 
 settings
   id                              integer pk check (id = 1)        -- singleton row
@@ -509,7 +510,10 @@ auto-resolve when Intercom state flips open → closed during sync), AI-suggeste
 `GET /tickets?resolved=true|false` filters; default excludes resolved.
 
 **Chip state** computed server-side per row from settings + ticket + AI cache;
-never auto-moves a ticket.
+never auto-moves a ticket. "Activity" — `new_reply`, `ai_reopened`, and the
+dismissal window — is `tickets.content_signature_at` (migration 0030, T206): the
+last customer-visible part, the same value the AI cache keys on. Never Intercom's
+`updated_at`, which also moves on internal notes, assignments and snoozes.
 
 See `docs/superpowers/specs/2026-05-23-ticket-resolution-design.md` for the full
 design.
@@ -646,7 +650,7 @@ Design spec: `docs/superpowers/specs/2026-05-26-playbooks-design.md`.
 - New `playbooks` table (one isolated backend module: `services/playbooks.py`
   + `routers/playbooks.py`). No change to ingest, cache, or `HydratedTicket`.
 - Lookup resolves a ticket's effective category exactly as board composition
-  does (override wins iff `ticket.updated_at <= override.set_at`).
+  does (override wins iff `ticket.content_signature_at <= override.set_at`).
 - AI drafter reuses `OpenRouterClient`; prompt is built from `parts` + operator
   notes only — `internal_notes` is never read.
 - Webapp: `stores/playbooks.ts`, flyout section `TicketPlaybooks.vue`, library

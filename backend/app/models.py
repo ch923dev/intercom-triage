@@ -731,6 +731,10 @@ class TicketClusterMember(Base):
     __table_args__ = (Index("ix_ticket_cluster_members_ticket", "ticket_id"),)
 
 
+def _default_content_signature(context: Any) -> Any:
+    return context.get_current_parameters()["updated_at"]
+
+
 class Ticket(Base):
     """An ingested + categorized conversation — the operator's board data.
 
@@ -757,6 +761,15 @@ class Ticket(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # The content signature (invariant #6): the last customer-visible part's
+    # timestamp. Intercom's `updated_at` also moves on internal notes,
+    # assignments and snoozes; this does not. "Did the conversation move since
+    # X?" — the override rule, the resolution chip — asks this column, never
+    # `updated_at` (T205/T206). Ingest always writes it; the default only keeps
+    # hand-built rows (fixtures, scripts) on the old updated_at behavior.
+    content_signature_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=_default_content_signature
+    )
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL"),
     )
