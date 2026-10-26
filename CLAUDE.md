@@ -35,7 +35,7 @@ intercom-ticket-management/
 | backend    | `ruff check app tests && ruff format --check app tests && mypy app && pytest -q`                              |
 | webapp     | `npm run lint && npm run format:check && npm run typecheck && npm test && npm run build`                      |
 
-CI (`.github/workflows/gates.yml`) runs both gates on every PR and every push to `main`, plus `pip-audit` / `npm audit --omit=dev` (advisory for now) and a blocking gitleaks scan of the new commits. Run the gates locally anyway — CI is the backstop, not the loop.
+CI (`.github/workflows/gates.yml`) runs both gates on every PR and every push to `main`, plus `npm audit --omit=dev` and a gitleaks scan of the new commits (both blocking) and `pip-audit` (advisory until the backend pins are bumped — accepted residuals live in `SECURITY.md`). Run the gates locally anyway — CI is the backstop, not the loop.
 
 ## Cross-package invariants
 

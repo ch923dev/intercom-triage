@@ -112,7 +112,7 @@ fallback category until the key is set.
 |---|---|
 | backend | Python 3.11+ (3.12 tested), FastAPI 0.135.4, SQLAlchemy 2.0 (async), Alembic, pydantic v2, httpx |
 | embeddings/ML | sentence-transformers 5.5.1 + torch 2.8.0 (CPU, `all-MiniLM-L6-v2`, 384-dim), sqlite-vec 0.1.9 (pre-v1, pinned exact), scikit-learn 1.6.1 (HDBSCAN clustering) |
-| webapp | Vue 3.5, Pinia 2.3, Vite 6, TypeScript 5.6, vue-tsc, ESLint 9, Prettier 3, Vitest 2 |
+| webapp | Vue 3.5, Pinia 2.3, Vite 6, TypeScript 5.6, vue-tsc, ESLint 9, Prettier 3, Vitest 4 + happy-dom 21 |
 | AI | OpenRouter (`anthropic/claude-sonnet-4.5` default; swap via `OPENROUTER_MODEL`) |
 | auth | OnlySales-delegated identity (`pyapi.onlysales.io`) · HS256 access JWT (PyJWT) · Fernet (`cryptography`) encrypts the upstream refresh token at rest · sha256 refresh-hash rotation |
 | storage | SQLite (default, `backend/data/triage.db`) · Postgres swap via `DATABASE_URL` |
@@ -272,7 +272,7 @@ lookup (US-047, T187–T190). Migrations 0028–0029.
 
 `/qa-all` runs backend + webapp back-to-back. CI (`.github/workflows/gates.yml`,
 test-only — no deploy) runs the same gates on every PR and push to `main`, plus
-advisory `pip-audit` / `npm audit` and a blocking gitleaks scan. Last full run (2026-08-17, on
+blocking `npm audit --omit=dev` + gitleaks and advisory `pip-audit`. Last full run (2026-08-17, on
 `feat/bug-alert-ack`): backend 683 tests, webapp 293 tests — all green.
 
 ---

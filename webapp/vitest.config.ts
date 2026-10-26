@@ -22,9 +22,8 @@ export default defineConfig({
     // adopts it (observed on Node 25.9), so every spec touching localStorage
     // fails with "localStorage.clear is not a function". Strip it from the
     // worker processes so happy-dom installs its own working storage.
-    poolOptions: {
-      threads: { execArgv: ['--no-experimental-webstorage'] },
-      forks: { execArgv: ['--no-experimental-webstorage'] },
-    },
+    // (Vitest 4 removed `poolOptions`; `execArgv` is top-level and applies to
+    // whichever pool runs.)
+    execArgv: ['--no-experimental-webstorage'],
   },
 });

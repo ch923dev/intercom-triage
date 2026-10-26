@@ -66,3 +66,13 @@ bot token rules + allowlist for test fixtures, `.env.example`, and the public
 workspace id `j3dxf22l`).
 
 Bypass for a verified false positive: `git commit --no-verify` (use sparingly).
+
+## Dependency advisories
+
+CI runs `npm audit --omit=dev` (blocking) and `pip-audit` (advisory until the
+backend pins are bumped — audit item AUD-02). Accepted residuals are listed here
+with the reason; anything not listed is a bug.
+
+| Package | Severity | Path | Why accepted |
+|---|---|---|---|
+| `postcss-selector-parser` <7.1.6 | moderate (CPU DoS) | `eslint-plugin-vue` 9 → lint only | Parses our own source during `npm run lint`; never ships, never sees untrusted input. Fix needs the `eslint-plugin-vue` 10 major — take it with the next lint-config change. |

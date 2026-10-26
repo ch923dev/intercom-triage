@@ -72,9 +72,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      # Advisory until AUD-12 patches vite/vue; then drop continue-on-error.
-      - name: npm audit (advisory)
-        continue-on-error: true
+      # Blocking: runtime deps were cleared in T204. Dev-only residuals are
+      # listed with reasons in SECURITY.md.
+      - name: npm audit
         run: npm audit --omit=dev
 
   secrets:
